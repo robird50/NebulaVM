@@ -110,6 +110,7 @@ app.innerHTML = `
               <option value="qemu-x64">Nebula x64 / QEMU Wasm</option>
               <option value="native-qemu">Native QEMU / large ISO</option>
               <option value="native-qemu-arm64">Native QEMU ARM64 / Windows ARM</option>
+              <option value="native-qemu-ubuntu-arm64">Native QEMU ARM64 / Ubuntu</option>
               <option value="remote-vm">Remote VM / browser stream</option>
             </select>
             <div class="emulator-dropdown">
@@ -142,6 +143,10 @@ app.innerHTML = `
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu-arm64">
                   <span class="emulator-menu-icon emulator-menu-icon-empty" aria-hidden="true"></span>
                   <span>Native QEMU ARM64 / Windows ARM</span>
+                </button>
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu-ubuntu-arm64">
+                  <span class="emulator-menu-icon emulator-menu-icon-empty" aria-hidden="true"></span>
+                  <span>Native QEMU ARM64 / Ubuntu</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="remote-vm">
                   <span class="emulator-menu-icon emulator-menu-icon-empty" aria-hidden="true"></span>
@@ -462,15 +467,27 @@ const setPowerState = (label, mode = "off") => {
 
 const isBrowserQemuMode = () => els.emulatorMode.value === "qemu-x64";
 const isNativeX64Mode = () => els.emulatorMode.value === "native-qemu";
-const isNativeArm64Mode = () => els.emulatorMode.value === "native-qemu-arm64";
+const isNativeWindowsArm64Mode = () => els.emulatorMode.value === "native-qemu-arm64";
+const isNativeUbuntuArm64Mode = () => els.emulatorMode.value === "native-qemu-ubuntu-arm64";
+const isNativeArm64Mode = () => isNativeWindowsArm64Mode() || isNativeUbuntuArm64Mode();
 const isNativeMode = () => isNativeX64Mode() || isNativeArm64Mode();
 const isRemoteMode = () => els.emulatorMode.value === "remote-vm";
 const isQemuMode = () => isBrowserQemuMode() || isNativeMode();
 const isExternalMode = () => isQemuMode() || isRemoteMode();
 const nativeArchitecture = () => (isNativeArm64Mode() ? "aarch64" : "x86_64");
+const nativeProfile = () =>
+  isNativeUbuntuArm64Mode() ? "ubuntu-arm64" : isNativeWindowsArm64Mode() ? "windows-arm64" : "generic-x64";
+const nativeModeLabel = () =>
+  isNativeUbuntuArm64Mode()
+    ? "Native QEMU ARM64 / Ubuntu"
+    : isNativeWindowsArm64Mode()
+      ? "Native QEMU ARM64 / Windows ARM"
+      : "Native QEMU / large ISO";
 const isNebulaEmulator = (value) => value === "v86" || value === "qemu-x64";
 const looksLikeArm64Iso = (path) => /(^|[^a-z0-9])(arm64|aarch64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeX64Iso = (path) => /(^|[^a-z0-9])(x64|amd64|x86_64)(?=[^a-z0-9]|$)/i.test(path);
+const looksLikeUbuntuIso = (path) => /(^|[^a-z0-9])ubuntu(?=[^a-z0-9]|$)/i.test(path);
+const looksLikeWindowsIso = (path) => /(^|[^a-z0-9])(windows|win\d*)(?=[^a-z0-9]|$)/i.test(path);
 
 const getEmulatorLabel = (value) =>
   [...els.emulatorMode.options].find((option) => option.value === value)?.textContent || value;
@@ -496,20 +513,22 @@ const syncNativeModeToIsoPath = () => {
   if (!isNativeMode()) return;
 
   const isoPath = els.nativeIsoPath.value.trim();
-  const nextMode = looksLikeArm64Iso(isoPath)
-    ? "native-qemu-arm64"
-    : looksLikeX64Iso(isoPath)
-      ? "native-qemu"
-      : els.emulatorMode.value;
+  const nextMode = looksLikeX64Iso(isoPath)
+    ? "native-qemu"
+    : looksLikeUbuntuIso(isoPath) && looksLikeArm64Iso(isoPath)
+      ? "native-qemu-ubuntu-arm64"
+      : looksLikeWindowsIso(isoPath) && looksLikeArm64Iso(isoPath)
+        ? "native-qemu-arm64"
+        : looksLikeArm64Iso(isoPath)
+          ? isNativeUbuntuArm64Mode()
+            ? "native-qemu-ubuntu-arm64"
+            : "native-qemu-arm64"
+          : els.emulatorMode.value;
 
   if (nextMode !== els.emulatorMode.value) {
     els.emulatorMode.value = nextMode;
     updateBackendUi();
-    log(
-      `Switched emulator to ${
-        nextMode === "native-qemu-arm64" ? "Native QEMU ARM64 / Windows ARM" : "Native QEMU / large ISO"
-      } based on the ISO path.`,
-    );
+    log(`Switched emulator to ${nativeModeLabel()} based on the ISO path.`);
   }
 };
 
@@ -926,6 +945,7 @@ const bootNativeQemu = async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       arch: nativeArchitecture(),
+      profile: nativeProfile(),
       isoPath: els.nativeIsoPath.value.trim(),
       memoryMb: Number(els.memorySize.value) / 1024 / 1024,
       bootOrder: els.bootOrder.value,
@@ -949,12 +969,18 @@ const bootNativeQemu = async () => {
     },
   };
   state.running = true;
-  const nativeLabel = result.arch === "aarch64" ? "Native ARM64 QEMU" : "Native QEMU";
+  const nativeLabel =
+    result.profile === "ubuntu-arm64"
+      ? "Native Ubuntu ARM64 QEMU"
+      : result.arch === "aarch64"
+        ? "Native ARM64 QEMU"
+        : "Native QEMU";
   setPowerState(nativeLabel, "running");
   updateButtons();
   log(`${nativeLabel} started in the browser display (pid ${result.pid}).`);
   if (base !== window.location.origin) log(`Using local bridge: ${base}`);
   if (result.arch) log(`Native architecture: ${result.arch}.`);
+  if (result.profile) log(`Native profile: ${result.profile}.`);
   if (result.diskPath) log(`Using install disk: ${result.diskPath}`);
   if (result.ovmf) log(`Using UEFI firmware: ${result.ovmf}`);
   if (result.vncPath) log("Native QEMU display is embedded in the browser display box.");
@@ -996,7 +1022,7 @@ const bootRemoteVm = async () => {
 const bootEmulator = async () => {
   if (!isNativeMode() && !isRemoteMode() && !state.isoFile) return;
   if (isNativeMode() && !els.nativeIsoPath.value.trim()) {
-    log(`Boot blocked: enter a local ISO path for ${isNativeArm64Mode() ? "Native ARM64 QEMU" : "Native QEMU"}.`);
+    log(`Boot blocked: enter a local ISO path for ${nativeModeLabel()}.`);
     return;
   }
   syncNativeModeToIsoPath();
@@ -1144,7 +1170,7 @@ const updateNativeStatus = async () => {
     if (status.available) {
       els.nativeStatus.dataset.mode = "ready";
       els.nativeStatus.textContent =
-        `${status.arch === "aarch64" ? "Native ARM64 QEMU" : "Native QEMU"} ready${status.ovmf ? " with UEFI" : ""}${bridgeLabel}.`;
+        `${nativeModeLabel()} ready${status.ovmf ? " with UEFI" : ""}${bridgeLabel}.`;
     } else {
       els.nativeStatus.dataset.mode = "missing";
       els.nativeStatus.textContent =
@@ -1171,6 +1197,7 @@ const updateBackendUi = () => {
   const qemuMode = isQemuMode();
   const nativeMode = isNativeMode();
   const nativeArm64Mode = isNativeArm64Mode();
+  const nativeUbuntuArm64Mode = isNativeUbuntuArm64Mode();
   const remoteMode = isRemoteMode();
   const externalMode = isExternalMode();
   syncEmulatorDropdown();
@@ -1180,7 +1207,7 @@ const updateBackendUi = () => {
   if (nativeMode) {
     state.nativeQemuReady = false;
     els.nativeStatus.dataset.mode = "";
-    els.nativeStatus.textContent = `Checking ${nativeArm64Mode ? "Native ARM64 QEMU" : "native QEMU"}...`;
+    els.nativeStatus.textContent = `Checking ${nativeModeLabel()}...`;
   }
   els.vgaSize.disabled = externalMode;
   els.bootOrder.disabled = remoteMode || state.emulator;
@@ -1190,9 +1217,11 @@ const updateBackendUi = () => {
     ? "QEMU networking depends on the compiled Wasm build."
     : "Uses v86 networking support when available.";
   els.placeholderMeta.textContent = nativeMode
-    ? nativeArm64Mode
-      ? "Native ARM64 QEMU opens a desktop VM window and reads Windows ARM ISOs directly from disk."
-      : "Native QEMU opens a desktop VM window and reads the ISO directly from disk."
+    ? nativeUbuntuArm64Mode
+      ? "Native ARM64 QEMU boots Ubuntu ARM64 ISOs with a separate Ubuntu qcow2 disk."
+      : nativeArm64Mode
+        ? "Native ARM64 QEMU reads Windows ARM ISOs directly from disk."
+        : "Native QEMU reads large x64 ISOs directly from disk."
     : remoteMode
       ? "Remote VM mode shows a VM running on another computer or cloud server."
     : isBrowserQemuMode()

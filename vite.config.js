@@ -160,6 +160,18 @@ const waitForTcpPort = async (port, timeoutMs = 8000) => {
 
 const normalizeArch = (arch) => (arch === "aarch64" ? "aarch64" : "x86_64");
 
+const normalizeNativeProfile = (profile, arch) => {
+  if (arch === "aarch64" && profile === "ubuntu-arm64") return "ubuntu-arm64";
+  if (arch === "aarch64") return "windows-arm64";
+  return "generic-x64";
+};
+
+const nativeDiskName = (profile) => {
+  if (profile === "ubuntu-arm64") return "nebulavm-native-ubuntu-arm64.qcow2";
+  if (profile === "windows-arm64") return "nebulavm-native-arm64.qcow2";
+  return "nebulavm-native.qcow2";
+};
+
 const nativeStatus = (requestedArch = "x86_64") => {
   const arch = normalizeArch(requestedArch);
   const qemu = findExecutable(arch === "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64");
@@ -182,6 +194,7 @@ const startNativeVm = async (body) => {
   }
 
   const arch = normalizeArch(body.arch);
+  const profile = normalizeNativeProfile(body.profile, arch);
   const qemu = findExecutable(arch === "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64");
   if (!qemu) {
     throw new Error(
@@ -202,7 +215,7 @@ const startNativeVm = async (body) => {
   const diskBootIndex = diskFirst ? 1 : 2;
   const qemuBootDevice = diskFirst ? "c" : "d";
   const vmDir = resolve(workspaceDir, "vm-disks");
-  const diskPath = resolve(vmDir, arch === "aarch64" ? "nebulavm-native-arm64.qcow2" : "nebulavm-native.qcow2");
+  const diskPath = resolve(vmDir, nativeDiskName(profile));
   mkdirSync(vmDir, { recursive: true });
 
   const qemuImg = findExecutable("qemu-img");
@@ -284,7 +297,12 @@ const startNativeVm = async (body) => {
   if (body.createDisk !== false && existsSync(diskPath)) {
     if (arch === "aarch64") {
       args.push("-drive", `if=none,id=systemdisk,file=${diskPath},format=qcow2`);
-      args.push("-device", `nvme,drive=systemdisk,serial=nebulavm-arm64,bootindex=${diskBootIndex}`);
+      args.push(
+        "-device",
+        profile === "ubuntu-arm64"
+          ? `virtio-blk-pci,drive=systemdisk,bootindex=${diskBootIndex}`
+          : `nvme,drive=systemdisk,serial=nebulavm-arm64,bootindex=${diskBootIndex}`,
+      );
     } else {
       args.push("-drive", `file=${diskPath},format=qcow2,if=ide`);
     }
@@ -323,6 +341,7 @@ const startNativeVm = async (body) => {
   return {
     pid: child.pid,
     arch,
+    profile,
     qemu,
     args,
     bootOrder: diskFirst ? "disk-first" : "cdrom-first",
@@ -407,6 +426,7 @@ const nativeQemuPlugin = () => ({
             ok: true,
             pid: result.pid,
             arch: result.arch,
+            profile: result.profile,
             qemu: result.qemu,
             diskPath: result.diskPath,
             ovmf: result.ovmf,
