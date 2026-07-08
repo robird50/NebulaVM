@@ -422,6 +422,8 @@ const isQemuMode = () => isBrowserQemuMode() || isNativeMode();
 const isExternalMode = () => isQemuMode() || isRemoteMode();
 const nativeArchitecture = () => (isNativeArm64Mode() ? "aarch64" : "x86_64");
 const isNebulaEmulator = (value) => value === "v86" || value === "qemu-x64";
+const looksLikeArm64Iso = (path) => /(^|[^a-z0-9])(arm64|aarch64)(?=[^a-z0-9]|$)/i.test(path);
+const looksLikeX64Iso = (path) => /(^|[^a-z0-9])(x64|amd64|x86_64)(?=[^a-z0-9]|$)/i.test(path);
 
 const getEmulatorLabel = (value) =>
   [...els.emulatorMode.options].find((option) => option.value === value)?.textContent || value;
@@ -441,6 +443,27 @@ const syncEmulatorDropdown = () => {
     option.classList.toggle("is-selected", selected);
     option.setAttribute("aria-selected", String(selected));
   });
+};
+
+const syncNativeModeToIsoPath = () => {
+  if (!isNativeMode()) return;
+
+  const isoPath = els.nativeIsoPath.value.trim();
+  const nextMode = looksLikeArm64Iso(isoPath)
+    ? "native-qemu-arm64"
+    : looksLikeX64Iso(isoPath)
+      ? "native-qemu"
+      : els.emulatorMode.value;
+
+  if (nextMode !== els.emulatorMode.value) {
+    els.emulatorMode.value = nextMode;
+    updateBackendUi();
+    log(
+      `Switched emulator to ${
+        nextMode === "native-qemu-arm64" ? "Native QEMU ARM64 / Windows ARM" : "Native QEMU / large ISO"
+      } based on the ISO path.`,
+    );
+  }
 };
 
 const isSelectedMediaTooLarge = () =>
@@ -728,6 +751,7 @@ const bootEmulator = async () => {
     log(`Boot blocked: enter a local ISO path for ${isNativeArm64Mode() ? "Native ARM64 QEMU" : "Native QEMU"}.`);
     return;
   }
+  syncNativeModeToIsoPath();
   if (isRemoteMode() && !els.remoteVmUrl.value.trim()) {
     log("Boot blocked: enter a remote VM URL.");
     return;
