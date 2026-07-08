@@ -608,7 +608,7 @@ input[type="text"] {
   gap: 8px;
 }
 
-.metric-row span {
+.metric-row > span {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
@@ -621,19 +621,23 @@ input[type="text"] {
 }
 
 .metric-row .ai-summary-pill {
-  width: min(360px, 42vw);
-  max-width: 100%;
+  width: auto;
+  min-width: 210px;
+  max-width: min(300px, 36vw);
   gap: 8px;
   overflow: hidden;
   border: 1px solid rgba(132, 220, 255, 0.28);
-  background: rgba(27, 52, 74, 0.72);
+  background: rgba(20, 39, 54, 0.86);
   color: #dff7ff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
 }
 
 .metric-row .ai-summary-pill::before {
   content: "AI";
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
   min-height: 18px;
   padding: 0 6px;
   border-radius: 999px;
@@ -644,20 +648,24 @@ input[type="text"] {
 }
 
 .ai-summary-stage {
-  display: grid;
-  align-items: center;
+  position: relative;
+  display: block;
   min-width: 0;
-  height: 1.25em;
+  height: 18px;
   flex: 1;
   overflow: hidden;
 }
 
 .ai-summary-text {
-  grid-area: 1 / 1;
-  min-width: 0;
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  min-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 18px;
   opacity: 1;
   transform: translateY(0);
   transition:

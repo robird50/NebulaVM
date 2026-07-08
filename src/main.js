@@ -280,7 +280,7 @@ app.innerHTML = `
             <span id="uptimeMetric">00:00</span>
             <span class="ai-summary-pill" id="viewportSummaryMetric" aria-live="polite">
               <span class="ai-summary-stage">
-                <span class="ai-summary-text">Waiting for boot media to start</span>
+                <span class="ai-summary-text is-current">Waiting for boot media to start</span>
               </span>
             </span>
             <span id="ramMetric">128 MB RAM</span>
@@ -567,6 +567,8 @@ const setViewportSummary = (summary) => {
   if (!stage) return;
 
   const outgoing = stage.querySelector(".ai-summary-text.is-current") || stage.querySelector(".ai-summary-text");
+  if (outgoing?.textContent === summary) return;
+
   const incoming = document.createElement("span");
   incoming.className = "ai-summary-text is-entering";
   incoming.textContent = summary;
