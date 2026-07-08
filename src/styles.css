@@ -620,6 +620,30 @@ input[type="text"] {
   font-weight: 800;
 }
 
+.metric-row .ai-summary-pill {
+  max-width: min(360px, 42vw);
+  gap: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(132, 220, 255, 0.28);
+  background: rgba(27, 52, 74, 0.72);
+  color: #dff7ff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-row .ai-summary-pill::before {
+  content: "AI";
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #8ee4d6;
+  color: #052221;
+  font-size: 0.66rem;
+  font-weight: 950;
+}
+
 .screen-shell {
   display: grid;
   min-height: clamp(360px, 58vh, 700px);

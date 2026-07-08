@@ -47,6 +47,7 @@ const state = {
   nativeQemuReady: false,
   nativeQemuApiBase: null,
   nativeRfb: null,
+  viewportSummaryTimer: null,
 };
 
 app.innerHTML = `
@@ -277,6 +278,7 @@ app.innerHTML = `
           </div>
           <div class="metric-row">
             <span id="uptimeMetric">00:00</span>
+            <span class="ai-summary-pill" id="viewportSummaryMetric">Waiting for boot media to start</span>
             <span id="ramMetric">128 MB RAM</span>
             <button class="secondary compact-button" id="fullscreenButton" type="button">Fullscreen</button>
           </div>
@@ -356,6 +358,7 @@ const els = {
   machineTitle: document.querySelector("#machineTitle"),
   powerState: document.querySelector("#powerState"),
   uptimeMetric: document.querySelector("#uptimeMetric"),
+  viewportSummaryMetric: document.querySelector("#viewportSummaryMetric"),
   ramMetric: document.querySelector("#ramMetric"),
   logOutput: document.querySelector("#logOutput"),
   clearLogButton: document.querySelector("#clearLogButton"),
@@ -555,6 +558,153 @@ const updateUptime = () => {
   els.uptimeMetric.textContent = `${minutes}:${seconds}`;
 };
 
+const setViewportSummary = (summary) => {
+  els.viewportSummaryMetric.textContent = summary;
+};
+
+const summarizeViewportText = (text) => {
+  const value = text.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!value) return null;
+  if (value.includes("connecting to native qemu display")) return "Connecting to native QEMU display";
+  if (/press any key.*(cd|dvd)/i.test(value)) return "CD boot prompt is waiting";
+  if (value.includes("installing windows") || value.includes("windows setup")) {
+    return "Windows setup is active on screen";
+  }
+  if (value.includes("getting ready") || value.includes("getting devices ready")) {
+    return "Windows setup is preparing devices";
+  }
+  if (value.includes("boot manager") || value.includes("uefi") || value.includes("tianocore")) {
+    return "UEFI firmware screen is showing";
+  }
+  if (value.includes("no bootable") || value.includes("boot failed") || value.includes("missing operating system")) {
+    return "Boot media problem needs attention";
+  }
+  if (value.includes("nebulavm demo booted")) return "Nebula demo boot image is running";
+  return null;
+};
+
+const getViewportText = () => {
+  const vgaText = els.screenContainer.querySelector(".vga-text");
+  return [
+    !els.qemuTerminal.hidden ? els.qemuTerminal.textContent : "",
+    vgaText && !vgaText.hidden ? vgaText.textContent : "",
+    !els.nativeDisplay.hidden ? els.nativeDisplay.querySelector(".native-display-status")?.textContent || "" : "",
+  ].join("\n");
+};
+
+const getVisibleViewportCanvas = () => {
+  const canvases = !els.nativeDisplay.hidden
+    ? [...els.nativeDisplay.querySelectorAll("canvas")]
+    : [...els.screenContainer.querySelectorAll("canvas")];
+  return canvases.find((canvas) => {
+    const rect = canvas.getBoundingClientRect();
+    return rect.width > 8 && rect.height > 8 && canvas.width > 8 && canvas.height > 8;
+  });
+};
+
+const summarizeViewportCanvas = (canvas) => {
+  if (!canvas) return null;
+
+  const width = 64;
+  const height = 36;
+  const sample = document.createElement("canvas");
+  sample.width = width;
+  sample.height = height;
+  const context = sample.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+
+  try {
+    context.drawImage(canvas, 0, 0, width, height);
+  } catch {
+    return "Display is visible but protected";
+  }
+
+  let pixels;
+  try {
+    pixels = context.getImageData(0, 0, width, height).data;
+  } catch {
+    return "Display is visible but protected";
+  }
+  let total = 0;
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let avgRed = 0;
+  let avgGreen = 0;
+  let avgBlue = 0;
+  let dark = 0;
+  let white = 0;
+  let purple = 0;
+  let gray = 0;
+
+  for (let index = 0; index < pixels.length; index += 4) {
+    const alpha = pixels[index + 3];
+    if (alpha < 16) continue;
+
+    const r = pixels[index];
+    const g = pixels[index + 1];
+    const b = pixels[index + 2];
+    const brightness = (r + g + b) / 3;
+    const spread = Math.max(r, g, b) - Math.min(r, g, b);
+    total += 1;
+    avgRed += r;
+    avgGreen += g;
+    avgBlue += b;
+
+    if (brightness < 30) dark += 1;
+    if (brightness > 210 && spread < 56) white += 1;
+    if (r > 140 && r > g + 40 && r > b + 40) red += 1;
+    if (g > 120 && g > r + 30 && g > b + 20) green += 1;
+    if (b > 90 && b > r + 35 && b > g + 10) blue += 1;
+    if (b > 70 && r > 35 && b > g + 24) purple += 1;
+    if (brightness > 50 && brightness < 190 && spread < 28) gray += 1;
+  }
+
+  if (!total) return "Waiting for visible display pixels";
+
+  const ratios = {
+    red: red / total,
+    green: green / total,
+    blue: blue / total,
+    dark: dark / total,
+    white: white / total,
+    purple: purple / total,
+    gray: gray / total,
+  };
+  avgRed /= total;
+  avgGreen /= total;
+  avgBlue /= total;
+
+  if (ratios.dark > 0.92) return "Black boot screen is waiting";
+  if (ratios.blue > 0.42 && avgBlue > avgRed + 40) return "Windows setup is active on screen";
+  if (ratios.purple > 0.28 || (avgBlue > avgGreen + 24 && avgRed > avgGreen + 8)) {
+    return "UEFI firmware screen is showing";
+  }
+  if (ratios.white > 0.05 && ratios.dark > 0.5) return "Boot console text is visible";
+  if (ratios.red > 0.08) return "Warning or error screen is visible";
+  if (ratios.green > 0.14 && ratios.dark < 0.55) return "Desktop environment appears to be running";
+  if (ratios.gray > 0.55 && ratios.white > 0.01) return "Setup screen is waiting for input";
+  return "VM display is active and changing";
+};
+
+const updateViewportSummary = () => {
+  if (!els.screenPlaceholder.hidden) {
+    setViewportSummary("Waiting for boot media to start");
+    return;
+  }
+
+  const textSummary = summarizeViewportText(getViewportText());
+  if (textSummary) {
+    setViewportSummary(textSummary);
+    return;
+  }
+
+  setViewportSummary(
+    summarizeViewportCanvas(getVisibleViewportCanvas()) ||
+      (state.emulator ? "VM display is starting up" : "Waiting for boot media to start"),
+  );
+};
+
 const clearStatsTimer = () => {
   if (state.statsTimer) {
     window.clearInterval(state.statsTimer);
@@ -607,6 +757,7 @@ const stopEmulator = async () => {
   state.startedAt = null;
   clearStatsTimer();
   updateUptime();
+  setViewportSummary("Waiting for boot media to start");
   setPowerState("Powered off", "off");
   els.screenPlaceholder.hidden = false;
   els.screenContainer.querySelector(".vga-text").textContent = "";
@@ -651,6 +802,7 @@ const prepareBootUi = () => {
   clearStatsTimer();
   state.statsTimer = window.setInterval(updateUptime, 1000);
   updateUptime();
+  setViewportSummary("VM display is starting up");
 };
 
 const bootV86 = () => {
@@ -1069,3 +1221,5 @@ window.addEventListener("beforeunload", stopEmulator);
 log("NebulaVM ready.");
 updateBackendUi();
 updateButtons();
+updateViewportSummary();
+state.viewportSummaryTimer = window.setInterval(updateViewportSummary, 4000);
