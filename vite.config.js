@@ -296,6 +296,8 @@ const startNativeVm = async (body) => {
 
   if (embeddedDisplay) {
     args.push("-display", "none", "-vnc", `${nativeVncHost}:${vnc.display}`);
+  } else {
+    args.push("-display", "gtk");
   }
 
   if (body.createDisk !== false && existsSync(diskPath)) {

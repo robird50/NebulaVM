@@ -997,6 +997,18 @@ const bootNativeQemu = async (displayMode = "viewport") => {
     throw new Error(result.error || "Native QEMU failed to start.");
   }
 
+  if (displayMode === "external" && result.displayMode !== "external") {
+    try {
+      await fetchNativeQemuJson("stop", { method: "POST" });
+    } catch {
+      // The bridge mismatch message below is more useful than a stop failure here.
+    }
+    showNativeDisplayStatus("External mode needs the updated local bridge.");
+    throw new Error(
+      "External QEMU needs the updated local bridge. Stop any running VM, restart npm.cmd run dev -- --port 5174, then choose External again.",
+    );
+  }
+
   const rfb = result.vncPath ? connectNativeDisplay(base, result.vncPath) : null;
   state.nativeRfb = rfb;
   state.emulator = {
