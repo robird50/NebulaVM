@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+.netlify/
+.env
+.env.*
+vm-disks/
+*.iso
+*.img
+*.raw
+*.qcow2
+*.vhd
+*.vdi
+*.vmdk
