@@ -202,7 +202,7 @@ const startNativeVm = async (body) => {
   if (body.createDisk !== false && existsSync(diskPath)) {
     if (arch === "aarch64") {
       args.push("-drive", `if=none,id=systemdisk,file=${diskPath},format=qcow2`);
-      args.push("-device", "usb-storage,drive=systemdisk,bootindex=2");
+      args.push("-device", "nvme,drive=systemdisk,serial=nebulavm-arm64,bootindex=2");
     } else {
       args.push("-drive", `file=${diskPath},format=qcow2,if=ide`);
     }
