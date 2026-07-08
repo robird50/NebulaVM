@@ -41,6 +41,8 @@ const state = {
   startedAt: null,
   statsTimer: null,
   browserQemuCanMountFiles: false,
+  nativeQemuApiAvailable: null,
+  nativeQemuReady: false,
 };
 
 app.innerHTML = `
@@ -356,6 +358,20 @@ const log = (message) => {
   els.logOutput.scrollTop = els.logOutput.scrollHeight;
 };
 
+const nativeQemuHostedMessage =
+  "Native QEMU is only available when NebulaVM is running locally on your desktop. Hosted sites like Netlify cannot launch QEMU or read local ISO paths.";
+
+const fetchNativeQemuJson = async (path, options) => {
+  const response = await fetch(`/api/native-qemu/${path}`, options);
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new Error(nativeQemuHostedMessage);
+  }
+
+  return { response, data: await response.json() };
+};
+
 const setPowerState = (label, mode = "off") => {
   els.powerState.dataset.mode = mode;
   els.powerState.querySelector("span:last-child").textContent = label;
@@ -402,7 +418,9 @@ const updateButtons = (busy = false) => {
     : isRemoteMode()
       ? Boolean(els.remoteVmUrl.value.trim())
       : Boolean(state.isoFile);
-  els.bootButton.disabled = !hasBootMedia || Boolean(state.emulator) || isSelectedMediaTooLarge();
+  const nativeUnavailable =
+    isNativeMode() && (state.nativeQemuApiAvailable === false || state.nativeQemuReady === false);
+  els.bootButton.disabled = !hasBootMedia || Boolean(state.emulator) || isSelectedMediaTooLarge() || nativeUnavailable;
   els.pauseButton.disabled = busy || !state.emulator || externalMode;
   els.stopButton.disabled = busy || !state.emulator;
   els.resetButton.disabled = busy || !state.emulator || externalMode;
@@ -586,7 +604,7 @@ const bootNativeQemu = async () => {
   els.qemuTerminal.hidden = false;
   els.qemuTerminal.textContent = "Starting native QEMU...\n";
 
-  const response = await fetch("/api/native-qemu/start", {
+  const { response, data: result } = await fetchNativeQemuJson("start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -596,14 +614,13 @@ const bootNativeQemu = async () => {
       diskSizeGb: Number(els.nativeDiskSize.value),
     }),
   });
-  const result = await response.json();
   if (!response.ok || !result.ok) {
     throw new Error(result.error || "Native QEMU failed to start.");
   }
 
   state.emulator = {
     stop: async () => {
-      await fetch("/api/native-qemu/stop", { method: "POST" });
+      await fetchNativeQemuJson("stop", { method: "POST" });
     },
     destroy: async () => {},
   };
@@ -792,8 +809,9 @@ const updateNativeStatus = async () => {
   if (!isNativeMode()) return;
 
   try {
-    const response = await fetch("/api/native-qemu/status");
-    const status = await response.json();
+    const { data: status } = await fetchNativeQemuJson("status");
+    state.nativeQemuApiAvailable = true;
+    state.nativeQemuReady = Boolean(status.available);
     if (status.available) {
       els.nativeStatus.dataset.mode = "ready";
       els.nativeStatus.textContent = `Native QEMU ready${status.ovmf ? " with UEFI" : ""}.`;
@@ -802,9 +820,13 @@ const updateNativeStatus = async () => {
       els.nativeStatus.textContent = "Native QEMU not found. Install QEMU for Windows, then restart NebulaVM.";
     }
   } catch (error) {
+    state.nativeQemuApiAvailable = false;
+    state.nativeQemuReady = false;
     els.nativeStatus.dataset.mode = "missing";
-    els.nativeStatus.textContent = `Native QEMU status unavailable: ${error.message}`;
+    els.nativeStatus.textContent = error.message;
   }
+
+  updateButtons();
 };
 
 const updateBrowserQemuCapabilities = async () => {
