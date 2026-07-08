@@ -1,11 +1,10 @@
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import net from "node:net";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket, { WebSocketServer } from "ws";
-import { callAiTroubleshooter } from "./server/aiTroubleshooter.js";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 
@@ -401,9 +400,7 @@ const nativeQemuPlugin = () => ({
 
     server.middlewares.use(async (req, res, next) => {
       const url = new URL(req.url || "/", "http://localhost");
-      const nativeApiRoute = url.pathname.startsWith("/api/native-qemu");
-      const aiTroubleshooterRoute = url.pathname === "/api/ai-troubleshooter";
-      if (!nativeApiRoute && !aiTroubleshooterRoute) {
+      if (!url.pathname.startsWith("/api/native-qemu")) {
         next();
         return;
       }
@@ -417,18 +414,6 @@ const nativeQemuPlugin = () => ({
       }
 
       try {
-        if (req.method === "POST" && aiTroubleshooterRoute) {
-          const body = await readJsonBody(req);
-          const result = await callAiTroubleshooter(body);
-          json(res, result.status || (result.ok ? 200 : 500), result);
-          return;
-        }
-
-        if (aiTroubleshooterRoute) {
-          json(res, 405, { ok: false, error: "Use POST for AI Troubleshooter requests." });
-          return;
-        }
-
         if (req.method === "GET" && url.pathname === "/api/native-qemu/status") {
           json(res, 200, nativeStatus(url.searchParams.get("arch")));
           return;
@@ -461,27 +446,23 @@ const nativeQemuPlugin = () => ({
 
         json(res, 404, { error: "Unknown native QEMU endpoint." });
       } catch (error) {
-        json(res, 400, { ok: false, error: error.message });
+        json(res, 400, { error: error.message });
       }
     });
   },
 });
 
-export default defineConfig(({ mode }) => {
-  Object.assign(process.env, loadEnv(mode, workspaceDir, ""));
-
-  return {
-    plugins: [nativeQemuPlugin()],
-    define: {
-      __NEBULAVM_COMMIT__: JSON.stringify(commitId),
-    },
-    server: {
-      cors: false,
-      headers: isolationHeaders,
-    },
-    preview: {
-      cors: false,
-      headers: isolationHeaders,
-    },
-  };
+export default defineConfig({
+  plugins: [nativeQemuPlugin()],
+  define: {
+    __NEBULAVM_COMMIT__: JSON.stringify(commitId),
+  },
+  server: {
+    cors: false,
+    headers: isolationHeaders,
+  },
+  preview: {
+    cors: false,
+    headers: isolationHeaders,
+  },
 });

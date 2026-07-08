@@ -2,16 +2,8 @@
   command = "npm run build"
   publish = "dist"
 
-[functions]
-  directory = "netlify/functions"
-
 [build.environment]
   NODE_VERSION = "22"
-
-[[redirects]]
-  from = "/api/ai-troubleshooter"
-  to = "/.netlify/functions/ai-troubleshooter"
-  status = 200
 
 [[headers]]
   for = "/*"
