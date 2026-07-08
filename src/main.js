@@ -145,7 +145,7 @@ app.innerHTML = `
                   <span>Native QEMU ARM64 / Windows ARM</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu-ubuntu-arm64">
-                  <span class="emulator-menu-icon emulator-menu-icon-empty" aria-hidden="true"></span>
+                  <img class="emulator-menu-icon" src="/assets/nebulavm-emulator-icon.png" alt="" />
                   <span>Native QEMU ARM64 / Ubuntu</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="remote-vm">
@@ -483,7 +483,7 @@ const nativeModeLabel = () =>
     : isNativeWindowsArm64Mode()
       ? "Native QEMU ARM64 / Windows ARM"
       : "Native QEMU / large ISO";
-const isNebulaEmulator = (value) => value === "v86" || value === "qemu-x64";
+const isNebulaEmulator = (value) => value === "v86" || value === "qemu-x64" || value === "native-qemu-ubuntu-arm64";
 const looksLikeArm64Iso = (path) => /(^|[^a-z0-9])(arm64|aarch64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeX64Iso = (path) => /(^|[^a-z0-9])(x64|amd64|x86_64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeUbuntuIso = (path) => /(^|[^a-z0-9])ubuntu(?=[^a-z0-9]|$)/i.test(path);
