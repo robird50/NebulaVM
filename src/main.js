@@ -562,11 +562,25 @@ const updateUptime = () => {
   els.uptimeMetric.textContent = `${minutes}:${seconds}`;
 };
 
+const measureSummaryText = (summary) => {
+  const measure = document.createElement("span");
+  measure.className = "ai-summary-measure";
+  measure.textContent = summary;
+  els.viewportSummaryMetric.append(measure);
+  const width = Math.ceil(measure.getBoundingClientRect().width);
+  measure.remove();
+  return Math.max(42, width);
+};
+
 const setViewportSummary = (summary) => {
   const stage = els.viewportSummaryMetric.querySelector(".ai-summary-stage");
   if (!stage) return;
 
   const outgoing = stage.querySelector(".ai-summary-text.is-current") || stage.querySelector(".ai-summary-text");
+  const outgoingWidth = outgoing?.textContent ? measureSummaryText(outgoing.textContent) : 0;
+  const incomingWidth = measureSummaryText(summary);
+  stage.style.setProperty("--summary-text-width", `${Math.max(outgoingWidth, incomingWidth)}px`);
+
   if (outgoing?.textContent === summary) return;
 
   const incoming = document.createElement("span");

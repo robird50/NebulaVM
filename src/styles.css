@@ -621,9 +621,9 @@ input[type="text"] {
 }
 
 .metric-row .ai-summary-pill {
-  width: auto;
-  min-width: 210px;
-  max-width: min(300px, 36vw);
+  width: fit-content;
+  max-width: none;
+  flex: 0 0 auto;
   gap: 8px;
   overflow: hidden;
   border: 1px solid rgba(132, 220, 255, 0.28);
@@ -649,21 +649,21 @@ input[type="text"] {
 
 .ai-summary-stage {
   position: relative;
-  display: block;
-  min-width: 0;
+  display: grid;
+  width: var(--summary-text-width, max-content);
+  min-width: var(--summary-text-width, max-content);
   height: 18px;
-  flex: 1;
+  flex: 0 0 auto;
   overflow: hidden;
+  transition: width 220ms ease;
 }
 
 .ai-summary-text {
-  position: absolute;
-  inset: 0;
+  grid-area: 1 / 1;
   display: block;
-  width: 100%;
-  min-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: max-content;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
   line-height: 18px;
   opacity: 1;
@@ -686,6 +686,13 @@ input[type="text"] {
 .ai-summary-text.is-leaving {
   opacity: 0;
   transform: translateY(70%);
+}
+
+.ai-summary-measure {
+  position: absolute;
+  visibility: hidden;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .screen-shell {
