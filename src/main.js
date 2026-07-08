@@ -1039,6 +1039,7 @@ const bootNativeQemu = async (displayMode = "viewport") => {
   if (result.profile) log(`Native profile: ${result.profile}.`);
   if (result.diskPath) log(`Using install disk: ${result.diskPath}`);
   if (result.ovmf) log(`Using UEFI firmware: ${result.ovmf}`);
+  if (result.ovmfVarsPath) log(`Using UEFI variables: ${result.ovmfVarsPath}`);
   if (result.vncPath) log("Native QEMU display is embedded in the browser display box.");
   if (result.displayMode === "external") log("Native QEMU display is running in an external desktop window.");
 };

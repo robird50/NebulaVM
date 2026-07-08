@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import net from "node:net";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -108,6 +108,29 @@ const findFirmware = (arch, qemuPath) => {
   return candidates.map((candidate) => normalize(candidate)).find((candidate) => existsSync(candidate));
 };
 
+const findFirmwareVars = (arch, qemuPath) => {
+  const qemuDir = qemuPath ? dirname(qemuPath) : "";
+  const candidates =
+    arch === "aarch64"
+      ? [
+          join(qemuDir, "share", "edk2-aarch64-vars.fd"),
+          join(qemuDir, "..", "share", "edk2-aarch64-vars.fd"),
+          join(qemuDir, "share", "edk2-arm-vars.fd"),
+          join(qemuDir, "..", "share", "edk2-arm-vars.fd"),
+          "C:\\Program Files\\qemu\\share\\edk2-aarch64-vars.fd",
+          "C:\\Program Files\\qemu\\share\\edk2-arm-vars.fd",
+          "C:\\Program Files\\qemu\\share\\qemu\\edk2-aarch64-vars.fd",
+          "C:\\Program Files\\qemu\\share\\qemu\\edk2-arm-vars.fd",
+        ]
+      : [
+          join(qemuDir, "share", "edk2-x86_64-vars.fd"),
+          join(qemuDir, "..", "share", "edk2-x86_64-vars.fd"),
+          "C:\\Program Files\\qemu\\share\\edk2-x86_64-vars.fd",
+          "C:\\Program Files\\qemu\\share\\qemu\\edk2-x86_64-vars.fd",
+        ];
+  return candidates.map((candidate) => normalize(candidate)).find((candidate) => existsSync(candidate));
+};
+
 let nativeVm = null;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
@@ -170,6 +193,12 @@ const nativeDiskName = (profile) => {
   if (profile === "ubuntu-arm64") return "nebulavm-native-ubuntu-arm64.qcow2";
   if (profile === "windows-arm64") return "nebulavm-native-arm64.qcow2";
   return "nebulavm-native.qcow2";
+};
+
+const nativeVarsName = (profile) => {
+  if (profile === "ubuntu-arm64") return "nebulavm-native-ubuntu-arm64-vars.fd";
+  if (profile === "windows-arm64") return "nebulavm-native-arm64-vars.fd";
+  return "nebulavm-native-vars.fd";
 };
 
 const nativeStatus = (requestedArch = "x86_64") => {
@@ -239,6 +268,11 @@ const startNativeVm = async (body) => {
   }
 
   const ovmf = findFirmware(arch, qemu);
+  const ovmfVarsTemplate = findFirmwareVars(arch, qemu);
+  const ovmfVarsPath = ovmf && ovmfVarsTemplate ? resolve(vmDir, nativeVarsName(profile)) : null;
+  if (ovmfVarsPath && !existsSync(ovmfVarsPath)) {
+    copyFileSync(ovmfVarsTemplate, ovmfVarsPath);
+  }
   const vnc = embeddedDisplay ? await findAvailableVncDisplay() : null;
   const args =
     arch === "aarch64"
@@ -290,7 +324,10 @@ const startNativeVm = async (body) => {
           "e1000,netdev=net0",
         ];
 
-  if (ovmf) {
+  if (ovmf && ovmfVarsPath) {
+    args.push("-drive", `if=pflash,format=raw,readonly=on,file=${ovmf}`);
+    args.push("-drive", `if=pflash,format=raw,file=${ovmfVarsPath}`);
+  } else if (ovmf) {
     args.push("-bios", ovmf);
   }
 
@@ -356,6 +393,7 @@ const startNativeVm = async (body) => {
     displayMode,
     diskPath: existsSync(diskPath) ? diskPath : null,
     ovmf,
+    ovmfVarsPath,
     vncPath: embeddedDisplay ? nativeVncPath : null,
     vncPort: vnc?.port || null,
     get recentOutput() {
