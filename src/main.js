@@ -18,9 +18,13 @@ const isMobileOrTabletDevice = () => {
   const mobileOrTabletUserAgent =
     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet|Kindle|Silk/i.test(userAgent);
   const iPadDesktopMode = /Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1;
+  const touchCapable = navigator.maxTouchPoints > 0 || "ontouchstart" in window;
+  const coarsePointer =
+    window.matchMedia("(pointer: coarse)").matches ||
+    window.matchMedia("(any-pointer: coarse)").matches;
   const coarsePortableScreen =
-    navigator.maxTouchPoints > 1 &&
-    window.matchMedia("(pointer: coarse)").matches &&
+    touchCapable &&
+    coarsePointer &&
     window.matchMedia("(max-width: 1366px)").matches;
 
   return mobileOrTabletUserAgent || iPadDesktopMode || coarsePortableScreen;

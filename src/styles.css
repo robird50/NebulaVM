@@ -66,6 +66,16 @@ button:disabled {
   display: grid;
 }
 
+@media (hover: none) and (pointer: coarse), (any-pointer: coarse) and (max-width: 1366px) {
+  .shell {
+    display: none;
+  }
+
+  .mobile-unsupported {
+    display: grid;
+  }
+}
+
 .mobile-unsupported-image {
   width: min(100%, 860px);
   border-radius: 8px;
