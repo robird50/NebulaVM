@@ -60,6 +60,13 @@ memory. It needs QEMU for Windows installed, then you paste the full ISO path
 into the `Local ISO path` field. NebulaVM can create a qcow2 install disk in
 `vm-disks/`.
 
+When NebulaVM is hosted on Netlify, Native QEMU can still work through a local
+bridge on the same PC. Start NebulaVM locally with `npm.cmd run dev`, keep that
+terminal open, then use the Netlify site. The hosted app will try
+`http://127.0.0.1:5174` and `http://localhost:5174` for the native QEMU API.
+This is still required because browsers cannot launch desktop programs by
+themselves.
+
 ## Chromebook Workaround
 
 A Chromebook cannot realistically run the Windows 11 ISO locally inside the

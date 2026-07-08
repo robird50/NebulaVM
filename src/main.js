@@ -43,6 +43,7 @@ const state = {
   browserQemuCanMountFiles: false,
   nativeQemuApiAvailable: null,
   nativeQemuReady: false,
+  nativeQemuApiBase: null,
 };
 
 app.innerHTML = `
@@ -358,18 +359,40 @@ const log = (message) => {
   els.logOutput.scrollTop = els.logOutput.scrollHeight;
 };
 
-const nativeQemuHostedMessage =
-  "Native QEMU is only available when NebulaVM is running locally on your desktop. Hosted sites like Netlify cannot launch QEMU or read local ISO paths.";
+const nativeQemuBridgeMessage =
+  "Native QEMU needs a local bridge. Run NebulaVM locally with npm run dev, then keep this hosted page open.";
 
 const fetchNativeQemuJson = async (path, options) => {
-  const response = await fetch(`/api/native-qemu/${path}`, options);
-  const contentType = response.headers.get("content-type") || "";
+  const bridgeBases = [
+    state.nativeQemuApiBase,
+    window.location.origin,
+    "http://127.0.0.1:5174",
+    "http://localhost:5174",
+  ].filter(Boolean);
+  const uniqueBridgeBases = [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
+  let lastError = new Error(nativeQemuBridgeMessage);
 
-  if (!contentType.toLowerCase().includes("application/json")) {
-    throw new Error(nativeQemuHostedMessage);
+  for (const base of uniqueBridgeBases) {
+    try {
+      const response = await fetch(`${base}/api/native-qemu/${path}`, {
+        cache: "no-store",
+        ...options,
+      });
+      const contentType = response.headers.get("content-type") || "";
+
+      if (!contentType.toLowerCase().includes("application/json")) {
+        lastError = new Error(nativeQemuBridgeMessage);
+        continue;
+      }
+
+      state.nativeQemuApiBase = base;
+      return { response, data: await response.json(), base };
+    } catch (error) {
+      lastError = error instanceof TypeError ? new Error(nativeQemuBridgeMessage) : error;
+    }
   }
 
-  return { response, data: await response.json() };
+  throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
 const setPowerState = (label, mode = "off") => {
@@ -604,7 +627,7 @@ const bootNativeQemu = async () => {
   els.qemuTerminal.hidden = false;
   els.qemuTerminal.textContent = "Starting native QEMU...\n";
 
-  const { response, data: result } = await fetchNativeQemuJson("start", {
+  const { response, data: result, base } = await fetchNativeQemuJson("start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -628,6 +651,7 @@ const bootNativeQemu = async () => {
   setPowerState("Native QEMU", "running");
   updateButtons();
   log(`Native QEMU started in a desktop window (pid ${result.pid}).`);
+  if (base !== window.location.origin) log(`Using local bridge: ${base}`);
   if (result.diskPath) log(`Using install disk: ${result.diskPath}`);
   if (result.ovmf) log(`Using UEFI firmware: ${result.ovmf}`);
   els.qemuTerminal.textContent += `Native QEMU started.\nPID: ${result.pid}\n`;
@@ -809,15 +833,17 @@ const updateNativeStatus = async () => {
   if (!isNativeMode()) return;
 
   try {
-    const { data: status } = await fetchNativeQemuJson("status");
+    const { data: status, base } = await fetchNativeQemuJson("status");
+    const bridgeLabel = base === window.location.origin ? "" : ` via local bridge ${base}`;
     state.nativeQemuApiAvailable = true;
     state.nativeQemuReady = Boolean(status.available);
     if (status.available) {
       els.nativeStatus.dataset.mode = "ready";
-      els.nativeStatus.textContent = `Native QEMU ready${status.ovmf ? " with UEFI" : ""}.`;
+      els.nativeStatus.textContent = `Native QEMU ready${status.ovmf ? " with UEFI" : ""}${bridgeLabel}.`;
     } else {
       els.nativeStatus.dataset.mode = "missing";
-      els.nativeStatus.textContent = "Native QEMU not found. Install QEMU for Windows, then restart NebulaVM.";
+      els.nativeStatus.textContent =
+        `Native QEMU not found${bridgeLabel}. Install QEMU for Windows, then restart the local bridge.`;
     }
   } catch (error) {
     state.nativeQemuApiAvailable = false;

@@ -11,6 +11,15 @@ const isolationHeaders = {
   "Cross-Origin-Embedder-Policy": "require-corp",
 };
 
+const setNativeQemuCors = (req, res) => {
+  const origin = req.headers.origin || "*";
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Private-Network", "true");
+  res.setHeader("Vary", "Origin");
+};
+
 const json = (res, status, payload) => {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
@@ -190,6 +199,14 @@ const nativeQemuPlugin = () => ({
     server.middlewares.use(async (req, res, next) => {
       if (!req.url?.startsWith("/api/native-qemu")) {
         next();
+        return;
+      }
+
+      setNativeQemuCors(req, res);
+
+      if (req.method === "OPTIONS") {
+        res.statusCode = 204;
+        res.end();
         return;
       }
 
