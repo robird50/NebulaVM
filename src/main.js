@@ -9,22 +9,24 @@ import "./styles.css";
 
 const app = document.querySelector("#app");
 
-const isMobileDevice = () => {
-  if (navigator.userAgentData && typeof navigator.userAgentData.mobile === "boolean") {
-    return navigator.userAgentData.mobile;
+const isMobileOrTabletDevice = () => {
+  if (navigator.userAgentData?.mobile) {
+    return true;
   }
 
   const userAgent = navigator.userAgent || navigator.vendor || window.opera || "";
-  const mobileUserAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet/i.test(userAgent);
-  const coarseSmallScreen =
+  const mobileOrTabletUserAgent =
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet|Kindle|Silk/i.test(userAgent);
+  const iPadDesktopMode = /Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1;
+  const coarsePortableScreen =
     navigator.maxTouchPoints > 1 &&
     window.matchMedia("(pointer: coarse)").matches &&
-    window.matchMedia("(max-width: 900px)").matches;
+    window.matchMedia("(max-width: 1366px)").matches;
 
-  return mobileUserAgent || coarseSmallScreen;
+  return mobileOrTabletUserAgent || iPadDesktopMode || coarsePortableScreen;
 };
 
-if (isMobileDevice()) {
+if (isMobileOrTabletDevice()) {
   document.documentElement.classList.add("is-mobile-device");
 }
 
@@ -39,10 +41,10 @@ const state = {
 
 app.innerHTML = `
   <main class="mobile-unsupported" aria-labelledby="mobileUnsupportedTitle">
-    <img class="mobile-unsupported-image" src="/assets/mobile-not-supported.png" alt="NebulaVM mobile devices not supported" />
+    <img class="mobile-unsupported-image" src="/assets/mobile-not-supported.png" alt="NebulaVM mobile and tablet devices not supported" />
     <section class="mobile-unsupported-copy">
-      <h1 id="mobileUnsupportedTitle">Mobile Not Supported</h1>
-      <p>NebulaVM is currently available only on desktop and laptop browsers. Mobile support is still in development.</p>
+      <h1 id="mobileUnsupportedTitle">Mobile and Tablet Not Supported</h1>
+      <p>NebulaVM is currently available only on desktop and laptop browsers. Mobile and tablet support is still in development.</p>
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
     </section>
   </main>
@@ -61,7 +63,7 @@ app.innerHTML = `
 
     <section class="about-strip" aria-label="About NebulaVM">
       <p>
-        NebulaVM is a free and open-source virtual machine platform that lets you run operating systems directly in your web browser&mdash;no downloads or installation required. Powered by modern backend technology, NebulaVM is designed to make virtualization simple, accessible, and available to everyone. Our commitment is permanent: <strong>NebulaVM will always be free</strong>, with no subscriptions, premium plans, hidden fees, or paywalls. It runs on most modern desktop and laptop browsers, with mobile support planned for a future release.
+        NebulaVM is a free and open-source virtual machine platform that lets you run operating systems directly in your web browser&mdash;no downloads or installation required. Powered by modern backend technology, NebulaVM is designed to make virtualization simple, accessible, and available to everyone. Our commitment is permanent: <strong>NebulaVM will always be free</strong>, with no subscriptions, premium plans, hidden fees, or paywalls. It runs on most modern desktop and laptop browsers, with mobile and tablet support planned for a future release.
       </p>
       <div class="status-pill" id="powerState">
         <span class="status-dot"></span>
