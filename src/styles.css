@@ -354,82 +354,6 @@ input[type="text"] {
   color: #edf2f7;
 }
 
-.emulator-list {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.emulator-option {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  min-height: 62px;
-  padding: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: #0f151e;
-  color: #edf2f7;
-  text-align: left;
-  transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    transform 160ms ease;
-}
-
-.emulator-option:hover {
-  border-color: rgba(145, 217, 207, 0.48);
-  background: rgba(145, 217, 207, 0.08);
-}
-
-.emulator-option:focus-visible {
-  outline: 2px solid #91d9cf;
-  outline-offset: 2px;
-}
-
-.emulator-option.is-selected {
-  border-color: rgba(145, 217, 207, 0.74);
-  background: rgba(145, 217, 207, 0.13);
-  box-shadow: 0 0 0 1px rgba(145, 217, 207, 0.18) inset;
-}
-
-.emulator-icon {
-  width: 34px;
-  height: 34px;
-  object-fit: contain;
-  filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.24));
-}
-
-.emulator-icon-empty {
-  display: block;
-}
-
-.emulator-option-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.emulator-option-copy strong {
-  overflow: hidden;
-  color: #f8fbff;
-  font-size: 0.88rem;
-  line-height: 1.12;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.emulator-option-copy small {
-  overflow: hidden;
-  color: #95a4b6;
-  font-size: 0.72rem;
-  font-weight: 800;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .native-panel {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -777,10 +701,6 @@ pre {
 
   .brand-logo {
     width: 128px;
-  }
-
-  .emulator-list {
-    grid-template-columns: 1fr;
   }
 
   .field-grid,
