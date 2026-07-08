@@ -48,6 +48,7 @@ const state = {
   nativeQemuApiBase: null,
   nativeRfb: null,
   viewportSummaryTimer: null,
+  troubleshooterImage: null,
 };
 
 app.innerHTML = `
@@ -315,6 +316,34 @@ app.innerHTML = `
           </div>
           <pre id="logOutput" aria-live="polite"></pre>
         </div>
+
+        <div class="troubleshooter-panel">
+          <div class="terminal-header">
+            <span>AI Troubleshooter</span>
+            <button id="clearTroubleshooterButton" type="button">Clear</button>
+          </div>
+          <div class="troubleshooter-messages" id="troubleshooterMessages" aria-live="polite">
+            <article class="troubleshooter-message ai">
+              <strong>AI Troubleshooter</strong>
+              <p>Paste an error or attach a screenshot. I will check NebulaVM settings, logs, and the VM display state.</p>
+            </article>
+          </div>
+          <div class="troubleshooter-image-preview" id="troubleshooterImagePreview" hidden>
+            <img id="troubleshooterImagePreviewImg" alt="Attached troubleshooting screenshot preview" />
+            <span id="troubleshooterImageName"></span>
+            <button id="removeTroubleshooterImageButton" type="button">Remove</button>
+          </div>
+          <form class="troubleshooter-form" id="troubleshooterForm">
+            <textarea
+              id="troubleshooterInput"
+              rows="2"
+              placeholder="Paste an error, describe what happened, or attach a screenshot"
+            ></textarea>
+            <input id="troubleshooterImageInput" type="file" accept="image/*" hidden />
+            <button class="secondary compact-button" id="troubleshooterImageButton" type="button">Image</button>
+            <button class="primary compact-button" type="submit">Ask</button>
+          </form>
+        </div>
       </section>
     </section>
     <footer class="commit-id">Commit ${COMMIT_ID}</footer>
@@ -371,6 +400,16 @@ const els = {
   ramMetric: document.querySelector("#ramMetric"),
   logOutput: document.querySelector("#logOutput"),
   clearLogButton: document.querySelector("#clearLogButton"),
+  troubleshooterMessages: document.querySelector("#troubleshooterMessages"),
+  clearTroubleshooterButton: document.querySelector("#clearTroubleshooterButton"),
+  troubleshooterForm: document.querySelector("#troubleshooterForm"),
+  troubleshooterInput: document.querySelector("#troubleshooterInput"),
+  troubleshooterImageInput: document.querySelector("#troubleshooterImageInput"),
+  troubleshooterImageButton: document.querySelector("#troubleshooterImageButton"),
+  troubleshooterImagePreview: document.querySelector("#troubleshooterImagePreview"),
+  troubleshooterImagePreviewImg: document.querySelector("#troubleshooterImagePreviewImg"),
+  troubleshooterImageName: document.querySelector("#troubleshooterImageName"),
+  removeTroubleshooterImageButton: document.querySelector("#removeTroubleshooterImageButton"),
 };
 
 const formatBytes = (bytes) => {
@@ -768,6 +807,305 @@ const updateViewportSummary = () => {
     summarizeViewportCanvas(getVisibleViewportCanvas()) ||
       (state.emulator ? "VM display is starting up" : "Waiting for boot media to start"),
   );
+};
+
+const selectedOptionText = (select) => select.selectedOptions?.[0]?.textContent || select.value;
+
+const currentViewportSummary = () =>
+  els.viewportSummaryMetric.querySelector(".ai-summary-text.is-current")?.textContent ||
+  els.viewportSummaryMetric.textContent.trim();
+
+const getTroubleshooterContext = () => ({
+  emulator: getEmulatorLabel(els.emulatorMode.value),
+  processor: selectedOptionText(els.processorMode),
+  bootOrder: selectedOptionText(els.bootOrder),
+  memory: selectedOptionText(els.memorySize),
+  isoPath: els.nativeIsoPath.value.trim(),
+  nativeStatus: els.nativeStatus.textContent.trim(),
+  viewport: currentViewportSummary(),
+  activity: els.logOutput.textContent.trim().split("\n").slice(-8).join("\n"),
+});
+
+const formatTroubleshooterReply = (title, steps, context) =>
+  [
+    `Likely issue: ${title}`,
+    "",
+    "Try this:",
+    ...steps.map((step, index) => `${index + 1}. ${step}`),
+    "",
+    `Context: ${context.emulator}, ${context.bootOrder}, ${context.memory}, viewport says "${context.viewport}".`,
+  ].join("\n");
+
+const buildTroubleshooterReply = (message, imageSummary) => {
+  const context = getTroubleshooterContext();
+  const source = `${message}\n${imageSummary || ""}\n${context.activity}\n${context.nativeStatus}\n${context.viewport}`.toLowerCase();
+
+  if (/missing qemu wasm|qemu-system-x86_64\.wasm|out\.js|worker\.js/.test(source)) {
+    return formatTroubleshooterReply(
+      "the browser QEMU files are missing",
+      [
+        "Use Native QEMU for large 64-bit ISOs, or place the QEMU Wasm artifacts in public/qemu.",
+        "For Windows 11, choose Native QEMU or Native QEMU ARM64 instead of Nebula x64 / QEMU Wasm.",
+        "Restart the local bridge after changing backend files.",
+      ],
+      context,
+    );
+  }
+
+  if (/requested file could not be read|permission|could not be read/.test(source)) {
+    return formatTroubleshooterReply(
+      "the browser lost permission to the ISO file",
+      [
+        "Use the Local ISO path field with Native QEMU instead of dragging the large ISO into the browser.",
+        "Keep the ISO in a normal folder like Downloads, not a restricted or disconnected location.",
+        "Restart the VM after confirming the full absolute ISO path.",
+      ],
+      context,
+    );
+  }
+
+  if (/2048|too large|large iso|stage|browser memory|7\.9 gb|8079/.test(source)) {
+    return formatTroubleshooterReply(
+      "the ISO is too large for browser-staged boot",
+      [
+        "Use Native QEMU / large ISO or an ARM64 native profile.",
+        "Enter the ISO path in Local ISO path instead of dragging the file.",
+        "Keep the local bridge running at http://127.0.0.1:5174.",
+      ],
+      context,
+    );
+  }
+
+  if (/local bridge|native qemu needs|unexpected token '<'|not valid json|status unavailable/.test(source)) {
+    return formatTroubleshooterReply(
+      "the hosted page cannot reach the local bridge",
+      [
+        "Restart the bridge with: npm.cmd run dev -- --port 5174",
+        "Keep http://127.0.0.1:5174 open or running while using the Netlify page.",
+        "Hard refresh the Netlify page after the bridge says it is ready.",
+      ],
+      context,
+    );
+  }
+
+  if (/qemu not found|qemu-system|install qemu|not found/.test(source)) {
+    return formatTroubleshooterReply(
+      "QEMU is not available to the bridge",
+      [
+        "Confirm QEMU is installed under C:\\Program Files\\qemu.",
+        "Restart the local bridge after installing QEMU.",
+        "Use the emulator profile matching the ISO architecture: x64, Windows ARM64, or Ubuntu ARM64.",
+      ],
+      context,
+    );
+  }
+
+  if (/tpm|secure boot|bypass|pc has to support/.test(source)) {
+    return formatTroubleshooterReply(
+      "Windows setup is blocking unsupported VM hardware",
+      [
+        "Use the Windows 11 setup bypass registry steps from Shift+F10.",
+        "After the bypass succeeds, go back in setup and continue the install.",
+        "Keep using the Windows ARM64 profile for ARM ISOs or x64 native QEMU for x64 ISOs.",
+      ],
+      context,
+    );
+  }
+
+  if (/usb|ieee 1394|can't be installed on this drive|cannot be installed on this drive/.test(source)) {
+    return formatTroubleshooterReply(
+      "Windows is seeing the target disk as removable",
+      [
+        "Make sure the site and bridge are on the latest commit.",
+        "Use Native QEMU ARM64 / Windows ARM for Windows ARM installs.",
+        "Stop the VM, keep Create install disk checked, then boot again with CD-ROM first.",
+      ],
+      context,
+    );
+  }
+
+  if (/press any key|cd\/dvd|cd-rom|boot prompt|boot loop/.test(source)) {
+    return formatTroubleshooterReply(
+      "the VM is booting the installer again",
+      [
+        "If Windows already copied files, do not press any key at the CD/DVD prompt.",
+        "Stop the VM and set Boot order to Hard disk first.",
+        "Keep the same qcow2 disk and ISO path; do not delete the install disk.",
+      ],
+      context,
+    );
+  }
+
+  if (/uefi|tianocore|boot manager|qemu look|firmware screen/.test(source)) {
+    return formatTroubleshooterReply(
+      "the VM reached firmware instead of the OS",
+      [
+        "If the OS is already installed, stop and switch Boot order to Hard disk first.",
+        "If nothing is installed yet, boot with CD-ROM first and confirm the ISO path.",
+        "Use the matching emulator profile for the ISO architecture.",
+      ],
+      context,
+    );
+  }
+
+  if (/black|blank|vnc|display|no screen|protected/.test(source)) {
+    return formatTroubleshooterReply(
+      "the display is connected but not showing useful output yet",
+      [
+        "Wait 30-60 seconds after boot, especially with ARM64 QEMU.",
+        "If it stays blank, stop the VM and boot again with the same disk.",
+        "Restart the local bridge if noVNC disconnects or the display never connects.",
+      ],
+      context,
+    );
+  }
+
+  if (/77%|stuck|frozen|spinning|0%/.test(source)) {
+    return formatTroubleshooterReply(
+      "the installer may still be working slowly",
+      [
+        "If the spinner moves or QEMU uses CPU, keep waiting.",
+        "ARM64 installs can pause at one percentage for a long time.",
+        "Only restart if QEMU stays at 0% CPU and the screen is frozen for 15-20 minutes.",
+      ],
+      context,
+    );
+  }
+
+  if (/ubuntu|arm64|aarch64/.test(source)) {
+    return formatTroubleshooterReply(
+      "the ISO needs the matching ARM64 profile",
+      [
+        "Choose Native QEMU ARM64 / Ubuntu for Ubuntu ARM64 ISOs.",
+        "Use CD-ROM first for installation, then Hard disk first after install.",
+        "Keep Create install disk checked so Ubuntu gets its own qcow2 disk.",
+      ],
+      context,
+    );
+  }
+
+  if (/netlify|deploy|commit|footer/.test(source)) {
+    return formatTroubleshooterReply(
+      "the hosted site may not have the newest deploy",
+      [
+        "Wait for Netlify to finish the deploy from the latest GitHub commit.",
+        "Refresh the page and check the footer commit id.",
+        "Restart the local bridge for backend changes because Netlify cannot update your running local server.",
+      ],
+      context,
+    );
+  }
+
+  if (imageSummary) {
+    return formatTroubleshooterReply(
+      imageSummary,
+      [
+        "Compare the screenshot with the selected emulator and boot order.",
+        "Paste any visible error text for a more specific fix.",
+        "If this is after OS files copied, try Hard disk first without deleting the qcow2 disk.",
+      ],
+      context,
+    );
+  }
+
+  return formatTroubleshooterReply(
+    "more detail is needed, but the VM context is available",
+    [
+      "Paste the exact error text from the VM or Activity log.",
+      "Attach a screenshot if the error is visual.",
+      "Check that emulator, ISO architecture, and boot order match the install phase.",
+    ],
+    context,
+  );
+};
+
+const appendTroubleshooterMessage = (role, text, imageUrl = "") => {
+  const message = document.createElement("article");
+  message.className = `troubleshooter-message ${role}`;
+
+  const label = document.createElement("strong");
+  label.textContent = role === "user" ? "You" : "AI Troubleshooter";
+  message.append(label);
+
+  if (imageUrl) {
+    const image = document.createElement("img");
+    image.src = imageUrl;
+    image.alt = "Troubleshooting attachment";
+    message.append(image);
+  }
+
+  const body = document.createElement("p");
+  body.textContent = text;
+  message.append(body);
+
+  els.troubleshooterMessages.append(message);
+  els.troubleshooterMessages.scrollTop = els.troubleshooterMessages.scrollHeight;
+};
+
+const analyzeTroubleshooterImage = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const image = new Image();
+      image.addEventListener("load", () => {
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, 960 / Math.max(image.naturalWidth, image.naturalHeight));
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error("Could not inspect that image."));
+          return;
+        }
+
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve({
+          dataUrl: String(reader.result),
+          name: file.name,
+          summary: summarizeViewportCanvas(canvas) || "Screenshot attached for troubleshooting",
+        });
+      });
+      image.addEventListener("error", () => reject(new Error("That image could not be loaded.")));
+      image.src = String(reader.result);
+    });
+    reader.addEventListener("error", () => reject(new Error("That image could not be read.")));
+    reader.readAsDataURL(file);
+  });
+
+const setTroubleshooterImage = async (file) => {
+  if (!file?.type?.startsWith("image/")) {
+    appendTroubleshooterMessage("ai", "Attach a PNG, JPG, or another image file so I can inspect the screenshot.");
+    return;
+  }
+
+  try {
+    state.troubleshooterImage = await analyzeTroubleshooterImage(file);
+    els.troubleshooterImagePreviewImg.src = state.troubleshooterImage.dataUrl;
+    els.troubleshooterImageName.textContent = `${state.troubleshooterImage.name} - ${state.troubleshooterImage.summary}`;
+    els.troubleshooterImagePreview.hidden = false;
+  } catch (error) {
+    appendTroubleshooterMessage("ai", error.message);
+  }
+};
+
+const clearTroubleshooterImage = () => {
+  state.troubleshooterImage = null;
+  els.troubleshooterImageInput.value = "";
+  els.troubleshooterImagePreviewImg.removeAttribute("src");
+  els.troubleshooterImageName.textContent = "";
+  els.troubleshooterImagePreview.hidden = true;
+};
+
+const askTroubleshooter = async () => {
+  const prompt = els.troubleshooterInput.value.trim();
+  const image = state.troubleshooterImage;
+  if (!prompt && !image) return;
+
+  appendTroubleshooterMessage("user", prompt || "Please troubleshoot this screenshot.", image?.dataUrl);
+  const reply = buildTroubleshooterReply(prompt, image?.summary || "");
+  appendTroubleshooterMessage("ai", reply);
+  els.troubleshooterInput.value = "";
+  clearTroubleshooterImage();
 };
 
 const clearStatsTimer = () => {
@@ -1289,6 +1627,43 @@ document.addEventListener("fullscreenchange", updateFullscreenButton);
 
 els.clearLogButton.addEventListener("click", () => {
   els.logOutput.textContent = "";
+});
+
+els.clearTroubleshooterButton.addEventListener("click", () => {
+  els.troubleshooterMessages.replaceChildren();
+  appendTroubleshooterMessage(
+    "ai",
+    "Paste an error or attach a screenshot. I will check NebulaVM settings, logs, and the VM display state.",
+  );
+  clearTroubleshooterImage();
+});
+
+els.troubleshooterImageButton.addEventListener("click", () => els.troubleshooterImageInput.click());
+els.troubleshooterImageInput.addEventListener("change", (event) => {
+  const [file] = event.target.files;
+  if (file) void setTroubleshooterImage(file);
+});
+els.removeTroubleshooterImageButton.addEventListener("click", clearTroubleshooterImage);
+els.troubleshooterForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void askTroubleshooter();
+});
+els.troubleshooterForm.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  els.troubleshooterForm.classList.add("is-dragging");
+});
+els.troubleshooterForm.addEventListener("dragleave", () => {
+  els.troubleshooterForm.classList.remove("is-dragging");
+});
+els.troubleshooterForm.addEventListener("drop", (event) => {
+  event.preventDefault();
+  els.troubleshooterForm.classList.remove("is-dragging");
+  const [file] = [...(event.dataTransfer?.files || [])].filter((item) => item.type.startsWith("image/"));
+  if (file) void setTroubleshooterImage(file);
+});
+els.troubleshooterInput.addEventListener("paste", (event) => {
+  const [file] = [...(event.clipboardData?.files || [])].filter((item) => item.type.startsWith("image/"));
+  if (file) void setTroubleshooterImage(file);
 });
 
 window.addEventListener("beforeunload", stopEmulator);

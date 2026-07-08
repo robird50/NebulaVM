@@ -353,7 +353,8 @@ h2 {
 }
 
 select,
-input[type="text"] {
+input[type="text"],
+textarea {
   width: 100%;
   min-height: 42px;
   padding: 0 12px;
@@ -361,6 +362,11 @@ input[type="text"] {
   border-radius: 8px;
   background: #0f151e;
   color: #edf2f7;
+}
+
+textarea {
+  padding: 10px 12px;
+  font: inherit;
 }
 
 .emulator-field {
@@ -860,12 +866,17 @@ input[type="text"] {
   line-height: 1.55;
 }
 
-.terminal-panel {
+.terminal-panel,
+.troubleshooter-panel {
   min-height: 150px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   background: #080c11;
+}
+
+.troubleshooter-panel {
+  display: grid;
 }
 
 .terminal-header {
@@ -890,6 +901,111 @@ pre {
   color: #91d9cf;
   font: 0.82rem/1.6 "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   white-space: pre-wrap;
+}
+
+.troubleshooter-messages {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  max-height: 280px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.troubleshooter-message {
+  display: grid;
+  gap: 7px;
+  max-width: min(720px, 88%);
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #d9e5f2;
+}
+
+.troubleshooter-message.user {
+  justify-self: end;
+  background: rgba(145, 217, 207, 0.12);
+}
+
+.troubleshooter-message.ai {
+  justify-self: start;
+}
+
+.troubleshooter-message strong {
+  color: #91d9cf;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.troubleshooter-message p {
+  margin: 0;
+  color: #d8e3ef;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.troubleshooter-message img {
+  max-width: min(360px, 100%);
+  max-height: 180px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: #020407;
+}
+
+.troubleshooter-image-preview {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: #bdc9d7;
+  font-size: 0.82rem;
+}
+
+.troubleshooter-image-preview[hidden] {
+  display: none;
+}
+
+.troubleshooter-image-preview img {
+  width: 44px;
+  height: 34px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #020407;
+}
+
+.troubleshooter-image-preview span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.troubleshooter-image-preview button {
+  min-height: 30px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #cbd6e3;
+}
+
+.troubleshooter-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.troubleshooter-form.is-dragging {
+  background: rgba(145, 217, 207, 0.08);
+}
+
+.troubleshooter-form textarea {
+  min-height: 42px;
+  max-height: 120px;
+  resize: vertical;
 }
 
 @keyframes spin {
@@ -933,7 +1049,8 @@ pre {
 
   .field-grid,
   .button-row,
-  .button-row.compact {
+  .button-row.compact,
+  .troubleshooter-form {
     grid-template-columns: 1fr;
   }
 
