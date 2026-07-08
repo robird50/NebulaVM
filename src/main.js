@@ -730,6 +730,7 @@ const bootNativeQemu = async () => {
       arch: nativeArchitecture(),
       isoPath: els.nativeIsoPath.value.trim(),
       memoryMb: Number(els.memorySize.value) / 1024 / 1024,
+      bootOrder: els.bootOrder.value,
       createDisk: els.nativeCreateDisk.checked,
       diskSizeGb: Number(els.nativeDiskSize.value),
     }),
@@ -753,7 +754,7 @@ const bootNativeQemu = async () => {
   const nativeLabel = result.arch === "aarch64" ? "Native ARM64 QEMU" : "Native QEMU";
   setPowerState(nativeLabel, "running");
   updateButtons();
-  log(`${nativeLabel} started in a desktop window (pid ${result.pid}).`);
+  log(`${nativeLabel} started in the browser display (pid ${result.pid}).`);
   if (base !== window.location.origin) log(`Using local bridge: ${base}`);
   if (result.arch) log(`Native architecture: ${result.arch}.`);
   if (result.diskPath) log(`Using install disk: ${result.diskPath}`);
@@ -984,7 +985,7 @@ const updateBackendUi = () => {
     els.nativeStatus.textContent = `Checking ${nativeArm64Mode ? "Native ARM64 QEMU" : "native QEMU"}...`;
   }
   els.vgaSize.disabled = externalMode;
-  els.bootOrder.disabled = externalMode;
+  els.bootOrder.disabled = remoteMode || state.emulator;
   els.demoButton.disabled = externalMode;
   els.autostart.disabled = externalMode;
   els.networkingHelp.textContent = externalMode

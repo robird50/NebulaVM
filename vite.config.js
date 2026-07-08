@@ -196,6 +196,11 @@ const startNativeVm = async (body) => {
 
   const memoryMb = Math.min(6144, Math.max(512, Number(body.memoryMb) || 2048));
   const diskSizeGb = Math.min(256, Math.max(32, Number(body.diskSizeGb) || 64));
+  const bootOrder = String(body.bootOrder || "213");
+  const diskFirst = bootOrder === "123";
+  const cdBootIndex = diskFirst ? 2 : 1;
+  const diskBootIndex = diskFirst ? 1 : 2;
+  const qemuBootDevice = diskFirst ? "c" : "d";
   const vmDir = resolve(workspaceDir, "vm-disks");
   const diskPath = resolve(vmDir, arch === "aarch64" ? "nebulavm-native-arm64.qcow2" : "nebulavm-native.qcow2");
   mkdirSync(vmDir, { recursive: true });
@@ -242,7 +247,7 @@ const startNativeVm = async (body) => {
           "-drive",
           `if=none,id=install,media=cdrom,readonly=on,file=${isoPath}`,
           "-device",
-          "usb-storage,drive=install,bootindex=1",
+          `usb-storage,drive=install,bootindex=${cdBootIndex}`,
           "-netdev",
           "user,id=net0",
           "-device",
@@ -258,7 +263,7 @@ const startNativeVm = async (body) => {
           "-m",
           `${memoryMb}M`,
           "-boot",
-          "d",
+          qemuBootDevice,
           "-cdrom",
           isoPath,
           "-usb",
@@ -279,7 +284,7 @@ const startNativeVm = async (body) => {
   if (body.createDisk !== false && existsSync(diskPath)) {
     if (arch === "aarch64") {
       args.push("-drive", `if=none,id=systemdisk,file=${diskPath},format=qcow2`);
-      args.push("-device", "nvme,drive=systemdisk,serial=nebulavm-arm64,bootindex=2");
+      args.push("-device", `nvme,drive=systemdisk,serial=nebulavm-arm64,bootindex=${diskBootIndex}`);
     } else {
       args.push("-drive", `file=${diskPath},format=qcow2,if=ide`);
     }
@@ -320,6 +325,7 @@ const startNativeVm = async (body) => {
     arch,
     qemu,
     args,
+    bootOrder: diskFirst ? "disk-first" : "cdrom-first",
     diskPath: existsSync(diskPath) ? diskPath : null,
     ovmf,
     vncPath: nativeVncPath,
