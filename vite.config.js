@@ -300,9 +300,11 @@ const nativeQemuPlugin = () => ({
 export default defineConfig({
   plugins: [nativeQemuPlugin()],
   server: {
+    cors: false,
     headers: isolationHeaders,
   },
   preview: {
+    cors: false,
     headers: isolationHeaders,
   },
 });
