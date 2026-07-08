@@ -354,6 +354,119 @@ input[type="text"] {
   color: #edf2f7;
 }
 
+.emulator-field {
+  position: relative;
+}
+
+.emulator-dropdown {
+  position: relative;
+}
+
+.emulator-select {
+  position: relative;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 38px 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: #0f151e;
+  color: #edf2f7;
+  text-align: left;
+}
+
+.emulator-select::after {
+  position: absolute;
+  top: 50%;
+  right: 15px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #aeb9c8;
+  border-bottom: 2px solid #aeb9c8;
+  content: "";
+  transform: translateY(-65%) rotate(45deg);
+}
+
+.emulator-select[aria-expanded="true"]::after {
+  transform: translateY(-35%) rotate(225deg);
+}
+
+.emulator-select:focus-visible {
+  outline: 2px solid #91d9cf;
+  outline-offset: 2px;
+}
+
+.emulator-selected,
+.emulator-menu-option {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.emulator-selected {
+  min-width: 0;
+}
+
+.emulator-selected span,
+.emulator-menu-option span:last-child {
+  overflow: hidden;
+  color: #edf2f7;
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.emulator-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: #080c11;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+
+.emulator-menu[hidden] {
+  display: none;
+}
+
+.emulator-menu-option {
+  min-height: 40px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  color: #edf2f7;
+  text-align: left;
+}
+
+.emulator-menu-option:hover,
+.emulator-menu-option:focus-visible {
+  background: rgba(145, 217, 207, 0.1);
+  outline: 0;
+}
+
+.emulator-menu-option.is-selected {
+  background: rgba(145, 217, 207, 0.16);
+}
+
+.emulator-menu-icon {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.24));
+}
+
+.emulator-menu-icon-empty {
+  visibility: hidden;
+}
+
 .native-panel {
   display: grid;
   grid-template-columns: 1fr 1fr;

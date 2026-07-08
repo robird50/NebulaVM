@@ -98,16 +98,53 @@ app.innerHTML = `
         <button class="secondary full-width" id="demoButton" type="button">Demo boot image</button>
 
         <div class="field-grid">
-          <label class="field full-span">
-            <span>Emulator</span>
-            <select id="emulatorMode">
+          <div class="field full-span emulator-field">
+            <span id="emulatorLabel">Emulator</span>
+            <select id="emulatorMode" aria-labelledby="emulatorLabel" hidden>
               <option value="v86">Nebula x86 / v86</option>
               <option value="qemu-x64">Nebula x64 / QEMU Wasm</option>
               <option value="native-qemu">Native QEMU / large ISO</option>
               <option value="native-qemu-arm64">Native QEMU ARM64 / Windows ARM</option>
               <option value="remote-vm">Remote VM / browser stream</option>
             </select>
-          </label>
+            <div class="emulator-dropdown">
+              <button
+                class="emulator-select"
+                id="emulatorSelectButton"
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-labelledby="emulatorLabel emulatorSelectedText"
+              >
+                <span class="emulator-selected">
+                  <img class="emulator-menu-icon" id="emulatorSelectedIcon" src="/assets/nebulavm-emulator-icon.png" alt="" />
+                  <span id="emulatorSelectedText">Nebula x86 / v86</span>
+                </span>
+              </button>
+              <div class="emulator-menu" id="emulatorMenu" role="listbox" aria-labelledby="emulatorLabel" hidden>
+                <button class="emulator-menu-option is-selected" type="button" role="option" aria-selected="true" data-emulator-option="v86">
+                  <img class="emulator-menu-icon" src="/assets/nebulavm-emulator-icon.png" alt="" />
+                  <span>Nebula x86 / v86</span>
+                </button>
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="qemu-x64">
+                  <img class="emulator-menu-icon" src="/assets/nebulavm-emulator-icon.png" alt="" />
+                  <span>Nebula x64 / QEMU Wasm</span>
+                </button>
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu">
+                  <span class="emulator-menu-icon emulator-menu-icon-empty" aria-hidden="true"></span>
+                  <span>Native QEMU / large ISO</span>
+                </button>
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu-arm64">
+                  <span class="emulator-menu-icon emulator-menu-icon-empty" aria-hidden="true"></span>
+                  <span>Native QEMU ARM64 / Windows ARM</span>
+                </button>
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="remote-vm">
+                  <span class="emulator-menu-icon emulator-menu-icon-empty" aria-hidden="true"></span>
+                  <span>Remote VM / browser stream</span>
+                </button>
+              </div>
+            </div>
+          </div>
 
           <label class="field full-span">
             <span>Processor</span>
@@ -274,6 +311,11 @@ const els = {
   mediaWarning: document.querySelector("#mediaWarning"),
   demoButton: document.querySelector("#demoButton"),
   emulatorMode: document.querySelector("#emulatorMode"),
+  emulatorSelectButton: document.querySelector("#emulatorSelectButton"),
+  emulatorSelectedIcon: document.querySelector("#emulatorSelectedIcon"),
+  emulatorSelectedText: document.querySelector("#emulatorSelectedText"),
+  emulatorMenu: document.querySelector("#emulatorMenu"),
+  emulatorMenuOptions: [...document.querySelectorAll("[data-emulator-option]")],
   processorMode: document.querySelector("#processorMode"),
   nativePanel: document.querySelector("#nativePanel"),
   nativeIsoPath: document.querySelector("#nativeIsoPath"),
@@ -379,6 +421,27 @@ const isRemoteMode = () => els.emulatorMode.value === "remote-vm";
 const isQemuMode = () => isBrowserQemuMode() || isNativeMode();
 const isExternalMode = () => isQemuMode() || isRemoteMode();
 const nativeArchitecture = () => (isNativeArm64Mode() ? "aarch64" : "x86_64");
+const isNebulaEmulator = (value) => value === "v86" || value === "qemu-x64";
+
+const getEmulatorLabel = (value) =>
+  [...els.emulatorMode.options].find((option) => option.value === value)?.textContent || value;
+
+const setEmulatorMenuOpen = (open) => {
+  els.emulatorMenu.hidden = !open;
+  els.emulatorSelectButton.setAttribute("aria-expanded", String(open));
+};
+
+const syncEmulatorDropdown = () => {
+  const selectedValue = els.emulatorMode.value;
+  els.emulatorSelectedText.textContent = getEmulatorLabel(selectedValue);
+  els.emulatorSelectedIcon.classList.toggle("emulator-menu-icon-empty", !isNebulaEmulator(selectedValue));
+
+  els.emulatorMenuOptions.forEach((option) => {
+    const selected = option.dataset.emulatorOption === selectedValue;
+    option.classList.toggle("is-selected", selected);
+    option.setAttribute("aria-selected", String(selected));
+  });
+};
 
 const isSelectedMediaTooLarge = () =>
   isBrowserQemuMode() &&
@@ -838,6 +901,7 @@ const updateBackendUi = () => {
   const nativeArm64Mode = isNativeArm64Mode();
   const remoteMode = isRemoteMode();
   const externalMode = isExternalMode();
+  syncEmulatorDropdown();
   els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode ? "x64" : "x86";
   els.nativePanel.hidden = !nativeMode;
   els.remotePanel.hidden = !remoteMode;
@@ -870,6 +934,27 @@ const updateBackendUi = () => {
 };
 
 els.emulatorMode.addEventListener("change", updateBackendUi);
+els.emulatorSelectButton.addEventListener("click", () => {
+  setEmulatorMenuOpen(els.emulatorMenu.hidden);
+});
+els.emulatorMenuOptions.forEach((option) => {
+  option.addEventListener("click", () => {
+    els.emulatorMode.value = option.dataset.emulatorOption;
+    setEmulatorMenuOpen(false);
+    updateBackendUi();
+    els.emulatorSelectButton.focus();
+  });
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".emulator-dropdown")) {
+    setEmulatorMenuOpen(false);
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    setEmulatorMenuOpen(false);
+  }
+});
 els.processorMode.addEventListener("change", () => {
   els.emulatorMode.value =
     els.processorMode.value === "arm64" ? "native-qemu-arm64" : els.processorMode.value === "x64" ? "qemu-x64" : "v86";
