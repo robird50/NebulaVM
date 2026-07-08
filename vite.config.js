@@ -214,6 +214,8 @@ const startNativeVm = async (body) => {
   const cdBootIndex = diskFirst ? 2 : 1;
   const diskBootIndex = diskFirst ? 1 : 2;
   const qemuBootDevice = diskFirst ? "c" : "d";
+  const displayMode = body.displayMode === "external" ? "external" : "viewport";
+  const embeddedDisplay = displayMode === "viewport";
   const vmDir = resolve(workspaceDir, "vm-disks");
   const diskPath = resolve(vmDir, nativeDiskName(profile));
   mkdirSync(vmDir, { recursive: true });
@@ -237,7 +239,7 @@ const startNativeVm = async (body) => {
   }
 
   const ovmf = findFirmware(arch, qemu);
-  const vnc = await findAvailableVncDisplay();
+  const vnc = embeddedDisplay ? await findAvailableVncDisplay() : null;
   const args =
     arch === "aarch64"
       ? [
@@ -292,7 +294,9 @@ const startNativeVm = async (body) => {
     args.push("-bios", ovmf);
   }
 
-  args.push("-display", "none", "-vnc", `${nativeVncHost}:${vnc.display}`);
+  if (embeddedDisplay) {
+    args.push("-display", "none", "-vnc", `${nativeVncHost}:${vnc.display}`);
+  }
 
   if (body.createDisk !== false && existsSync(diskPath)) {
     if (arch === "aarch64") {
@@ -311,11 +315,11 @@ const startNativeVm = async (body) => {
   const child = spawn(qemu, args, {
     cwd: workspaceDir,
     detached: false,
-    windowsHide: true,
+    windowsHide: embeddedDisplay,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  child.vncPort = vnc.port;
+  child.vncPort = vnc?.port || null;
   nativeVm = child;
   let recentOutput = "";
   const capture = (chunk) => {
@@ -330,12 +334,14 @@ const startNativeVm = async (body) => {
     nativeVm = null;
   });
 
-  try {
-    await waitForTcpPort(vnc.port);
-  } catch (error) {
-    child.kill();
-    nativeVm = null;
-    throw error;
+  if (embeddedDisplay) {
+    try {
+      await waitForTcpPort(vnc.port);
+    } catch (error) {
+      child.kill();
+      nativeVm = null;
+      throw error;
+    }
   }
 
   return {
@@ -345,10 +351,11 @@ const startNativeVm = async (body) => {
     qemu,
     args,
     bootOrder: diskFirst ? "disk-first" : "cdrom-first",
+    displayMode,
     diskPath: existsSync(diskPath) ? diskPath : null,
     ovmf,
-    vncPath: nativeVncPath,
-    vncPort: vnc.port,
+    vncPath: embeddedDisplay ? nativeVncPath : null,
+    vncPort: vnc?.port || null,
     get recentOutput() {
       return recentOutput;
     },
@@ -429,6 +436,7 @@ const nativeQemuPlugin = () => ({
             profile: result.profile,
             qemu: result.qemu,
             diskPath: result.diskPath,
+            displayMode: result.displayMode,
             ovmf: result.ovmf,
             vncPath: result.vncPath,
           });

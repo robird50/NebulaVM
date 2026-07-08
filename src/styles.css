@@ -590,6 +590,45 @@ input[type="text"] {
   color: #220607;
 }
 
+.display-choice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(3, 5, 7, 0.68);
+  backdrop-filter: blur(10px);
+}
+
+.display-choice-overlay[hidden] {
+  display: none;
+}
+
+.display-choice-panel {
+  display: grid;
+  gap: 16px;
+  width: min(520px, 100%);
+  padding: 22px;
+  border: 1px solid rgba(145, 217, 207, 0.26);
+  border-radius: 8px;
+  background: #111720;
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.42);
+}
+
+.display-choice-panel h2 {
+  margin: 0;
+  color: #f5f8fb;
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  line-height: 1.35;
+}
+
+.display-choice-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .console-area {
   display: grid;
   gap: 14px;
@@ -933,7 +972,8 @@ pre {
 
   .field-grid,
   .button-row,
-  .button-row.compact {
+  .button-row.compact,
+  .display-choice-actions {
     grid-template-columns: 1fr;
   }
 

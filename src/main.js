@@ -319,6 +319,17 @@ app.innerHTML = `
     </section>
     <footer class="commit-id">Commit ${COMMIT_ID}</footer>
   </main>
+
+  <div class="display-choice-overlay" id="qemuDisplayDialog" role="dialog" aria-modal="true" aria-labelledby="qemuDisplayTitle" hidden>
+    <section class="display-choice-panel">
+      <p class="kicker">QEMU Display</p>
+      <h2 id="qemuDisplayTitle">Do you want to run QEMU as an external window or inside ISO viewport?</h2>
+      <div class="display-choice-actions">
+        <button class="secondary" id="qemuExternalDisplayButton" type="button">External</button>
+        <button class="primary" id="qemuViewportDisplayButton" type="button">ISO Viewport</button>
+      </div>
+    </section>
+  </div>
 `;
 
 const els = {
@@ -371,6 +382,9 @@ const els = {
   ramMetric: document.querySelector("#ramMetric"),
   logOutput: document.querySelector("#logOutput"),
   clearLogButton: document.querySelector("#clearLogButton"),
+  qemuDisplayDialog: document.querySelector("#qemuDisplayDialog"),
+  qemuExternalDisplayButton: document.querySelector("#qemuExternalDisplayButton"),
+  qemuViewportDisplayButton: document.querySelector("#qemuViewportDisplayButton"),
 };
 
 const formatBytes = (bytes) => {
@@ -390,6 +404,21 @@ const log = (message) => {
   els.logOutput.textContent += `[${time}] ${message}\n`;
   els.logOutput.scrollTop = els.logOutput.scrollHeight;
 };
+
+let qemuDisplayChoiceResolver = null;
+
+const chooseQemuDisplayMode = (mode) => {
+  els.qemuDisplayDialog.hidden = true;
+  qemuDisplayChoiceResolver?.(mode);
+  qemuDisplayChoiceResolver = null;
+};
+
+const askQemuDisplayMode = () =>
+  new Promise((resolve) => {
+    qemuDisplayChoiceResolver = resolve;
+    els.qemuDisplayDialog.hidden = false;
+    els.qemuViewportDisplayButton.focus();
+  });
 
 const nativeQemuBridgeMessage =
   "Native QEMU needs a local bridge. Run NebulaVM locally with npm run dev, then keep this hosted page open.";
@@ -933,12 +962,22 @@ const bootQemuX64 = async () => {
   await state.emulator.start();
 };
 
-const bootNativeQemu = async () => {
+const showNativeDisplayStatus = (message) => {
+  els.nativeDisplay.hidden = false;
+  const status = document.createElement("span");
+  status.className = "native-display-status";
+  status.textContent = message;
+  els.nativeDisplay.replaceChildren(status);
+};
+
+const bootNativeQemu = async (displayMode = "viewport") => {
   els.screenContainer.querySelector(".vga-text").hidden = true;
   els.screenContainer.querySelector(".vga-canvas").hidden = true;
   els.qemuTerminal.hidden = true;
   els.qemuTerminal.textContent = "";
-  els.nativeDisplay.hidden = false;
+  showNativeDisplayStatus(
+    displayMode === "external" ? "QEMU is running in an external window." : "Preparing ISO viewport display...",
+  );
 
   const { response, data: result, base } = await fetchNativeQemuJson("start", {
     method: "POST",
@@ -946,6 +985,7 @@ const bootNativeQemu = async () => {
     body: JSON.stringify({
       arch: nativeArchitecture(),
       profile: nativeProfile(),
+      displayMode,
       isoPath: els.nativeIsoPath.value.trim(),
       memoryMb: Number(els.memorySize.value) / 1024 / 1024,
       bootOrder: els.bootOrder.value,
@@ -957,7 +997,7 @@ const bootNativeQemu = async () => {
     throw new Error(result.error || "Native QEMU failed to start.");
   }
 
-  const rfb = connectNativeDisplay(base, result.vncPath);
+  const rfb = result.vncPath ? connectNativeDisplay(base, result.vncPath) : null;
   state.nativeRfb = rfb;
   state.emulator = {
     stop: async () => {
@@ -977,13 +1017,18 @@ const bootNativeQemu = async () => {
         : "Native QEMU";
   setPowerState(nativeLabel, "running");
   updateButtons();
-  log(`${nativeLabel} started in the browser display (pid ${result.pid}).`);
+  log(
+    `${nativeLabel} started ${
+      result.displayMode === "external" ? "in an external window" : "in the browser display"
+    } (pid ${result.pid}).`,
+  );
   if (base !== window.location.origin) log(`Using local bridge: ${base}`);
   if (result.arch) log(`Native architecture: ${result.arch}.`);
   if (result.profile) log(`Native profile: ${result.profile}.`);
   if (result.diskPath) log(`Using install disk: ${result.diskPath}`);
   if (result.ovmf) log(`Using UEFI firmware: ${result.ovmf}`);
   if (result.vncPath) log("Native QEMU display is embedded in the browser display box.");
+  if (result.displayMode === "external") log("Native QEMU display is running in an external desktop window.");
 };
 
 const normalizeRemoteUrl = (url) => {
@@ -1035,6 +1080,13 @@ const bootEmulator = async () => {
     log(`Boot blocked: ${els.mediaWarning.textContent}`);
     return;
   }
+
+  const qemuDisplayMode = isNativeMode() ? await askQemuDisplayMode() : "viewport";
+  if (!qemuDisplayMode) {
+    log("Boot canceled.");
+    return;
+  }
+
   await stopEmulator();
 
   prepareBootUi();
@@ -1044,7 +1096,7 @@ const bootEmulator = async () => {
     if (isRemoteMode()) {
       await bootRemoteVm();
     } else if (isNativeMode()) {
-      await bootNativeQemu();
+      await bootNativeQemu(qemuDisplayMode);
     } else if (isBrowserQemuMode()) {
       await bootQemuX64();
     } else {
@@ -1254,6 +1306,9 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     setEmulatorMenuOpen(false);
+    if (!els.qemuDisplayDialog.hidden) {
+      chooseQemuDisplayMode(null);
+    }
   }
 });
 els.processorMode.addEventListener("change", () => {
@@ -1286,6 +1341,8 @@ const toggleFullscreen = async () => {
 
 els.fullscreenButton.addEventListener("click", toggleFullscreen);
 document.addEventListener("fullscreenchange", updateFullscreenButton);
+els.qemuExternalDisplayButton.addEventListener("click", () => chooseQemuDisplayMode("external"));
+els.qemuViewportDisplayButton.addEventListener("click", () => chooseQemuDisplayMode("viewport"));
 
 els.clearLogButton.addEventListener("click", () => {
   els.logOutput.textContent = "";
