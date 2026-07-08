@@ -1,8 +1,10 @@
 import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
+import net from "node:net";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import WebSocket, { WebSocketServer } from "ws";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 
@@ -107,6 +109,54 @@ const findFirmware = (arch, qemuPath) => {
 };
 
 let nativeVm = null;
+const nativeVncHost = "127.0.0.1";
+const nativeVncPath = "/api/native-qemu/vnc";
+
+const isPortAvailable = (port) =>
+  new Promise((resolvePort) => {
+    const server = net.createServer();
+    server.once("error", () => resolvePort(false));
+    server.listen(port, nativeVncHost, () => {
+      server.close(() => resolvePort(true));
+    });
+  });
+
+const findAvailableVncDisplay = async () => {
+  for (let display = 10; display < 100; display += 1) {
+    const port = 5900 + display;
+    if (await isPortAvailable(port)) {
+      return { display, port };
+    }
+  }
+
+  throw new Error("No local VNC ports are available for the native QEMU display.");
+};
+
+const waitForTcpPort = async (port, timeoutMs = 8000) => {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const connected = await new Promise((resolveConnection) => {
+      const socket = net.connect(port, nativeVncHost);
+      socket.once("connect", () => {
+        socket.end();
+        resolveConnection(true);
+      });
+      socket.once("error", () => resolveConnection(false));
+      socket.setTimeout(400, () => {
+        socket.destroy();
+        resolveConnection(false);
+      });
+    });
+
+    if (connected) return;
+    await new Promise((resolveDelay) => {
+      setTimeout(resolveDelay, 150);
+    });
+  }
+
+  throw new Error("Native QEMU started, but its embedded display did not become available.");
+};
 
 const normalizeArch = (arch) => (arch === "aarch64" ? "aarch64" : "x86_64");
 
@@ -122,6 +172,7 @@ const nativeStatus = (requestedArch = "x86_64") => {
     ovmf: findFirmware(arch, qemu),
     running: Boolean(nativeVm),
     pid: nativeVm?.pid || null,
+    embeddedDisplay: Boolean(nativeVm?.vncPort),
   };
 };
 
@@ -168,6 +219,7 @@ const startNativeVm = async (body) => {
   }
 
   const ovmf = findFirmware(arch, qemu);
+  const vnc = await findAvailableVncDisplay();
   const args =
     arch === "aarch64"
       ? [
@@ -222,6 +274,8 @@ const startNativeVm = async (body) => {
     args.push("-bios", ovmf);
   }
 
+  args.push("-display", "none", "-vnc", `${nativeVncHost}:${vnc.display}`);
+
   if (body.createDisk !== false && existsSync(diskPath)) {
     if (arch === "aarch64") {
       args.push("-drive", `if=none,id=systemdisk,file=${diskPath},format=qcow2`);
@@ -234,10 +288,11 @@ const startNativeVm = async (body) => {
   const child = spawn(qemu, args, {
     cwd: workspaceDir,
     detached: false,
-    windowsHide: false,
+    windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+  child.vncPort = vnc.port;
   nativeVm = child;
   let recentOutput = "";
   const capture = (chunk) => {
@@ -252,6 +307,14 @@ const startNativeVm = async (body) => {
     nativeVm = null;
   });
 
+  try {
+    await waitForTcpPort(vnc.port);
+  } catch (error) {
+    child.kill();
+    nativeVm = null;
+    throw error;
+  }
+
   return {
     pid: child.pid,
     arch,
@@ -259,6 +322,8 @@ const startNativeVm = async (body) => {
     args,
     diskPath: existsSync(diskPath) ? diskPath : null,
     ovmf,
+    vncPath: nativeVncPath,
+    vncPort: vnc.port,
     get recentOutput() {
       return recentOutput;
     },
@@ -268,6 +333,46 @@ const startNativeVm = async (body) => {
 const nativeQemuPlugin = () => ({
   name: "nebulavm-native-qemu",
   configureServer(server) {
+    const nativeVncWss = new WebSocketServer({ noServer: true });
+
+    nativeVncWss.on("connection", (socket) => {
+      if (!nativeVm?.vncPort) {
+        socket.close(1011, "Native QEMU VNC display is not ready.");
+        return;
+      }
+
+      const vncSocket = net.connect(nativeVm.vncPort, nativeVncHost);
+      const closeBoth = () => {
+        vncSocket.destroy();
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.close();
+        }
+      };
+
+      vncSocket.on("data", (chunk) => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(chunk);
+        }
+      });
+      vncSocket.on("error", closeBoth);
+      vncSocket.on("close", closeBoth);
+      socket.on("message", (data) => {
+        const buffer = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data);
+        vncSocket.write(buffer);
+      });
+      socket.on("error", closeBoth);
+      socket.on("close", closeBoth);
+    });
+
+    server.httpServer?.on("upgrade", (req, socket, head) => {
+      const url = new URL(req.url || "/", "http://localhost");
+      if (url.pathname !== nativeVncPath) return;
+
+      nativeVncWss.handleUpgrade(req, socket, head, (ws) => {
+        nativeVncWss.emit("connection", ws, req);
+      });
+    });
+
     server.middlewares.use(async (req, res, next) => {
       const url = new URL(req.url || "/", "http://localhost");
       if (!url.pathname.startsWith("/api/native-qemu")) {
@@ -299,6 +404,7 @@ const nativeQemuPlugin = () => ({
             qemu: result.qemu,
             diskPath: result.diskPath,
             ovmf: result.ovmf,
+            vncPath: result.vncPath,
           });
           return;
         }

@@ -1,4 +1,5 @@
 import { V86 } from "v86";
+import RFB from "@novnc/novnc";
 import {
   QemuX64Emulator,
   MAX_BROWSER_MEDIA_BYTES,
@@ -45,6 +46,7 @@ const state = {
   nativeQemuApiAvailable: null,
   nativeQemuReady: false,
   nativeQemuApiBase: null,
+  nativeRfb: null,
 };
 
 app.innerHTML = `
@@ -285,6 +287,7 @@ app.innerHTML = `
             <div class="vga-text"></div>
             <canvas class="vga-canvas"></canvas>
             <pre class="qemu-terminal" id="qemuTerminal" hidden></pre>
+            <div class="native-display" id="nativeDisplay" hidden></div>
             <iframe class="remote-frame" id="remoteFrame" title="Remote VM display" hidden></iframe>
             <div class="screen-placeholder" id="screenPlaceholder">
               <span class="orbital"></span>
@@ -347,6 +350,7 @@ const els = {
   screenContainer: document.querySelector("#screenContainer"),
   screenPlaceholder: document.querySelector("#screenPlaceholder"),
   qemuTerminal: document.querySelector("#qemuTerminal"),
+  nativeDisplay: document.querySelector("#nativeDisplay"),
   remoteFrame: document.querySelector("#remoteFrame"),
   placeholderMeta: document.querySelector("#placeholderMeta"),
   machineTitle: document.querySelector("#machineTitle"),
@@ -409,6 +413,39 @@ const fetchNativeQemuJson = async (path, options) => {
   }
 
   throw new Error(lastError.message || nativeQemuBridgeMessage);
+};
+
+const nativeWebSocketUrl = (base, path) => {
+  const url = new URL(path, base);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+};
+
+const connectNativeDisplay = (base, vncPath) => {
+  if (!vncPath) return null;
+
+  els.nativeDisplay.hidden = false;
+  const status = document.createElement("span");
+  status.className = "native-display-status";
+  status.textContent = "Connecting to native QEMU display...";
+  els.nativeDisplay.replaceChildren(status);
+
+  const rfb = new RFB(els.nativeDisplay, nativeWebSocketUrl(base, vncPath));
+  rfb.scaleViewport = true;
+  rfb.resizeSession = false;
+  rfb.viewOnly = false;
+  rfb.focusOnClick = true;
+  rfb.addEventListener("connect", () => {
+    status.remove();
+    log("Native QEMU display connected in browser.");
+  });
+  rfb.addEventListener("disconnect", () => {
+    if (state.emulator) {
+      log("Native QEMU display disconnected.");
+    }
+  });
+
+  return rfb;
 };
 
 const setPowerState = (label, mode = "off") => {
@@ -577,6 +614,9 @@ const stopEmulator = async () => {
   els.screenContainer.querySelector(".vga-canvas").hidden = false;
   els.qemuTerminal.textContent = "";
   els.qemuTerminal.hidden = true;
+  els.nativeDisplay.replaceChildren();
+  els.nativeDisplay.hidden = true;
+  state.nativeRfb = null;
   els.remoteFrame.src = "about:blank";
   els.remoteFrame.hidden = true;
   updateButtons();
@@ -679,8 +719,9 @@ const bootQemuX64 = async () => {
 const bootNativeQemu = async () => {
   els.screenContainer.querySelector(".vga-text").hidden = true;
   els.screenContainer.querySelector(".vga-canvas").hidden = true;
-  els.qemuTerminal.hidden = false;
-  els.qemuTerminal.textContent = "Starting native QEMU...\n";
+  els.qemuTerminal.hidden = true;
+  els.qemuTerminal.textContent = "";
+  els.nativeDisplay.hidden = false;
 
   const { response, data: result, base } = await fetchNativeQemuJson("start", {
     method: "POST",
@@ -697,11 +738,16 @@ const bootNativeQemu = async () => {
     throw new Error(result.error || "Native QEMU failed to start.");
   }
 
+  const rfb = connectNativeDisplay(base, result.vncPath);
+  state.nativeRfb = rfb;
   state.emulator = {
     stop: async () => {
+      rfb?.disconnect();
       await fetchNativeQemuJson("stop", { method: "POST" });
     },
-    destroy: async () => {},
+    destroy: async () => {
+      rfb?.disconnect();
+    },
   };
   state.running = true;
   const nativeLabel = result.arch === "aarch64" ? "Native ARM64 QEMU" : "Native QEMU";
@@ -712,7 +758,7 @@ const bootNativeQemu = async () => {
   if (result.arch) log(`Native architecture: ${result.arch}.`);
   if (result.diskPath) log(`Using install disk: ${result.diskPath}`);
   if (result.ovmf) log(`Using UEFI firmware: ${result.ovmf}`);
-  els.qemuTerminal.textContent += `${nativeLabel} started.\nPID: ${result.pid}\n`;
+  if (result.vncPath) log("Native QEMU display is embedded in the browser display box.");
 };
 
 const normalizeRemoteUrl = (url) => {
