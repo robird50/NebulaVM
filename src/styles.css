@@ -46,6 +46,15 @@ button:disabled {
   padding: 28px;
 }
 
+.commit-id {
+  display: block;
+  margin-top: 22px;
+  color: rgba(174, 185, 200, 0.62);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: center;
+}
+
 .mobile-unsupported {
   display: none;
   width: min(1080px, 100%);

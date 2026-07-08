@@ -1,10 +1,33 @@
 import { defineConfig } from "vite";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
+
+const resolveCommitId = () => {
+  if (process.env.COMMIT_REF) {
+    return process.env.COMMIT_REF.slice(0, 7);
+  }
+
+  const gitCommands = ["git", "C:\\Program Files\\Git\\cmd\\git.exe"];
+  for (const gitCommand of gitCommands) {
+    try {
+      return execFileSync(gitCommand, ["rev-parse", "--short", "HEAD"], {
+        cwd: workspaceDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    } catch {
+      // Try the next Git path.
+    }
+  }
+
+  return "local";
+};
+
+const commitId = resolveCommitId();
 
 const isolationHeaders = {
   "Cross-Origin-Opener-Policy": "same-origin",
@@ -299,6 +322,9 @@ const nativeQemuPlugin = () => ({
 
 export default defineConfig({
   plugins: [nativeQemuPlugin()],
+  define: {
+    __NEBULAVM_COMMIT__: JSON.stringify(commitId),
+  },
   server: {
     cors: false,
     headers: isolationHeaders,

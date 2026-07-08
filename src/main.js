@@ -8,6 +8,7 @@ import {
 import "./styles.css";
 
 const app = document.querySelector("#app");
+const COMMIT_ID = typeof __NEBULAVM_COMMIT__ === "string" ? __NEBULAVM_COMMIT__ : "local";
 
 const isMobileOrTabletDevice = () => {
   if (navigator.userAgentData?.mobile) {
@@ -54,6 +55,7 @@ app.innerHTML = `
       <p>NebulaVM is currently available only on desktop and laptop browsers. Mobile and tablet support is still in development.</p>
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
     </section>
+    <small class="commit-id">Commit ${COMMIT_ID}</small>
   </main>
 
   <main class="shell">
@@ -301,6 +303,7 @@ app.innerHTML = `
         </div>
       </section>
     </section>
+    <footer class="commit-id">Commit ${COMMIT_ID}</footer>
   </main>
 `;
 
