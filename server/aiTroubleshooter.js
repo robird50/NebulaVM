@@ -52,7 +52,7 @@ const buildUserText = ({ message, imageSummary, context }) => {
 };
 
 export const callAiTroubleshooter = async (body, env = process.env) => {
-  const apiKey = env.OPENAI_API_KEY;
+  const apiKey = env.OPENAI_API_KEY || env["\uFEFFOPENAI_API_KEY"];
   if (!apiKey) {
     return {
       ok: false,
