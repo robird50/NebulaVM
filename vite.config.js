@@ -64,27 +64,39 @@ const candidateExecutables = (name) => {
 
 const findExecutable = (name) => candidateExecutables(name).find((candidate) => existsSync(candidate));
 
-const findOvmf = (qemuPath) => {
+const findFirmware = (arch, qemuPath) => {
   const qemuDir = qemuPath ? dirname(qemuPath) : "";
-  const candidates = [
-    join(qemuDir, "share", "edk2-x86_64-code.fd"),
-    join(qemuDir, "..", "share", "edk2-x86_64-code.fd"),
-    "C:\\Program Files\\qemu\\share\\edk2-x86_64-code.fd",
-    "C:\\Program Files\\qemu\\share\\qemu\\edk2-x86_64-code.fd",
-  ];
+  const candidates =
+    arch === "aarch64"
+      ? [
+          join(qemuDir, "share", "edk2-aarch64-code.fd"),
+          join(qemuDir, "..", "share", "edk2-aarch64-code.fd"),
+          "C:\\Program Files\\qemu\\share\\edk2-aarch64-code.fd",
+          "C:\\Program Files\\qemu\\share\\qemu\\edk2-aarch64-code.fd",
+        ]
+      : [
+          join(qemuDir, "share", "edk2-x86_64-code.fd"),
+          join(qemuDir, "..", "share", "edk2-x86_64-code.fd"),
+          "C:\\Program Files\\qemu\\share\\edk2-x86_64-code.fd",
+          "C:\\Program Files\\qemu\\share\\qemu\\edk2-x86_64-code.fd",
+        ];
   return candidates.map((candidate) => normalize(candidate)).find((candidate) => existsSync(candidate));
 };
 
 let nativeVm = null;
 
-const nativeStatus = () => {
-  const qemu = findExecutable("qemu-system-x86_64");
+const normalizeArch = (arch) => (arch === "aarch64" ? "aarch64" : "x86_64");
+
+const nativeStatus = (requestedArch = "x86_64") => {
+  const arch = normalizeArch(requestedArch);
+  const qemu = findExecutable(arch === "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64");
   const qemuImg = findExecutable("qemu-img");
   return {
     available: Boolean(qemu),
+    arch,
     qemu,
     qemuImg,
-    ovmf: findOvmf(qemu),
+    ovmf: findFirmware(arch, qemu),
     running: Boolean(nativeVm),
     pid: nativeVm?.pid || null,
   };
@@ -95,9 +107,12 @@ const startNativeVm = async (body) => {
     throw new Error(`A native QEMU VM is already running with pid ${nativeVm.pid}.`);
   }
 
-  const qemu = findExecutable("qemu-system-x86_64");
+  const arch = normalizeArch(body.arch);
+  const qemu = findExecutable(arch === "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64");
   if (!qemu) {
-    throw new Error("qemu-system-x86_64 was not found. Install QEMU for Windows and restart NebulaVM.");
+    throw new Error(
+      `${arch === "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64"} was not found. Install QEMU for Windows and restart NebulaVM.`,
+    );
   }
 
   const isoPath = stripPathQuotes(body.isoPath);
@@ -108,7 +123,7 @@ const startNativeVm = async (body) => {
   const memoryMb = Math.min(6144, Math.max(512, Number(body.memoryMb) || 2048));
   const diskSizeGb = Math.min(256, Math.max(32, Number(body.diskSizeGb) || 64));
   const vmDir = resolve(workspaceDir, "vm-disks");
-  const diskPath = resolve(vmDir, "nebulavm-native.qcow2");
+  const diskPath = resolve(vmDir, arch === "aarch64" ? "nebulavm-native-arm64.qcow2" : "nebulavm-native.qcow2");
   mkdirSync(vmDir, { recursive: true });
 
   const qemuImg = findExecutable("qemu-img");
@@ -129,35 +144,68 @@ const startNativeVm = async (body) => {
     });
   }
 
-  const ovmf = findOvmf(qemu);
-  const args = [
-    "-machine",
-    "q35",
-    "-cpu",
-    "qemu64",
-    "-smp",
-    "2",
-    "-m",
-    `${memoryMb}M`,
-    "-boot",
-    "d",
-    "-cdrom",
-    isoPath,
-    "-usb",
-    "-device",
-    "usb-tablet",
-    "-netdev",
-    "user,id=net0",
-    "-device",
-    "e1000,netdev=net0",
-  ];
+  const ovmf = findFirmware(arch, qemu);
+  const args =
+    arch === "aarch64"
+      ? [
+          "-machine",
+          "virt",
+          "-cpu",
+          "max",
+          "-smp",
+          "2",
+          "-m",
+          `${memoryMb}M`,
+          "-device",
+          "ramfb",
+          "-device",
+          "qemu-xhci",
+          "-device",
+          "usb-kbd",
+          "-device",
+          "usb-tablet",
+          "-drive",
+          `if=none,id=install,media=cdrom,readonly=on,file=${isoPath}`,
+          "-device",
+          "usb-storage,drive=install,bootindex=1",
+          "-netdev",
+          "user,id=net0",
+          "-device",
+          "virtio-net-pci,netdev=net0",
+        ]
+      : [
+          "-machine",
+          "q35",
+          "-cpu",
+          "qemu64",
+          "-smp",
+          "2",
+          "-m",
+          `${memoryMb}M`,
+          "-boot",
+          "d",
+          "-cdrom",
+          isoPath,
+          "-usb",
+          "-device",
+          "usb-tablet",
+          "-netdev",
+          "user,id=net0",
+          "-device",
+          "e1000,netdev=net0",
+        ];
 
   if (ovmf) {
     args.push("-bios", ovmf);
   }
 
   if (body.createDisk !== false && existsSync(diskPath)) {
-    args.push("-drive", `file=${diskPath},format=qcow2,if=ide`);
+    if (arch === "aarch64") {
+      args.push("-drive", `if=none,id=systemdisk,file=${diskPath},format=qcow2`);
+      args.push("-device", "usb-storage,drive=systemdisk,bootindex=2");
+    } else {
+      args.push("-drive", `file=${diskPath},format=qcow2,if=ide`);
+    }
   }
 
   const child = spawn(qemu, args, {
@@ -183,6 +231,7 @@ const startNativeVm = async (body) => {
 
   return {
     pid: child.pid,
+    arch,
     qemu,
     args,
     diskPath: existsSync(diskPath) ? diskPath : null,
@@ -197,7 +246,8 @@ const nativeQemuPlugin = () => ({
   name: "nebulavm-native-qemu",
   configureServer(server) {
     server.middlewares.use(async (req, res, next) => {
-      if (!req.url?.startsWith("/api/native-qemu")) {
+      const url = new URL(req.url || "/", "http://localhost");
+      if (!url.pathname.startsWith("/api/native-qemu")) {
         next();
         return;
       }
@@ -211,17 +261,18 @@ const nativeQemuPlugin = () => ({
       }
 
       try {
-        if (req.method === "GET" && req.url === "/api/native-qemu/status") {
-          json(res, 200, nativeStatus());
+        if (req.method === "GET" && url.pathname === "/api/native-qemu/status") {
+          json(res, 200, nativeStatus(url.searchParams.get("arch")));
           return;
         }
 
-        if (req.method === "POST" && req.url === "/api/native-qemu/start") {
+        if (req.method === "POST" && url.pathname === "/api/native-qemu/start") {
           const body = await readJsonBody(req);
           const result = await startNativeVm(body);
           json(res, 200, {
             ok: true,
             pid: result.pid,
+            arch: result.arch,
             qemu: result.qemu,
             diskPath: result.diskPath,
             ovmf: result.ovmf,
@@ -229,7 +280,7 @@ const nativeQemuPlugin = () => ({
           return;
         }
 
-        if (req.method === "POST" && req.url === "/api/native-qemu/stop") {
+        if (req.method === "POST" && url.pathname === "/api/native-qemu/stop") {
           if (nativeVm) {
             nativeVm.kill();
             nativeVm = null;

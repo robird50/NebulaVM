@@ -54,11 +54,12 @@ is several GB, the browser backend currently stages uploaded media into memory,
 and Windows 11 normally expects UEFI/Secure Boot/TPM support. Lightweight
 64-bit Linux ISOs are much more realistic.
 
-For large ISOs, use `Native QEMU / large ISO`. That mode runs
+For large x64 ISOs, use `Native QEMU / large ISO`. That mode runs
 `qemu-system-x86_64` from Windows instead of copying the ISO into browser
-memory. It needs QEMU for Windows installed, then you paste the full ISO path
-into the `Local ISO path` field. NebulaVM can create a qcow2 install disk in
-`vm-disks/`.
+memory. For Windows ARM64 ISOs, use `Native QEMU ARM64 / Windows ARM`, which
+runs `qemu-system-aarch64` with ARM64 UEFI firmware. Both modes need QEMU for
+Windows installed, then you paste the full ISO path into the `Local ISO path`
+field. NebulaVM can create a qcow2 install disk in `vm-disks/`.
 
 When NebulaVM is hosted on Netlify, Native QEMU can still work through a local
 bridge on the same PC. Start NebulaVM locally with `npm.cmd run dev`, keep that
