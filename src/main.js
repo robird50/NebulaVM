@@ -278,7 +278,11 @@ app.innerHTML = `
           </div>
           <div class="metric-row">
             <span id="uptimeMetric">00:00</span>
-            <span class="ai-summary-pill" id="viewportSummaryMetric">Waiting for boot media to start</span>
+            <span class="ai-summary-pill" id="viewportSummaryMetric" aria-live="polite">
+              <span class="ai-summary-stage">
+                <span class="ai-summary-text">Waiting for boot media to start</span>
+              </span>
+            </span>
             <span id="ramMetric">128 MB RAM</span>
             <button class="secondary compact-button" id="fullscreenButton" type="button">Fullscreen</button>
           </div>
@@ -559,7 +563,33 @@ const updateUptime = () => {
 };
 
 const setViewportSummary = (summary) => {
-  els.viewportSummaryMetric.textContent = summary;
+  const stage = els.viewportSummaryMetric.querySelector(".ai-summary-stage");
+  if (!stage) return;
+
+  const outgoing = stage.querySelector(".ai-summary-text.is-current") || stage.querySelector(".ai-summary-text");
+  const incoming = document.createElement("span");
+  incoming.className = "ai-summary-text is-entering";
+  incoming.textContent = summary;
+
+  if (!outgoing) {
+    incoming.classList.remove("is-entering");
+    incoming.classList.add("is-current");
+    stage.replaceChildren(incoming);
+    return;
+  }
+
+  outgoing.classList.remove("is-current", "is-entering");
+  outgoing.classList.add("is-leaving");
+
+  stage.append(incoming);
+  requestAnimationFrame(() => {
+    incoming.classList.remove("is-entering");
+    incoming.classList.add("is-current");
+  });
+
+  window.setTimeout(() => {
+    stage.querySelectorAll(".ai-summary-text.is-leaving").forEach((text) => text.remove());
+  }, 420);
 };
 
 const summarizeViewportText = (text) => {
@@ -1222,4 +1252,4 @@ log("NebulaVM ready.");
 updateBackendUi();
 updateButtons();
 updateViewportSummary();
-state.viewportSummaryTimer = window.setInterval(updateViewportSummary, 4000);
+state.viewportSummaryTimer = window.setInterval(updateViewportSummary, 3000);
