@@ -466,6 +466,42 @@ const fetchNativeQemuJson = async (path, options) => {
   throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
+const fetchAiTroubleshooterJson = async (payload) => {
+  const apiBases = [
+    window.location.origin,
+    state.nativeQemuApiBase,
+    "http://127.0.0.1:5174",
+    "http://localhost:5174",
+  ].filter(Boolean);
+  const uniqueApiBases = [...new Set(apiBases.map((base) => base.replace(/\/$/, "")))];
+  let lastError = new Error("AI Troubleshooter backend is unavailable.");
+
+  for (const base of uniqueApiBases) {
+    try {
+      const response = await fetch(`${base}/api/ai-troubleshooter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.toLowerCase().includes("application/json")) {
+        lastError = new Error("AI Troubleshooter backend returned a non-JSON response.");
+        continue;
+      }
+
+      const data = await response.json();
+      if (response.ok && data.ok) return { data, base };
+
+      lastError = new Error(data.error || `AI Troubleshooter request failed with status ${response.status}.`);
+    } catch (error) {
+      lastError = error instanceof TypeError ? new Error("AI Troubleshooter backend is unavailable.") : error;
+    }
+  }
+
+  throw lastError;
+};
+
 const nativeWebSocketUrl = (base, path) => {
   const url = new URL(path, base);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -1040,6 +1076,7 @@ const appendTroubleshooterMessage = (role, text, imageUrl = "") => {
 
   els.troubleshooterMessages.append(message);
   els.troubleshooterMessages.scrollTop = els.troubleshooterMessages.scrollHeight;
+  return message;
 };
 
 const analyzeTroubleshooterImage = (file) =>
@@ -1061,6 +1098,7 @@ const analyzeTroubleshooterImage = (file) =>
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
         resolve({
           dataUrl: String(reader.result),
+          apiImageDataUrl: canvas.toDataURL("image/jpeg", 0.82),
           name: file.name,
           summary: summarizeViewportCanvas(canvas) || "Screenshot attached for troubleshooting",
         });
@@ -1102,8 +1140,24 @@ const askTroubleshooter = async () => {
   if (!prompt && !image) return;
 
   appendTroubleshooterMessage("user", prompt || "Please troubleshoot this screenshot.", image?.dataUrl);
-  const reply = buildTroubleshooterReply(prompt, image?.summary || "");
-  appendTroubleshooterMessage("ai", reply);
+  const thinkingMessage = appendTroubleshooterMessage("ai", "Thinking through the error with the current VM context...");
+  const thinkingBody = thinkingMessage.querySelector("p");
+
+  try {
+    const { data, base } = await fetchAiTroubleshooterJson({
+      message: prompt,
+      imageDataUrl: image?.apiImageDataUrl || "",
+      imageSummary: image?.summary || "",
+      context: getTroubleshooterContext(),
+    });
+    thinkingBody.textContent =
+      base === window.location.origin ? data.text : `${data.text}\n\nSource: local AI bridge ${base}`;
+  } catch (error) {
+    thinkingBody.textContent = `${buildTroubleshooterReply(prompt, image?.summary || "")}\n\nAI service note: ${
+      error.message
+    }`;
+  }
+
   els.troubleshooterInput.value = "";
   clearTroubleshooterImage();
 };

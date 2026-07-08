@@ -68,6 +68,19 @@ terminal open, then use the Netlify site. The hosted app will try
 This is still required because browsers cannot launch desktop programs by
 themselves.
 
+## AI Troubleshooter
+
+The AI Troubleshooter uses a backend endpoint so the OpenAI API key never ships
+to the browser. For local development, create `.env.local`:
+
+```env
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-5.5
+```
+
+For Netlify, add the same variables in the site's Environment variables page.
+Do not commit API keys or paste them into frontend code.
+
 ## Chromebook Workaround
 
 A Chromebook cannot realistically run the Windows 11 ISO locally inside the
