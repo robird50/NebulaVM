@@ -132,14 +132,41 @@ function Start-Emustar {
   Assert-HyperVReady
 
   $isoPath = [string]$config.isoPath
-  if ([string]::IsNullOrWhiteSpace($isoPath) -or -not [IO.Path]::IsPathRooted($isoPath)) {
-    throw "Enter an absolute ISO path, such as C:\Users\Dell\Downloads\Win11.iso."
+  $isoProvided = -not [string]::IsNullOrWhiteSpace($isoPath)
+  if ($isoProvided) {
+    if (-not [IO.Path]::IsPathRooted($isoPath)) {
+      throw "Enter an absolute ISO path, such as C:\Users\Dell\Downloads\Win11.iso."
+    }
+    if (-not (Test-Path -LiteralPath $isoPath -PathType Leaf)) {
+      throw "The ISO file does not exist: $isoPath"
+    }
+    if ([IO.Path]::GetExtension($isoPath) -ne ".iso") {
+      throw "EMUSTAR Hyper-V currently accepts CD-ROM ISO files."
+    }
   }
-  if (-not (Test-Path -LiteralPath $isoPath -PathType Leaf)) {
-    throw "The ISO file does not exist: $isoPath"
+
+  $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+  if ($vm -and -not $isoProvided) {
+    Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown
+    if ($vm.State -eq "Off") {
+      Start-VM -VM $vm | Out-Null
+      $vm = Get-VM -Name $vmName
+    }
+    if ([string]$config.displayMode -eq "external") {
+      Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
+    }
+    return [ordered]@{
+      ok = $true
+      engine = "Microsoft Hyper-V"
+      created = $false
+      bootOrder = "disk-first"
+      displayMode = [string]$config.displayMode
+      vm = Get-VmSnapshot -Vm $vm
+      warnings = $warnings
+    }
   }
-  if ([IO.Path]::GetExtension($isoPath) -ne ".iso") {
-    throw "EMUSTAR Hyper-V currently accepts CD-ROM ISO files."
+  if (-not $vm -and -not $isoProvided) {
+    throw "Choose an ISO the first time EMUSTAR creates a Windows VM."
   }
 
   $memoryMb = [math]::Min(6144, [math]::Max(2048, [int]$config.memoryMb))
@@ -153,8 +180,6 @@ function Start-Emustar {
 
   New-Item -ItemType Directory -Path $vmDirectory -Force | Out-Null
   $vhdPath = Join-Path $vmDirectory "nebulavm-emustar.vhdx"
-  $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
-
   if (-not $vm) {
     if (-not (Test-Path -LiteralPath $vhdPath)) {
       New-VHD -Path $vhdPath -Dynamic -SizeBytes ($diskSizeGb * 1GB) | Out-Null
@@ -184,7 +209,7 @@ function Start-Emustar {
     $vm = Get-VM -Name $vmName
   }
 
-  Set-VM -VM $vm -AutomaticStartAction Nothing -AutomaticStopAction ShutDown -CheckpointType Disabled
+  Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown -CheckpointType Disabled
   $hostMemoryBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
   if ($hostMemoryBytes -le 10GB -and $memoryMb -gt 2048) {
     Set-VMMemory -VM $vm `

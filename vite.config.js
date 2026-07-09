@@ -11,6 +11,8 @@ import WebSocket, { WebSocketServer } from "ws";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
+const publicUrlPath = resolve(workspaceDir, ".nebulavm-public-url");
+const guestCredentialsPath = resolve(workspaceDir, ".nebulavm-guest-credentials.json");
 
 const resolveHostAccessToken = () => {
   const environmentToken = String(process.env.NEBULAVM_HOST_TOKEN || "").trim();
@@ -215,6 +217,7 @@ let lastNativeExit = null;
 let activeNativeRuntimeName = null;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
+const hyperVGuestVncPath = "/api/emustar-hyperv/vnc";
 const hyperVScriptPath = resolve(workspaceDir, "scripts", "emustar-hyperv.ps1");
 
 const runHyperVAction = (action, config = {}) =>
@@ -309,6 +312,62 @@ const waitForTcpPort = async (port, timeoutMs = 8000) => {
   }
 
   throw new Error("Native QEMU started, but its embedded display did not become available.");
+};
+
+const canConnectToTcpPort = (host, port, timeoutMs = 700) =>
+  new Promise((resolveConnection) => {
+    if (!host) {
+      resolveConnection(false);
+      return;
+    }
+    const socket = net.connect(port, host);
+    let settled = false;
+    const finish = (connected) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolveConnection(connected);
+    };
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.setTimeout(timeoutMs, () => finish(false));
+  });
+
+const withHyperVDisplayStatus = async (status) => {
+  const addresses = (status.vm?.ipAddresses || [])
+    .filter((address) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(address))
+    .sort((left, right) => {
+      const leftIsDisplay = left.startsWith("192.168.231.");
+      const rightIsDisplay = right.startsWith("192.168.231.");
+      return Number(rightIsDisplay) - Number(leftIsDisplay);
+    });
+  const connectivity = await Promise.all(
+    addresses.map(async (address) => ({
+      address,
+      reachable: await canConnectToTcpPort(address, 5900),
+    })),
+  );
+  const guestAddress =
+    connectivity.find(({ reachable }) => reachable)?.address || addresses[0] || null;
+  const vncReady = connectivity.some(({ reachable }) => reachable);
+  let vncPassword = "";
+  if (existsSync(guestCredentialsPath)) {
+    try {
+      const credentials = JSON.parse(
+        readFileSync(guestCredentialsPath, "utf8").replace(/^\uFEFF/, ""),
+      );
+      vncPassword = credentials.vncPassword || "";
+    } catch {
+      vncPassword = "";
+    }
+  }
+  return {
+    ...status,
+    guestAddress,
+    vncPath: hyperVGuestVncPath,
+    vncReady,
+    vncPassword,
+  };
 };
 
 const normalizeArch = (arch) => (arch === "aarch64" ? "aarch64" : "x86_64");
@@ -593,6 +652,7 @@ const nativeQemuPlugin = () => ({
   name: "nebulavm-native-qemu",
   configureServer(server) {
     const nativeVncWss = new WebSocketServer({ noServer: true });
+    const hyperVGuestVncWss = new WebSocketServer({ noServer: true });
 
     nativeVncWss.on("connection", (socket) => {
       if (!nativeVm?.vncPort) {
@@ -623,17 +683,51 @@ const nativeQemuPlugin = () => ({
       socket.on("close", closeBoth);
     });
 
+    hyperVGuestVncWss.on("connection", async (socket) => {
+      try {
+        const status = await withHyperVDisplayStatus(await runHyperVAction("Status"));
+        if (!status.guestAddress || !status.vncReady) {
+          socket.close(1011, "The EMUSTAR guest display is not ready.");
+          return;
+        }
+
+        const vncSocket = net.connect(5900, status.guestAddress);
+        const closeBoth = () => {
+          vncSocket.destroy();
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.close();
+          }
+        };
+        vncSocket.on("data", (chunk) => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(chunk);
+          }
+        });
+        vncSocket.on("error", closeBoth);
+        vncSocket.on("close", closeBoth);
+        socket.on("message", (data) => {
+          const buffer = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data);
+          vncSocket.write(buffer);
+        });
+        socket.on("error", closeBoth);
+        socket.on("close", closeBoth);
+      } catch {
+        socket.close(1011, "The EMUSTAR guest display could not be reached.");
+      }
+    });
+
     server.httpServer?.on("upgrade", (req, socket, head) => {
       const url = new URL(req.url || "/", "http://localhost");
-      if (url.pathname !== nativeVncPath) return;
+      if (url.pathname !== nativeVncPath && url.pathname !== hyperVGuestVncPath) return;
       if (!isAuthorizedHostRequest(req, url)) {
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
       }
 
-      nativeVncWss.handleUpgrade(req, socket, head, (ws) => {
-        nativeVncWss.emit("connection", ws, req);
+      const targetWss = url.pathname === hyperVGuestVncPath ? hyperVGuestVncWss : nativeVncWss;
+      targetWss.handleUpgrade(req, socket, head, (ws) => {
+        targetWss.emit("connection", ws, req);
       });
     });
 
@@ -671,30 +765,34 @@ const nativeQemuPlugin = () => ({
                 (address) => `http://${address}:${port}/#token=${encodeURIComponent(hostAccessToken)}`,
               )
             : [];
+          const publicUrl = existsSync(publicUrlPath)
+            ? readFileSync(publicUrlPath, "utf8").trim().replace(/\/$/, "")
+            : "";
+          if (/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/i.test(publicUrl)) {
+            shareUrls.unshift(`${publicUrl}/#token=${encodeURIComponent(hostAccessToken)}`);
+          }
           json(res, 200, {
             ok: true,
             sharingEnabled,
             shareUrls,
+            publicUrl: publicUrl || null,
             accessToken: hostAccessToken,
           });
           return;
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") {
-          json(res, 200, await runHyperVAction("Status"));
+          json(res, 200, await withHyperVDisplayStatus(await runHyperVAction("Status")));
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") {
           const body = await readJsonBody(req);
-          json(
-            res,
-            200,
-            await runHyperVAction("Start", {
+          const result = await runHyperVAction("Start", {
               ...body,
               vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
-            }),
-          );
+            });
+          json(res, 200, await withHyperVDisplayStatus(result));
           return;
         }
 
@@ -768,6 +866,7 @@ export default defineConfig({
   },
   server: {
     cors: false,
+    allowedHosts: [".trycloudflare.com"],
     headers: isolationHeaders,
   },
   preview: {

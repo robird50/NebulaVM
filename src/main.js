@@ -606,7 +606,9 @@ const updateEmustarHostInfo = async () => {
     els.emustarShareUrl.value = shareUrl || "";
     els.emustarCopyShareButton.disabled = !shareUrl;
     els.emustarShareStatus.textContent = shareUrl
-      ? "Ready for another computer on the same network."
+      ? info.publicUrl
+        ? "Ready from any network while this host stays online."
+        : "Ready for another computer on the same network."
       : "Run npm run host to create a browser access link.";
   } catch (error) {
     els.emustarShareUrl.value = "";
@@ -623,7 +625,7 @@ const nativeWebSocketUrl = (base, path) => {
   return url.toString();
 };
 
-const connectNativeDisplay = (base, vncPath, runtimeName) => {
+const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   if (!vncPath) return null;
 
   els.nativeDisplay.hidden = false;
@@ -637,6 +639,9 @@ const connectNativeDisplay = (base, vncPath, runtimeName) => {
   rfb.resizeSession = false;
   rfb.viewOnly = false;
   rfb.focusOnClick = true;
+  rfb.addEventListener("credentialsrequired", () => {
+    rfb.sendCredentials({ password });
+  });
   rfb.addEventListener("connect", () => {
     status.remove();
     log(`${runtimeName} display connected in browser.`);
@@ -777,7 +782,9 @@ const updateMediaWarning = () => {
 const updateButtons = (busy = false) => {
   const externalMode = isExternalMode();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
-  const hasBootMedia = isNativeMode()
+  const hasBootMedia = emustarMode
+    ? true
+    : isNativeMode()
     ? Boolean(els.nativeIsoPath.value.trim())
     : isRemoteMode()
       ? Boolean(els.remoteVmUrl.value.trim())
@@ -1037,7 +1044,23 @@ const monitorNativeVm = () => {
         ? await fetchHyperVJson("status")
         : await fetchNativeQemuJson(`status?arch=${nativeArchitecture()}`);
       const running = hyperVRuntime ? status.vm?.state === "Running" : status.running;
-      if (running) return;
+      if (running) {
+        if (
+          hyperVRuntime &&
+          !state.nativeRfb &&
+          els.nativeDisplayMode.value === "viewport" &&
+          status.vncReady
+        ) {
+          state.nativeRfb = connectNativeDisplay(
+            state.nativeQemuApiBase || window.location.origin,
+            status.vncPath,
+            "EMUSTAR",
+            status.vncPassword || "",
+          );
+          log("EMUSTAR browser display is ready.");
+        }
+        return;
+      }
 
       clearNativeMonitor();
       state.nativeRfb?.disconnect();
@@ -1341,11 +1364,18 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   }
 
   state.nativeRuntimeName = runtimeName;
+  const rfb =
+    displayMode === "viewport" && result.vncReady
+      ? connectNativeDisplay(base, result.vncPath, runtimeName, result.vncPassword || "")
+      : null;
+  state.nativeRfb = rfb;
   state.emulator = {
     stop: async () => {
-      await fetchHyperVJson("stop", { method: "POST" });
+      rfb?.disconnect();
     },
-    destroy: async () => {},
+    destroy: async () => {
+      rfb?.disconnect();
+    },
   };
   state.running = result.vm?.state === "Running";
   setPowerState("EMUSTAR Hyper-V", state.running ? "running" : "booting");
@@ -1366,11 +1396,11 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   if (displayMode === "external") {
     showNativeDisplayStatus("EMUSTAR is running in the Hyper-V host console.");
     log("The Hyper-V setup console opened on the host computer.");
-  } else {
+  } else if (!result.vncReady) {
     showNativeDisplayStatus(
-      "EMUSTAR is running. Finish Windows setup with Open host console; browser desktop access follows after RDP is enabled.",
+      "EMUSTAR is running. The browser display will connect automatically when Windows is ready.",
     );
-    log("Browser desktop mode needs Windows setup and Remote Desktop enabled inside the guest.");
+    log("Waiting for the Windows guest display service.");
   }
 };
 
@@ -1409,7 +1439,7 @@ const bootRemoteVm = async () => {
 
 const bootEmulator = async () => {
   if (!isNativeMode() && !isRemoteMode() && !state.isoFile) return;
-  if (isNativeMode() && !els.nativeIsoPath.value.trim()) {
+  if (isNativeMode() && !isHyperVMode() && !els.nativeIsoPath.value.trim()) {
     log(`Boot blocked: enter a local ISO path for ${nativeModeLabel()}.`);
     return;
   }

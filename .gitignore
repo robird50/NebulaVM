@@ -6,6 +6,8 @@ dist/
 .env.*
 vm-disks/
 .nebulavm-host-token
+.nebulavm-public-url
+.nebulavm-guest-credentials.json
 *.iso
 *.img
 *.raw
