@@ -127,6 +127,60 @@ function Get-BootDevice {
   return Get-VMDvdDrive -VM $Vm | Select-Object -First 1
 }
 
+function Set-LowHostMemoryProfile {
+  param(
+    [object]$Vm,
+    [int]$MemoryMb
+  )
+
+  $hostMemoryBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+  if ($hostMemoryBytes -le 10GB) {
+    Set-VMMemory -VM $Vm `
+      -DynamicMemoryEnabled $true `
+      -StartupBytes 768MB `
+      -MinimumBytes 512MB `
+      -MaximumBytes ($MemoryMb * 1MB) `
+      -Buffer 10
+    return
+  }
+
+  Set-VMMemory -VM $Vm -DynamicMemoryEnabled $false -StartupBytes ($MemoryMb * 1MB)
+}
+
+function Set-InstalledWindowsBoot {
+  param(
+    [object]$Vm,
+    [bool]$DetachDvd = $false
+  )
+
+  if ($DetachDvd) {
+    Get-VMDvdDrive -VM $Vm -ErrorAction SilentlyContinue | Set-VMDvdDrive -Path $null
+  }
+
+  $firmware = Get-VMFirmware -VMName $Vm.Name -ErrorAction SilentlyContinue
+  if (-not $firmware) {
+    return
+  }
+
+  $windowsBoot = $firmware.BootOrder |
+    Where-Object { $_.BootType -eq "File" -and [string]$_.FirmwarePath -like "*\EFI\Microsoft\Boot\bootmgfw.efi*" } |
+    Select-Object -First 1
+  $hardDisk = $firmware.BootOrder |
+    Where-Object { $_.BootType -eq "Drive" -and $_.Device -and $_.Device.ToString() -like "*HardDiskDrive*" } |
+    Select-Object -First 1
+
+  if ($windowsBoot) {
+    $bootOrder = @($windowsBoot)
+    if ($hardDisk) {
+      $bootOrder += $hardDisk
+    }
+    $bootOrder += @($firmware.BootOrder | Where-Object { $_ -ne $windowsBoot -and $_ -ne $hardDisk })
+    Set-VMFirmware -VM $Vm -EnableSecureBoot Off -BootOrder $bootOrder
+  } elseif ($hardDisk) {
+    Set-VMFirmware -VM $Vm -EnableSecureBoot Off -FirstBootDevice $hardDisk
+  }
+}
+
 function Start-Emustar {
   $config = Read-Config
   Assert-HyperVReady
@@ -149,6 +203,8 @@ function Start-Emustar {
   if ($vm -and -not $isoProvided) {
     Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown
     if ($vm.State -eq "Off") {
+      Set-LowHostMemoryProfile -Vm $vm -MemoryMb 3072
+      Set-InstalledWindowsBoot -Vm $vm -DetachDvd $true
       Start-VM -VM $vm | Out-Null
       $vm = Get-VM -Name $vmName
     }
@@ -210,17 +266,7 @@ function Start-Emustar {
   }
 
   Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown -CheckpointType Disabled
-  $hostMemoryBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
-  if ($hostMemoryBytes -le 10GB -and $memoryMb -gt 2048) {
-    Set-VMMemory -VM $vm `
-      -DynamicMemoryEnabled $true `
-      -StartupBytes 2GB `
-      -MinimumBytes 1GB `
-      -MaximumBytes ($memoryMb * 1MB) `
-      -Buffer 20
-  } else {
-    Set-VMMemory -VM $vm -DynamicMemoryEnabled $false -StartupBytes ($memoryMb * 1MB)
-  }
+  Set-LowHostMemoryProfile -Vm $vm -MemoryMb $memoryMb
   Set-VMProcessor -VM $vm -Count $processorCount
 
   $dvd = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1

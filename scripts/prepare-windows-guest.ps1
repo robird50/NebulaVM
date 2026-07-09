@@ -58,7 +58,7 @@ if (-not $vm) {
   $newVmParameters = @{
     Name = $VmName
     Generation = 2
-    MemoryStartupBytes = 1GB
+    MemoryStartupBytes = 768MB
     VHDPath = $vhdPath
     Path = $vmDirectory
   }
@@ -316,10 +316,26 @@ exit /b 0
 $vm = Get-VM -Name $VmName
 $vmDisk = Get-VMHardDiskDrive -VM $vm | Select-Object -First 1
 Get-VMDvdDrive -VM $vm | Set-VMDvdDrive -Path $null
-Set-VMFirmware -VM $vm -EnableSecureBoot Off -FirstBootDevice $vmDisk
+$firmware = Get-VMFirmware -VMName $vm.Name
+$windowsBoot = $firmware.BootOrder |
+  Where-Object { $_.BootType -eq "File" -and [string]$_.FirmwarePath -like "*\EFI\Microsoft\Boot\bootmgfw.efi*" } |
+  Select-Object -First 1
+$hardDiskBoot = $firmware.BootOrder |
+  Where-Object { $_.BootType -eq "Drive" -and $_.Device -and $_.Device.ToString() -like "*HardDiskDrive*" } |
+  Select-Object -First 1
+if ($windowsBoot) {
+  $bootOrder = @($windowsBoot)
+  if ($hardDiskBoot) {
+    $bootOrder += $hardDiskBoot
+  }
+  $bootOrder += @($firmware.BootOrder | Where-Object { $_ -ne $windowsBoot -and $_ -ne $hardDiskBoot })
+  Set-VMFirmware -VM $vm -EnableSecureBoot Off -BootOrder $bootOrder
+} else {
+  Set-VMFirmware -VM $vm -EnableSecureBoot Off -FirstBootDevice $vmDisk
+}
 Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown -CheckpointType Disabled
 Set-VMProcessor -VM $vm -Count 2
-Set-VMMemory -VM $vm -DynamicMemoryEnabled $true -MinimumBytes 768MB -StartupBytes 1GB -MaximumBytes 4GB -Buffer 10
+Set-VMMemory -VM $vm -DynamicMemoryEnabled $true -MinimumBytes 512MB -StartupBytes 768MB -MaximumBytes 3GB -Buffer 10
 try {
   $security = Get-VMSecurity -VM $vm
   if (-not $security.TpmEnabled) {
