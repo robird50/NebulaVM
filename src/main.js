@@ -85,7 +85,7 @@ app.innerHTML = `
 
     <section class="about-strip" aria-label="About NebulaVM">
       <p>
-        NebulaVM is a free and open-source virtual machine platform that lets you run operating systems directly in your web browser&mdash;no downloads or installation required. Powered by modern backend technology, NebulaVM is designed to make virtualization simple, accessible, and available to everyone. Our commitment is permanent: <strong>NebulaVM will always be free</strong>, with no subscriptions, premium plans, hidden fees, or paywalls. It runs on most modern desktop and laptop browsers, with mobile and tablet support planned for a future release.
+        NebulaVM is an open-source, browser-based virtual machine platform that makes running operating systems simple. Launch lightweight virtual machines directly in your browser, or use the optional EMUSTAR host for more flexible virtualization and support for modern 64-bit operating systems like Windows 11. With drag-and-drop ISO support, configurable hardware, fullscreen mode, and a clean interface, NebulaVM brings virtualization to the web while remaining <strong>free forever</strong>.
       </p>
       <div class="status-pill" id="powerState">
         <span class="status-dot"></span>
@@ -118,9 +118,7 @@ app.innerHTML = `
             <select id="emulatorMode" aria-labelledby="emulatorLabel" hidden>
               <option value="v86">Nebula x86 / v86</option>
               <option value="qemu-x64">Nebula x64 / QEMU Wasm</option>
-              <option value="native-qemu">EMUSTAR x64</option>
-              <option value="native-qemu-arm64">EMUSTAR ARM64 / Windows</option>
-              <option value="native-qemu-ubuntu-arm64">EMUSTAR ARM64 / Ubuntu</option>
+              <option value="emustar-hyperv">EMUSTAR x64 / Hyper-V</option>
               <option value="qemu-native-x64">QEMU x64 / large ISO</option>
               <option value="qemu-native-arm64-windows">QEMU ARM64 / Windows</option>
               <option value="qemu-native-arm64-ubuntu">QEMU ARM64 / Ubuntu</option>
@@ -149,17 +147,9 @@ app.innerHTML = `
                   <img class="emulator-menu-icon" src="/assets/nebulavm-emulator-icon.png" alt="" />
                   <span>Nebula x64 / QEMU Wasm</span>
                 </button>
-                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu">
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="emustar-hyperv">
                   <img class="emulator-menu-icon" src="/assets/emustar-icon.png" alt="" />
-                  <span>EMUSTAR x64</span>
-                </button>
-                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu-arm64">
-                  <img class="emulator-menu-icon" src="/assets/emustar-icon.png" alt="" />
-                  <span>EMUSTAR ARM64 / Windows</span>
-                </button>
-                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu-ubuntu-arm64">
-                  <img class="emulator-menu-icon" src="/assets/emustar-icon.png" alt="" />
-                  <span>EMUSTAR ARM64 / Ubuntu</span>
+                  <span>EMUSTAR x64 / Hyper-V</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="qemu-native-x64">
                   <img class="emulator-menu-icon" src="/assets/qemu-icon.png" alt="" />
@@ -242,7 +232,7 @@ app.innerHTML = `
             <span>
               <span class="emustar-console-kicker">Nebula Console</span>
               <strong id="nativeRuntimeName">EMUSTAR</strong>
-              <small id="nativeRuntimeAttribution">NebulaVM runtime powered by QEMU</small>
+              <small id="nativeRuntimeAttribution">Native virtualization runtime</small>
             </span>
           </div>
 
@@ -258,8 +248,8 @@ app.innerHTML = `
           <label class="field full-span">
             <span>Display</span>
             <select id="nativeDisplayMode">
-              <option value="viewport" selected>ISO viewport</option>
-              <option value="external">External window</option>
+              <option value="viewport" selected>Browser desktop</option>
+              <option value="external">Host console</option>
             </select>
           </label>
 
@@ -272,7 +262,7 @@ app.innerHTML = `
             <input type="checkbox" id="nativeCreateDisk" checked />
             <span>
               <strong>Create install disk</strong>
-              <small>Uses a qcow2 disk in the NebulaVM folder.</small>
+              <small id="nativeDiskHelp">Uses a virtual disk in the NebulaVM folder.</small>
             </span>
           </label>
 
@@ -292,6 +282,14 @@ app.innerHTML = `
             type="button"
             title="Restore clean UEFI settings without deleting the virtual disk"
           >Reset UEFI</button>
+
+          <button
+            class="secondary emustar-reset-firmware"
+            id="nativeConsoleButton"
+            type="button"
+            title="Open the EMUSTAR setup console on this host"
+            hidden
+          >Open host console</button>
 
           <p class="native-status" id="nativeStatus">Checking EMUSTAR...</p>
         </div>
@@ -391,10 +389,10 @@ app.innerHTML = `
       <h2 id="emustarInfoTitle">EMUSTAR</h2>
       <div class="emustar-info-copy">
         <p>
-          EMUSTAR is NebulaVM's viewport-first runtime layer for native virtual machines. It coordinates QEMU profiles, ISO booting, virtual disks, persistent UEFI settings, and the in-browser display so those moving parts behave like one approachable emulator.
+          EMUSTAR is NebulaVM's Windows virtualization runtime. It creates and controls a Generation 2 Hyper-V machine with its own VHDX disk, Secure Boot, virtual TPM, ISO drive, memory, processors, and boot order.
         </p>
         <p>
-          QEMU still performs the serious CPU and device emulation underneath; EMUSTAR handles the workflow, recovery controls, and presentation. Think of it as mission control for QEMU, except nobody makes you wear a headset or count backward from ten.
+          Microsoft Hyper-V performs the hardware virtualization; QEMU is not involved. EMUSTAR handles the friendlier controls and keeps the intimidating switches behind the curtain, where intimidating switches are happiest.
         </p>
       </div>
       <div class="emustar-info-actions">
@@ -434,8 +432,10 @@ const els = {
   nativeDisplayMode: document.querySelector("#nativeDisplayMode"),
   nativeIsoPath: document.querySelector("#nativeIsoPath"),
   nativeCreateDisk: document.querySelector("#nativeCreateDisk"),
+  nativeDiskHelp: document.querySelector("#nativeDiskHelp"),
   nativeDiskSize: document.querySelector("#nativeDiskSize"),
   nativeResetFirmwareButton: document.querySelector("#nativeResetFirmwareButton"),
+  nativeConsoleButton: document.querySelector("#nativeConsoleButton"),
   nativeStatus: document.querySelector("#nativeStatus"),
   remotePanel: document.querySelector("#remotePanel"),
   remoteVmUrl: document.querySelector("#remoteVmUrl"),
@@ -500,7 +500,7 @@ const log = (message) => {
 };
 
 const nativeQemuBridgeMessage =
-  "EMUSTAR needs the local NebulaVM bridge. Run NebulaVM locally with npm run dev, then keep this page open.";
+  "Native runtimes need the local NebulaVM bridge. Run NebulaVM locally with npm run host, then keep this page open.";
 
 const fetchNativeQemuJson = async (path, options) => {
   const bridgeBases = [
@@ -532,6 +532,43 @@ const fetchNativeQemuJson = async (path, options) => {
 
       state.nativeQemuApiBase = base;
       return { response, data: await response.json(), base };
+    } catch (error) {
+      lastError = error instanceof TypeError ? new Error(nativeQemuBridgeMessage) : error;
+    }
+  }
+
+  throw new Error(lastError.message || nativeQemuBridgeMessage);
+};
+
+const fetchHyperVJson = async (path, options) => {
+  const bridgeBases = [
+    state.nativeQemuApiBase,
+    window.location.origin,
+    "http://127.0.0.1:5174",
+    "http://localhost:5174",
+  ].filter(Boolean);
+  const uniqueBridgeBases = [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
+  let lastError = new Error(nativeQemuBridgeMessage);
+
+  for (const base of uniqueBridgeBases) {
+    try {
+      const headers = new Headers(options?.headers || {});
+      if (state.nativeHostToken) {
+        headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+      }
+      const response = await fetch(`${base}/api/emustar-hyperv/${path}`, {
+        cache: "no-store",
+        ...options,
+        headers,
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.toLowerCase().includes("application/json")) {
+        continue;
+      }
+
+      const data = await response.json();
+      state.nativeQemuApiBase = base;
+      return { response, data, base };
     } catch (error) {
       lastError = error instanceof TypeError ? new Error(nativeQemuBridgeMessage) : error;
     }
@@ -619,40 +656,40 @@ const setPowerState = (label, mode = "off") => {
 };
 
 const isBrowserQemuMode = () => els.emulatorMode.value === "qemu-x64";
+const isHyperVMode = () => els.emulatorMode.value === "emustar-hyperv";
 const isStandaloneQemuMode = () =>
   els.emulatorMode.value === "qemu-native-x64" ||
   els.emulatorMode.value === "qemu-native-arm64-windows" ||
   els.emulatorMode.value === "qemu-native-arm64-ubuntu";
 const isNativeX64Mode = () =>
-  els.emulatorMode.value === "native-qemu" || els.emulatorMode.value === "qemu-native-x64";
+  isHyperVMode() || els.emulatorMode.value === "qemu-native-x64";
 const isNativeWindowsArm64Mode = () =>
-  els.emulatorMode.value === "native-qemu-arm64" || els.emulatorMode.value === "qemu-native-arm64-windows";
+  els.emulatorMode.value === "qemu-native-arm64-windows";
 const isNativeUbuntuArm64Mode = () =>
-  els.emulatorMode.value === "native-qemu-ubuntu-arm64" ||
   els.emulatorMode.value === "qemu-native-arm64-ubuntu";
 const isNativeArm64Mode = () => isNativeWindowsArm64Mode() || isNativeUbuntuArm64Mode();
 const isNativeMode = () => isNativeX64Mode() || isNativeArm64Mode();
 const isRemoteMode = () => els.emulatorMode.value === "remote-vm";
-const isQemuMode = () => isBrowserQemuMode() || isNativeMode();
-const isExternalMode = () => isQemuMode() || isRemoteMode();
+const isNativeQemuMode = () => isStandaloneQemuMode();
+const isQemuMode = () => isBrowserQemuMode() || isNativeQemuMode();
+const isExternalMode = () => isQemuMode() || isHyperVMode() || isRemoteMode();
 const nativeArchitecture = () => (isNativeArm64Mode() ? "aarch64" : "x86_64");
 const nativeProfile = () =>
   isNativeUbuntuArm64Mode() ? "ubuntu-arm64" : isNativeWindowsArm64Mode() ? "windows-arm64" : "generic-x64";
-const nativeRuntimeBrand = () => (isStandaloneQemuMode() ? "QEMU" : "EMUSTAR");
+const nativeRuntimeBrand = () => (isHyperVMode() ? "EMUSTAR" : "QEMU");
 const nativeModeLabel = () =>
-  isNativeUbuntuArm64Mode()
+  isHyperVMode()
+    ? "EMUSTAR x64 / Hyper-V"
+    : isNativeUbuntuArm64Mode()
     ? `${nativeRuntimeBrand()} ARM64 / Ubuntu`
     : isNativeWindowsArm64Mode()
       ? `${nativeRuntimeBrand()} ARM64 / Windows`
       : `${nativeRuntimeBrand()} x64`;
-const isEmustarEmulator = (value) =>
-  value === "native-qemu" || value === "native-qemu-arm64" || value === "native-qemu-ubuntu-arm64";
+const isEmustarEmulator = (value) => value === "emustar-hyperv";
 const hasEmulatorIcon = (value) =>
   value === "v86" ||
   value === "qemu-x64" ||
-  value === "native-qemu" ||
-  value === "native-qemu-arm64" ||
-  value === "native-qemu-ubuntu-arm64" ||
+  value === "emustar-hyperv" ||
   value === "qemu-native-x64" ||
   value === "qemu-native-arm64-windows" ||
   value === "qemu-native-arm64-ubuntu" ||
@@ -692,12 +729,12 @@ const syncEmulatorDropdown = () => {
 
 const syncNativeModeToIsoPath = () => {
   if (!isNativeMode()) return;
+  if (isHyperVMode()) return;
 
   const isoPath = els.nativeIsoPath.value.trim();
-  const qemuFamily = isStandaloneQemuMode();
-  const x64Mode = qemuFamily ? "qemu-native-x64" : "native-qemu";
-  const windowsArmMode = qemuFamily ? "qemu-native-arm64-windows" : "native-qemu-arm64";
-  const ubuntuArmMode = qemuFamily ? "qemu-native-arm64-ubuntu" : "native-qemu-ubuntu-arm64";
+  const x64Mode = "qemu-native-x64";
+  const windowsArmMode = "qemu-native-arm64-windows";
+  const ubuntuArmMode = "qemu-native-arm64-ubuntu";
   const nextMode = looksLikeX64Iso(isoPath)
     ? x64Mode
     : looksLikeUbuntuIso(isoPath) && looksLikeArm64Iso(isoPath)
@@ -755,6 +792,7 @@ const updateButtons = (busy = false) => {
   els.loadStateButton.disabled = externalMode;
   els.nativeResetFirmwareButton.disabled =
     busy || !isNativeMode() || Boolean(state.emulator) || nativeUnavailable;
+  els.nativeConsoleButton.disabled = busy || !isHyperVMode() || nativeUnavailable;
   els.bootButton.textContent = emustarMode ? "Launch EMUSTAR" : "Boot VM";
   els.stopButton.textContent = emustarMode ? "End session" : "Stop";
   els.pauseButton.textContent = state.running ? "Pause" : "Resume";
@@ -994,8 +1032,12 @@ const monitorNativeVm = () => {
     }
 
     try {
-      const { data: status } = await fetchNativeQemuJson(`status?arch=${nativeArchitecture()}`);
-      if (status.running) return;
+      const hyperVRuntime = state.nativeRuntimeName === "EMUSTAR";
+      const { data: status } = hyperVRuntime
+        ? await fetchHyperVJson("status")
+        : await fetchNativeQemuJson(`status?arch=${nativeArchitecture()}`);
+      const running = hyperVRuntime ? status.vm?.state === "Running" : status.running;
+      if (running) return;
 
       clearNativeMonitor();
       state.nativeRfb?.disconnect();
@@ -1005,7 +1047,9 @@ const monitorNativeVm = () => {
       state.startedAt = null;
       clearStatsTimer();
       updateUptime();
-      const summary = nativeExitSummary(status.lastExit);
+      const summary = hyperVRuntime
+        ? "The Hyper-V machine is powered off."
+        : nativeExitSummary(status.lastExit);
       const runtimeName = state.nativeRuntimeName || nativeRuntimeBrand();
       showNativeDisplayStatus(`${runtimeName} stopped. ${summary}`);
       setViewportSummary(`${runtimeName} stopped and reported an error`);
@@ -1264,7 +1308,69 @@ const bootNativeQemu = async (displayMode = "viewport") => {
   if (result.vncPath) log(`${runtimeName} display is embedded in the ISO viewport.`);
   if (result.displayMode === "external") log(`${runtimeName} display is running in an external desktop window.`);
   if (runtimeName === "EMUSTAR") {
-    log("EMUSTAR uses the open-source QEMU emulation engine.");
+    log("EMUSTAR uses the Microsoft Hyper-V engine.");
+  }
+};
+
+const bootEmustarHyperV = async (displayMode = "viewport") => {
+  const runtimeName = "EMUSTAR";
+  els.screenContainer.querySelector(".vga-text").hidden = true;
+  els.screenContainer.querySelector(".vga-canvas").hidden = true;
+  els.qemuTerminal.hidden = true;
+  els.qemuTerminal.textContent = "";
+  showNativeDisplayStatus(
+    displayMode === "external"
+      ? "Starting the EMUSTAR Hyper-V host console..."
+      : "Starting EMUSTAR. Browser desktop access becomes available after Windows setup.",
+  );
+
+  const { response, data: result, base } = await fetchHyperVJson("start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      displayMode,
+      isoPath: els.nativeIsoPath.value.trim(),
+      memoryMb: Number(els.memorySize.value) / 1024 / 1024,
+      bootOrder: els.bootOrder.value,
+      createDisk: els.nativeCreateDisk.checked,
+      diskSizeGb: Number(els.nativeDiskSize.value),
+    }),
+  });
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "EMUSTAR Hyper-V failed to start.");
+  }
+
+  state.nativeRuntimeName = runtimeName;
+  state.emulator = {
+    stop: async () => {
+      await fetchHyperVJson("stop", { method: "POST" });
+    },
+    destroy: async () => {},
+  };
+  state.running = result.vm?.state === "Running";
+  setPowerState("EMUSTAR Hyper-V", state.running ? "running" : "booting");
+  updateButtons();
+  monitorNativeVm();
+
+  const vm = result.vm || {};
+  log(`EMUSTAR started ${vm.name || "the Windows VM"} with Microsoft Hyper-V.`);
+  if (base !== window.location.origin) log(`Using local bridge: ${base}`);
+  if (vm.diskPath) log(`Using VHDX install disk: ${vm.diskPath}`);
+  if (vm.isoPath) log(`Mounted installation media: ${vm.isoPath}`);
+  log(`Secure Boot: ${vm.secureBoot ? "enabled" : "not enabled"}.`);
+  log(`Virtual TPM: ${vm.tpm ? "enabled" : "not enabled"}.`);
+  for (const warning of result.warnings || []) {
+    log(`EMUSTAR warning: ${warning}`);
+  }
+
+  if (displayMode === "external") {
+    showNativeDisplayStatus("EMUSTAR is running in the Hyper-V host console.");
+    log("The Hyper-V setup console opened on the host computer.");
+  } else {
+    showNativeDisplayStatus(
+      "EMUSTAR is running. Finish Windows setup with Open host console; browser desktop access follows after RDP is enabled.",
+    );
+    log("Browser desktop mode needs Windows setup and Remote Desktop enabled inside the guest.");
   }
 };
 
@@ -1307,6 +1413,10 @@ const bootEmulator = async () => {
     log(`Boot blocked: enter a local ISO path for ${nativeModeLabel()}.`);
     return;
   }
+  if (isHyperVMode() && looksLikeArm64Iso(els.nativeIsoPath.value.trim())) {
+    log("Boot blocked: EMUSTAR Hyper-V on this Intel PC needs the Windows 11 x64 ISO, not ARM64.");
+    return;
+  }
   syncNativeModeToIsoPath();
   if (isRemoteMode() && !els.remoteVmUrl.value.trim()) {
     log("Boot blocked: enter a remote VM URL.");
@@ -1328,6 +1438,8 @@ const bootEmulator = async () => {
   try {
     if (isRemoteMode()) {
       await bootRemoteVm();
+    } else if (isHyperVMode()) {
+      await bootEmustarHyperV(qemuDisplayMode);
     } else if (isNativeMode()) {
       await bootNativeQemu(qemuDisplayMode);
     } else if (isBrowserQemuMode()) {
@@ -1447,6 +1559,34 @@ els.memorySize.addEventListener("change", () => {
 const updateNativeStatus = async () => {
   if (!isNativeMode()) return;
 
+  if (isHyperVMode()) {
+    try {
+      const { data: status, base } = await fetchHyperVJson("status");
+      const bridgeLabel = base === window.location.origin ? "" : ` via local bridge ${base}`;
+      state.nativeQemuApiAvailable = true;
+      state.nativeQemuReady = Boolean(status.available);
+      if (status.available) {
+        const vmState = status.vm ? ` VM: ${status.vm.state}.` : "";
+        els.nativeStatus.dataset.mode = "ready";
+        els.nativeStatus.textContent = `EMUSTAR ready with Microsoft Hyper-V${bridgeLabel}.${vmState}`;
+      } else if (status.restartRequired) {
+        els.nativeStatus.dataset.mode = "missing";
+        els.nativeStatus.textContent =
+          "Hyper-V is enabled. Restart Windows once to finish preparing EMUSTAR.";
+      } else {
+        els.nativeStatus.dataset.mode = "missing";
+        els.nativeStatus.textContent = "Microsoft Hyper-V is not available on this host.";
+      }
+    } catch (error) {
+      state.nativeQemuApiAvailable = false;
+      state.nativeQemuReady = false;
+      els.nativeStatus.dataset.mode = "missing";
+      els.nativeStatus.textContent = error.message;
+    }
+    updateButtons();
+    return;
+  }
+
   try {
     const { data: status, base } = await fetchNativeQemuJson(`status?arch=${nativeArchitecture()}`);
     const bridgeLabel = base === window.location.origin ? "" : ` via local bridge ${base}`;
@@ -1473,7 +1613,7 @@ const updateNativeStatus = async () => {
 };
 
 const resetNativeFirmware = async () => {
-  if (!isNativeMode() || state.emulator) return;
+  if (!isNativeQemuMode() || state.emulator) return;
 
   els.nativeResetFirmwareButton.disabled = true;
   log(`Resetting ${nativeModeLabel()} UEFI settings.`);
@@ -1496,6 +1636,24 @@ const resetNativeFirmware = async () => {
     els.nativeStatus.dataset.mode = "missing";
     els.nativeStatus.textContent = error.message;
     log(`UEFI reset failed: ${error.message}`);
+  } finally {
+    updateButtons();
+  }
+};
+
+const openHyperVConsole = async () => {
+  if (!isHyperVMode()) return;
+  els.nativeConsoleButton.disabled = true;
+  try {
+    const { response, data } = await fetchHyperVJson("open-console", { method: "POST" });
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "The Hyper-V console could not be opened.");
+    }
+    log("Opened the EMUSTAR Hyper-V console on the host computer.");
+  } catch (error) {
+    log(`Host console failed: ${error.message}`);
+    els.nativeStatus.dataset.mode = "missing";
+    els.nativeStatus.textContent = error.message;
   } finally {
     updateButtons();
   }
@@ -1530,7 +1688,8 @@ const updateBackendUi = () => {
   if (!state.emulator && !state.isoFile) {
     els.machineTitle.textContent = emustarMode ? "EMUSTAR Control Deck" : "Awaiting boot media";
   }
-  els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode ? "x64" : "x86";
+  els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode || emustarMode ? "x64" : "x86";
+  els.processorMode.disabled = emustarMode;
   const selectedMemoryMb = Number(els.memorySize.value) / 1024 / 1024;
   if (isNativeWindowsArm64Mode() && selectedMemoryMb < 4096) {
     els.memorySize.value = "4294967296";
@@ -1540,13 +1699,21 @@ const updateBackendUi = () => {
   els.nativePanel.hidden = !nativeMode;
   els.remotePanel.hidden = !remoteMode;
   if (nativeMode) {
-    els.nativeRuntimeIcon.src = isStandaloneQemuMode()
-      ? "/assets/qemu-icon.png"
-      : "/assets/emustar-icon.png";
+    els.nativeRuntimeIcon.src = isStandaloneQemuMode() ? "/assets/qemu-icon.png" : "/assets/emustar-icon.png";
     els.nativeRuntimeName.textContent = runtimeBrand;
     els.nativeRuntimeAttribution.textContent = isStandaloneQemuMode()
       ? "Native virtualization engine"
-      : "NebulaVM runtime powered by QEMU";
+      : "Generation 2 virtualization powered by Microsoft Hyper-V";
+    els.nativeResetFirmwareButton.hidden = emustarMode;
+    els.nativeConsoleButton.hidden = !emustarMode;
+    els.nativeDiskHelp.textContent = emustarMode
+      ? "Uses a dynamic VHDX disk in the NebulaVM folder."
+      : "Uses a qcow2 disk in the NebulaVM folder.";
+    els.nativeCreateDisk.checked = true;
+    els.nativeCreateDisk.disabled = emustarMode;
+    const [viewportOption, externalOption] = els.nativeDisplayMode.options;
+    viewportOption.textContent = emustarMode ? "Browser desktop (after setup)" : "ISO viewport";
+    externalOption.textContent = emustarMode ? "Hyper-V host console" : "External window";
     state.nativeQemuReady = false;
     els.nativeStatus.dataset.mode = "";
     els.nativeStatus.textContent = `Checking ${nativeModeLabel()}...`;
@@ -1557,14 +1724,18 @@ const updateBackendUi = () => {
   els.demoButton.disabled = externalMode;
   els.autostart.disabled = externalMode;
   els.networkingHelp.textContent = nativeMode
-    ? isStandaloneQemuMode()
+    ? emustarMode
+      ? "Uses a Hyper-V virtual switch when one is available."
+      : isStandaloneQemuMode()
       ? "QEMU user-mode networking."
-      : "EMUSTAR uses QEMU user-mode networking."
+      : "Native runtime networking."
     : isBrowserQemuMode()
       ? "QEMU networking depends on the compiled Wasm build."
     : "Uses v86 networking support when available.";
   els.placeholderMeta.textContent = nativeMode
-    ? nativeUbuntuArm64Mode
+    ? emustarMode
+      ? "Windows 11 runs through Hyper-V with Secure Boot, virtual TPM, and a VHDX disk."
+      : nativeUbuntuArm64Mode
       ? `${runtimeBrand} boots Ubuntu ARM64 with a dedicated qcow2 disk.`
       : nativeArm64Mode
         ? `${runtimeBrand} boots Windows ARM64 from a local ISO.`
@@ -1626,7 +1797,11 @@ document.addEventListener("keydown", (event) => {
 });
 els.processorMode.addEventListener("change", () => {
   els.emulatorMode.value =
-    els.processorMode.value === "arm64" ? "native-qemu-arm64" : els.processorMode.value === "x64" ? "qemu-x64" : "v86";
+    els.processorMode.value === "arm64"
+      ? "qemu-native-arm64-windows"
+      : els.processorMode.value === "x64"
+        ? "qemu-x64"
+        : "v86";
   updateBackendUi();
 });
 els.nativeIsoPath.addEventListener("input", () => updateButtons());
@@ -1635,6 +1810,7 @@ els.nativeDisplayMode.addEventListener("change", () => {
   window.localStorage.setItem("nebulavm.emustar.display", els.nativeDisplayMode.value);
 });
 els.nativeResetFirmwareButton.addEventListener("click", resetNativeFirmware);
+els.nativeConsoleButton.addEventListener("click", openHyperVConsole);
 els.remoteVmUrl.addEventListener("input", () => updateButtons());
 
 const updateFullscreenButton = () => {

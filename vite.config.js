@@ -215,6 +215,55 @@ let lastNativeExit = null;
 let activeNativeRuntimeName = null;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
+const hyperVScriptPath = resolve(workspaceDir, "scripts", "emustar-hyperv.ps1");
+
+const runHyperVAction = (action, config = {}) =>
+  new Promise((resolveAction, rejectAction) => {
+    const configBase64 = Buffer.from(JSON.stringify(config), "utf8").toString("base64");
+    const child = spawn(
+      "powershell.exe",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        hyperVScriptPath,
+        "-Action",
+        action,
+        "-ConfigBase64",
+        configBase64,
+      ],
+      {
+        cwd: workspaceDir,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", rejectAction);
+    child.on("exit", (code) => {
+      const output = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
+      try {
+        const result = JSON.parse(output || "{}");
+        if (code === 0 && result.ok !== false) {
+          resolveAction(result);
+          return;
+        }
+        rejectAction(new Error(result.error || stderr.trim() || `Hyper-V action failed with code ${code}.`));
+      } catch {
+        rejectAction(new Error(stderr.trim() || stdout.trim() || `Hyper-V action failed with code ${code}.`));
+      }
+    });
+  });
 
 const isPortAvailable = (port) =>
   new Promise((resolvePort) => {
@@ -333,7 +382,7 @@ const startNativeVm = async (body) => {
 
   const arch = normalizeArch(body.arch);
   const profile = normalizeNativeProfile(body.profile, arch);
-  const runtimeName = body.runtime === "QEMU" ? "QEMU" : "EMUSTAR";
+  const runtimeName = "QEMU";
   const qemu = findExecutable(arch === "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64");
   if (!qemu) {
     throw new Error(
@@ -591,8 +640,9 @@ const nativeQemuPlugin = () => ({
     server.middlewares.use(async (req, res, next) => {
       const url = new URL(req.url || "/", "http://localhost");
       const isNativeQemuApi = url.pathname.startsWith("/api/native-qemu");
+      const isHyperVApi = url.pathname.startsWith("/api/emustar-hyperv");
       const isHostInfoApi = url.pathname === "/api/emustar-host/info";
-      if (!isNativeQemuApi && !isHostInfoApi) {
+      if (!isNativeQemuApi && !isHyperVApi && !isHostInfoApi) {
         next();
         return;
       }
@@ -627,6 +677,39 @@ const nativeQemuPlugin = () => ({
             shareUrls,
             accessToken: hostAccessToken,
           });
+          return;
+        }
+
+        if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") {
+          json(res, 200, await runHyperVAction("Status"));
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") {
+          const body = await readJsonBody(req);
+          json(
+            res,
+            200,
+            await runHyperVAction("Start", {
+              ...body,
+              vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
+            }),
+          );
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/stop") {
+          json(res, 200, await runHyperVAction("Stop"));
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/reset") {
+          json(res, 200, await runHyperVAction("Reset"));
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/open-console") {
+          json(res, 200, await runHyperVAction("OpenConsole"));
           return;
         }
 
