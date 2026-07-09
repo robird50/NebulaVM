@@ -10,6 +10,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@netlify/blobs": "^10.7.9",
     "@novnc/novnc": "^1.7.0",
     "v86": "^0.5.424",
     "vite": "^8.1.3",

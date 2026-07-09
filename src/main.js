@@ -627,6 +627,42 @@ const fetchEmustarHostJson = async (path, options) => {
   throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
+const fetchNetlifyHostRegistry = async () => {
+  if (!/\.netlify\.app$/i.test(window.location.hostname)) return null;
+
+  try {
+    const response = await fetch("/.netlify/functions/host-registry", { cache: "no-store" });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data.ok || !data.host?.publicUrl || !data.host?.accessToken) return null;
+
+    const publicUrl = String(data.host.publicUrl).replace(/\/$/, "");
+    state.nativeQemuApiBase = publicUrl;
+    state.nativeHostToken = String(data.host.accessToken);
+    window.localStorage.setItem("nebulavm.emustar.hostToken", state.nativeHostToken);
+    return { ...data.host, publicUrl, stale: data.stale };
+  } catch {
+    return null;
+  }
+};
+
+const connectNetlifyHostRegistry = async () => {
+  const host = await fetchNetlifyHostRegistry();
+  if (!host) return;
+
+  if (!isHyperVMode()) {
+    els.emulatorMode.value = "emustar-hyperv";
+    syncEmulatorDropdown();
+    updateBackendUi();
+  }
+
+  els.nativeStatus.dataset.mode = "ready";
+  els.nativeStatus.textContent = host.stale
+    ? "Found a registered host, but it may be stale. Trying anyway..."
+    : "Found the current NebulaVM host. Connecting...";
+  await autoAdoptSharedHyperV();
+};
+
 const updateEmustarHostInfo = async () => {
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   els.emustarHostShare.hidden = !emustarMode;
@@ -2110,6 +2146,7 @@ window.addEventListener("beforeunload", stopEmulator);
 log("NebulaVM ready.");
 updateBackendUi();
 void autoAdoptSharedHyperV();
+void connectNetlifyHostRegistry();
 updateButtons();
 updateViewportSummary();
 state.viewportSummaryTimer = window.setInterval(updateViewportSummary, 3000);
