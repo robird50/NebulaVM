@@ -29,7 +29,22 @@ function Get-FeatureState {
   }
 }
 
+function Import-HyperVModule {
+  if ($null -ne (Get-Command Get-VM -ErrorAction SilentlyContinue)) {
+    return
+  }
+
+  $moduleRoot = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\Modules\Hyper-V"
+  $manifest = Get-ChildItem -LiteralPath $moduleRoot -Recurse -Filter "Hyper-V.psd1" -ErrorAction SilentlyContinue |
+    Sort-Object FullName -Descending |
+    Select-Object -First 1
+  if ($manifest) {
+    Import-Module $manifest.FullName -ErrorAction SilentlyContinue
+  }
+}
+
 function Test-HyperVCmdlets {
+  Import-HyperVModule
   return $null -ne (Get-Command Get-VM -ErrorAction SilentlyContinue)
 }
 
