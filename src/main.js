@@ -47,6 +47,7 @@ const state = {
   nativeQemuReady: false,
   nativeQemuApiBase: null,
   nativeRfb: null,
+  nativeRuntimeName: null,
   nativeMonitorTimer: null,
   viewportSummaryTimer: null,
 };
@@ -112,6 +113,9 @@ app.innerHTML = `
               <option value="native-qemu">EMUSTAR x64</option>
               <option value="native-qemu-arm64">EMUSTAR ARM64 / Windows</option>
               <option value="native-qemu-ubuntu-arm64">EMUSTAR ARM64 / Ubuntu</option>
+              <option value="qemu-native-x64">QEMU x64 / large ISO</option>
+              <option value="qemu-native-arm64-windows">QEMU ARM64 / Windows</option>
+              <option value="qemu-native-arm64-ubuntu">QEMU ARM64 / Ubuntu</option>
               <option value="remote-vm">Remote VM / browser stream</option>
             </select>
             <div class="emulator-dropdown">
@@ -148,6 +152,18 @@ app.innerHTML = `
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu-ubuntu-arm64">
                   <img class="emulator-menu-icon" src="/assets/emustar-icon.png" alt="" />
                   <span>EMUSTAR ARM64 / Ubuntu</span>
+                </button>
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="qemu-native-x64">
+                  <img class="emulator-menu-icon" src="/assets/qemu-icon.png" alt="" />
+                  <span>QEMU x64 / large ISO</span>
+                </button>
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="qemu-native-arm64-windows">
+                  <img class="emulator-menu-icon" src="/assets/qemu-icon.png" alt="" />
+                  <span>QEMU ARM64 / Windows</span>
+                </button>
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="qemu-native-arm64-ubuntu">
+                  <img class="emulator-menu-icon" src="/assets/qemu-icon.png" alt="" />
+                  <span>QEMU ARM64 / Ubuntu</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="remote-vm">
                   <img class="emulator-menu-icon" src="/assets/remote-vm-icon.png" alt="" />
@@ -211,10 +227,10 @@ app.innerHTML = `
 
         <div class="native-panel" id="nativePanel" hidden>
           <div class="emustar-runtime-heading">
-            <img src="/assets/emustar-icon.png" alt="" />
+            <img id="nativeRuntimeIcon" src="/assets/emustar-icon.png" alt="" />
             <span>
-              <strong>EMUSTAR</strong>
-              <small>NebulaVM runtime powered by QEMU</small>
+              <strong id="nativeRuntimeName">EMUSTAR</strong>
+              <small id="nativeRuntimeAttribution">NebulaVM runtime powered by QEMU</small>
             </span>
           </div>
 
@@ -359,6 +375,9 @@ const els = {
   emulatorMenuOptions: [...document.querySelectorAll("[data-emulator-option]")],
   processorMode: document.querySelector("#processorMode"),
   nativePanel: document.querySelector("#nativePanel"),
+  nativeRuntimeIcon: document.querySelector("#nativeRuntimeIcon"),
+  nativeRuntimeName: document.querySelector("#nativeRuntimeName"),
+  nativeRuntimeAttribution: document.querySelector("#nativeRuntimeAttribution"),
   nativeDisplayMode: document.querySelector("#nativeDisplayMode"),
   nativeIsoPath: document.querySelector("#nativeIsoPath"),
   nativeCreateDisk: document.querySelector("#nativeCreateDisk"),
@@ -464,13 +483,13 @@ const nativeWebSocketUrl = (base, path) => {
   return url.toString();
 };
 
-const connectNativeDisplay = (base, vncPath) => {
+const connectNativeDisplay = (base, vncPath, runtimeName) => {
   if (!vncPath) return null;
 
   els.nativeDisplay.hidden = false;
   const status = document.createElement("span");
   status.className = "native-display-status";
-  status.textContent = "Connecting to EMUSTAR display...";
+  status.textContent = `Connecting to ${runtimeName} display...`;
   els.nativeDisplay.replaceChildren(status);
 
   const rfb = new RFB(els.nativeDisplay, nativeWebSocketUrl(base, vncPath));
@@ -480,11 +499,11 @@ const connectNativeDisplay = (base, vncPath) => {
   rfb.focusOnClick = true;
   rfb.addEventListener("connect", () => {
     status.remove();
-    log("EMUSTAR display connected in browser.");
+    log(`${runtimeName} display connected in browser.`);
   });
   rfb.addEventListener("disconnect", () => {
     if (state.emulator) {
-      log("EMUSTAR display disconnected.");
+      log(`${runtimeName} display disconnected.`);
     }
   });
 
@@ -497,9 +516,17 @@ const setPowerState = (label, mode = "off") => {
 };
 
 const isBrowserQemuMode = () => els.emulatorMode.value === "qemu-x64";
-const isNativeX64Mode = () => els.emulatorMode.value === "native-qemu";
-const isNativeWindowsArm64Mode = () => els.emulatorMode.value === "native-qemu-arm64";
-const isNativeUbuntuArm64Mode = () => els.emulatorMode.value === "native-qemu-ubuntu-arm64";
+const isStandaloneQemuMode = () =>
+  els.emulatorMode.value === "qemu-native-x64" ||
+  els.emulatorMode.value === "qemu-native-arm64-windows" ||
+  els.emulatorMode.value === "qemu-native-arm64-ubuntu";
+const isNativeX64Mode = () =>
+  els.emulatorMode.value === "native-qemu" || els.emulatorMode.value === "qemu-native-x64";
+const isNativeWindowsArm64Mode = () =>
+  els.emulatorMode.value === "native-qemu-arm64" || els.emulatorMode.value === "qemu-native-arm64-windows";
+const isNativeUbuntuArm64Mode = () =>
+  els.emulatorMode.value === "native-qemu-ubuntu-arm64" ||
+  els.emulatorMode.value === "qemu-native-arm64-ubuntu";
 const isNativeArm64Mode = () => isNativeWindowsArm64Mode() || isNativeUbuntuArm64Mode();
 const isNativeMode = () => isNativeX64Mode() || isNativeArm64Mode();
 const isRemoteMode = () => els.emulatorMode.value === "remote-vm";
@@ -508,12 +535,13 @@ const isExternalMode = () => isQemuMode() || isRemoteMode();
 const nativeArchitecture = () => (isNativeArm64Mode() ? "aarch64" : "x86_64");
 const nativeProfile = () =>
   isNativeUbuntuArm64Mode() ? "ubuntu-arm64" : isNativeWindowsArm64Mode() ? "windows-arm64" : "generic-x64";
+const nativeRuntimeBrand = () => (isStandaloneQemuMode() ? "QEMU" : "EMUSTAR");
 const nativeModeLabel = () =>
   isNativeUbuntuArm64Mode()
-    ? "EMUSTAR ARM64 / Ubuntu"
+    ? `${nativeRuntimeBrand()} ARM64 / Ubuntu`
     : isNativeWindowsArm64Mode()
-      ? "EMUSTAR ARM64 / Windows"
-      : "EMUSTAR x64";
+      ? `${nativeRuntimeBrand()} ARM64 / Windows`
+      : `${nativeRuntimeBrand()} x64`;
 const isEmustarEmulator = (value) =>
   value === "native-qemu" || value === "native-qemu-arm64" || value === "native-qemu-ubuntu-arm64";
 const hasEmulatorIcon = (value) =>
@@ -522,6 +550,9 @@ const hasEmulatorIcon = (value) =>
   value === "native-qemu" ||
   value === "native-qemu-arm64" ||
   value === "native-qemu-ubuntu-arm64" ||
+  value === "qemu-native-x64" ||
+  value === "qemu-native-arm64-windows" ||
+  value === "qemu-native-arm64-ubuntu" ||
   value === "remote-vm";
 const looksLikeArm64Iso = (path) => /(^|[^a-z0-9])(arm64|aarch64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeX64Iso = (path) => /(^|[^a-z0-9])(x64|amd64|x86_64)(?=[^a-z0-9]|$)/i.test(path);
@@ -543,6 +574,8 @@ const syncEmulatorDropdown = () => {
   els.emulatorSelectedIcon.src =
     selectedValue === "remote-vm"
       ? "/assets/remote-vm-icon.png"
+      : selectedValue.startsWith("qemu-native-")
+        ? "/assets/qemu-icon.png"
       : isEmustarEmulator(selectedValue)
         ? "/assets/emustar-icon.png"
         : "/assets/nebulavm-emulator-icon.png";
@@ -558,16 +591,20 @@ const syncNativeModeToIsoPath = () => {
   if (!isNativeMode()) return;
 
   const isoPath = els.nativeIsoPath.value.trim();
+  const qemuFamily = isStandaloneQemuMode();
+  const x64Mode = qemuFamily ? "qemu-native-x64" : "native-qemu";
+  const windowsArmMode = qemuFamily ? "qemu-native-arm64-windows" : "native-qemu-arm64";
+  const ubuntuArmMode = qemuFamily ? "qemu-native-arm64-ubuntu" : "native-qemu-ubuntu-arm64";
   const nextMode = looksLikeX64Iso(isoPath)
-    ? "native-qemu"
+    ? x64Mode
     : looksLikeUbuntuIso(isoPath) && looksLikeArm64Iso(isoPath)
-      ? "native-qemu-ubuntu-arm64"
+      ? ubuntuArmMode
       : looksLikeWindowsIso(isoPath) && looksLikeArm64Iso(isoPath)
-        ? "native-qemu-arm64"
+        ? windowsArmMode
         : looksLikeArm64Iso(isoPath)
           ? isNativeUbuntuArm64Mode()
-            ? "native-qemu-ubuntu-arm64"
-            : "native-qemu-arm64"
+            ? ubuntuArmMode
+            : windowsArmMode
           : els.emulatorMode.value;
 
   if (nextMode !== els.emulatorMode.value) {
@@ -863,10 +900,12 @@ const monitorNativeVm = () => {
       clearStatsTimer();
       updateUptime();
       const summary = nativeExitSummary(status.lastExit);
-      showNativeDisplayStatus(`EMUSTAR stopped. ${summary}`);
-      setViewportSummary("EMUSTAR stopped and reported an error");
-      setPowerState("EMUSTAR stopped", "off");
-      log(`EMUSTAR stopped: ${summary}`);
+      const runtimeName = state.nativeRuntimeName || nativeRuntimeBrand();
+      showNativeDisplayStatus(`${runtimeName} stopped. ${summary}`);
+      setViewportSummary(`${runtimeName} stopped and reported an error`);
+      setPowerState(`${runtimeName} stopped`, "off");
+      log(`${runtimeName} stopped: ${summary}`);
+      state.nativeRuntimeName = null;
       updateButtons();
     } catch {
       // A temporary status request failure should not disconnect a running VM.
@@ -931,6 +970,7 @@ const stopEmulator = async () => {
   els.nativeDisplay.replaceChildren();
   els.nativeDisplay.hidden = true;
   state.nativeRfb = null;
+  state.nativeRuntimeName = null;
   els.remoteFrame.src = "about:blank";
   els.remoteFrame.hidden = true;
   updateButtons();
@@ -1040,12 +1080,15 @@ const showNativeDisplayStatus = (message) => {
 };
 
 const bootNativeQemu = async (displayMode = "viewport") => {
+  const runtimeName = nativeRuntimeBrand();
   els.screenContainer.querySelector(".vga-text").hidden = true;
   els.screenContainer.querySelector(".vga-canvas").hidden = true;
   els.qemuTerminal.hidden = true;
   els.qemuTerminal.textContent = "";
   showNativeDisplayStatus(
-    displayMode === "external" ? "EMUSTAR is opening an external window." : "Preparing EMUSTAR viewport...",
+    displayMode === "external"
+      ? `${runtimeName} is opening an external window.`
+      : `Preparing ${runtimeName} viewport...`,
   );
 
   const { response, data: result, base } = await fetchNativeQemuJson("start", {
@@ -1054,6 +1097,7 @@ const bootNativeQemu = async (displayMode = "viewport") => {
     body: JSON.stringify({
       arch: nativeArchitecture(),
       profile: nativeProfile(),
+      runtime: runtimeName,
       displayMode,
       isoPath: els.nativeIsoPath.value.trim(),
       memoryMb: Number(els.memorySize.value) / 1024 / 1024,
@@ -1074,12 +1118,13 @@ const bootNativeQemu = async (displayMode = "viewport") => {
     }
     showNativeDisplayStatus("External mode needs the updated local bridge.");
     throw new Error(
-      "EMUSTAR external display needs the updated local bridge. Restart npm.cmd run dev -- --port 5174 and try again.",
+      `${runtimeName} external display needs the updated local bridge. Restart npm.cmd run dev -- --port 5174 and try again.`,
     );
   }
 
-  const rfb = result.vncPath ? connectNativeDisplay(base, result.vncPath) : null;
+  const rfb = result.vncPath ? connectNativeDisplay(base, result.vncPath, runtimeName) : null;
   state.nativeRfb = rfb;
+  state.nativeRuntimeName = runtimeName;
   state.emulator = {
     stop: async () => {
       rfb?.disconnect();
@@ -1092,10 +1137,10 @@ const bootNativeQemu = async (displayMode = "viewport") => {
   state.running = true;
   const nativeLabel =
     result.profile === "ubuntu-arm64"
-      ? "EMUSTAR ARM64 / Ubuntu"
+      ? `${runtimeName} ARM64 / Ubuntu`
       : result.arch === "aarch64"
-        ? "EMUSTAR ARM64 / Windows"
-        : "EMUSTAR x64";
+        ? `${runtimeName} ARM64 / Windows`
+        : `${runtimeName} x64`;
   setPowerState(nativeLabel, "running");
   updateButtons();
   monitorNativeVm();
@@ -1110,9 +1155,11 @@ const bootNativeQemu = async (displayMode = "viewport") => {
   if (result.diskPath) log(`Using install disk: ${result.diskPath}`);
   if (result.ovmf) log(`Using UEFI firmware: ${result.ovmf}`);
   if (result.ovmfVarsPath) log(`Using UEFI variables: ${result.ovmfVarsPath}`);
-  if (result.vncPath) log("EMUSTAR display is embedded in the ISO viewport.");
-  if (result.displayMode === "external") log("EMUSTAR display is running in an external desktop window.");
-  log("EMUSTAR uses the open-source QEMU emulation engine.");
+  if (result.vncPath) log(`${runtimeName} display is embedded in the ISO viewport.`);
+  if (result.displayMode === "external") log(`${runtimeName} display is running in an external desktop window.`);
+  if (runtimeName === "EMUSTAR") {
+    log("EMUSTAR uses the open-source QEMU emulation engine.");
+  }
 };
 
 const normalizeRemoteUrl = (url) => {
@@ -1302,11 +1349,12 @@ const updateNativeStatus = async () => {
     if (status.available) {
       els.nativeStatus.dataset.mode = "ready";
       els.nativeStatus.textContent =
-        `${nativeModeLabel()} ready${status.ovmf ? " with UEFI" : ""}${bridgeLabel}. Powered by QEMU.`;
+        `${nativeModeLabel()} ready${status.ovmf ? " with UEFI" : ""}${bridgeLabel}.` +
+        (isStandaloneQemuMode() ? "" : " Powered by QEMU.");
     } else {
       els.nativeStatus.dataset.mode = "missing";
       els.nativeStatus.textContent =
-        `EMUSTAR engine not found${bridgeLabel}. Install QEMU for Windows, then restart the local bridge.`;
+        `${nativeRuntimeBrand()} engine not found${bridgeLabel}. Install QEMU for Windows, then restart the local bridge.`;
     }
   } catch (error) {
     state.nativeQemuApiAvailable = false;
@@ -1361,6 +1409,7 @@ const updateBackendUi = () => {
   const nativeUbuntuArm64Mode = isNativeUbuntuArm64Mode();
   const remoteMode = isRemoteMode();
   const externalMode = isExternalMode();
+  const runtimeBrand = nativeRuntimeBrand();
   syncEmulatorDropdown();
   els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode ? "x64" : "x86";
   const selectedMemoryMb = Number(els.memorySize.value) / 1024 / 1024;
@@ -1372,6 +1421,13 @@ const updateBackendUi = () => {
   els.nativePanel.hidden = !nativeMode;
   els.remotePanel.hidden = !remoteMode;
   if (nativeMode) {
+    els.nativeRuntimeIcon.src = isStandaloneQemuMode()
+      ? "/assets/qemu-icon.png"
+      : "/assets/emustar-icon.png";
+    els.nativeRuntimeName.textContent = runtimeBrand;
+    els.nativeRuntimeAttribution.textContent = isStandaloneQemuMode()
+      ? "Native virtualization engine"
+      : "NebulaVM runtime powered by QEMU";
     state.nativeQemuReady = false;
     els.nativeStatus.dataset.mode = "";
     els.nativeStatus.textContent = `Checking ${nativeModeLabel()}...`;
@@ -1382,16 +1438,18 @@ const updateBackendUi = () => {
   els.demoButton.disabled = externalMode;
   els.autostart.disabled = externalMode;
   els.networkingHelp.textContent = nativeMode
-    ? "EMUSTAR uses QEMU user-mode networking."
+    ? isStandaloneQemuMode()
+      ? "QEMU user-mode networking."
+      : "EMUSTAR uses QEMU user-mode networking."
     : isBrowserQemuMode()
       ? "QEMU networking depends on the compiled Wasm build."
     : "Uses v86 networking support when available.";
   els.placeholderMeta.textContent = nativeMode
     ? nativeUbuntuArm64Mode
-      ? "EMUSTAR boots Ubuntu ARM64 with a dedicated qcow2 disk."
+      ? `${runtimeBrand} boots Ubuntu ARM64 with a dedicated qcow2 disk.`
       : nativeArm64Mode
-        ? "EMUSTAR boots Windows ARM64 from a local ISO."
-        : "EMUSTAR boots large x64 ISOs through the local runtime."
+        ? `${runtimeBrand} boots Windows ARM64 from a local ISO.`
+        : `${runtimeBrand} boots large x64 ISOs through the local runtime.`
     : remoteMode
       ? "Remote VM mode shows a VM running on another computer or cloud server."
     : isBrowserQemuMode()

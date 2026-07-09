@@ -59,6 +59,10 @@ For large x64 ISOs, use `EMUSTAR x64`. For Windows ARM64 ISOs, use
 paste the full ISO path into the `Local ISO path` field. NebulaVM can create a
 qcow2 install disk in `vm-disks/`.
 
+The emulator menu also includes direct `QEMU x64`, `QEMU ARM64 / Windows`, and
+`QEMU ARM64 / Ubuntu` choices. These use the same native bridge and disk formats
+while keeping the original QEMU identity in the interface and process title.
+
 When NebulaVM is hosted on Netlify, EMUSTAR can still work through a local
 bridge on the same PC. Start NebulaVM locally with `npm.cmd run dev`, keep that
 terminal open, then use the Netlify site. The hosted app will try

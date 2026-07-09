@@ -135,6 +135,7 @@ const findFirmwareVars = (arch, qemuPath) => {
 let nativeVm = null;
 let nativeVmOutput = "";
 let lastNativeExit = null;
+let activeNativeRuntimeName = null;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
 
@@ -242,7 +243,7 @@ const nativeStatus = (requestedArch = "x86_64") => {
     running: Boolean(nativeVm),
     pid: nativeVm?.pid || null,
     embeddedDisplay: Boolean(nativeVm?.vncPort),
-    runtime: "EMUSTAR",
+    runtime: activeNativeRuntimeName || "EMUSTAR",
     engine: "QEMU",
     lastExit: lastNativeExit,
   };
@@ -255,6 +256,7 @@ const startNativeVm = async (body) => {
 
   const arch = normalizeArch(body.arch);
   const profile = normalizeNativeProfile(body.profile, arch);
+  const runtimeName = body.runtime === "QEMU" ? "QEMU" : "EMUSTAR";
   const qemu = findExecutable(arch === "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64");
   if (!qemu) {
     throw new Error(
@@ -310,7 +312,7 @@ const startNativeVm = async (body) => {
     arch === "aarch64"
       ? [
           "-name",
-          `EMUSTAR ${profile}`,
+          `${runtimeName} ${profile}`,
           "-machine",
           "virt,gic-version=3,highmem=on",
           "-accel",
@@ -340,7 +342,7 @@ const startNativeVm = async (body) => {
         ]
       : [
           "-name",
-          "EMUSTAR x64",
+          `${runtimeName} x64`,
           "-machine",
           "q35",
           "-cpu",
@@ -398,6 +400,7 @@ const startNativeVm = async (body) => {
 
   child.vncPort = vnc?.port || null;
   nativeVm = child;
+  activeNativeRuntimeName = runtimeName;
   nativeVmOutput = "";
   lastNativeExit = null;
   const capture = (chunk) => {
@@ -414,6 +417,7 @@ const startNativeVm = async (body) => {
     };
     if (nativeVm === child) {
       nativeVm = null;
+      activeNativeRuntimeName = null;
     }
   });
   child.on("error", (error) => {
@@ -425,6 +429,7 @@ const startNativeVm = async (body) => {
     };
     if (nativeVm === child) {
       nativeVm = null;
+      activeNativeRuntimeName = null;
     }
   });
 
@@ -442,6 +447,7 @@ const startNativeVm = async (body) => {
     pid: child.pid,
     arch,
     profile,
+    runtime: runtimeName,
     qemu,
     args,
     bootOrder: diskFirst ? "disk-first" : "cdrom-first",
@@ -529,6 +535,7 @@ const nativeQemuPlugin = () => ({
             pid: result.pid,
             arch: result.arch,
             profile: result.profile,
+            runtime: result.runtime,
             qemu: result.qemu,
             diskPath: result.diskPath,
             displayMode: result.displayMode,
@@ -549,6 +556,7 @@ const nativeQemuPlugin = () => ({
           if (nativeVm) {
             nativeVm.kill();
             nativeVm = null;
+            activeNativeRuntimeName = null;
           }
           json(res, 200, { ok: true });
           return;
