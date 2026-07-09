@@ -171,6 +171,9 @@ app.innerHTML = `
                 </button>
               </div>
             </div>
+            <button class="emustar-info-link" id="emustarInfoLink" type="button" hidden>
+              What in the world is EMUSTAR?
+            </button>
           </div>
 
           <label class="field full-span">
@@ -359,6 +362,24 @@ app.innerHTML = `
     </section>
     <footer class="commit-id">Commit ${COMMIT_ID}</footer>
   </main>
+
+  <div class="display-choice-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>
+    <section class="display-choice-panel emustar-info-panel">
+      <img class="emustar-info-icon" src="/assets/emustar-icon.png" alt="" />
+      <h2 id="emustarInfoTitle">EMUSTAR</h2>
+      <div class="emustar-info-copy">
+        <p>
+          EMUSTAR is NebulaVM's viewport-first runtime layer for native virtual machines. It coordinates QEMU profiles, ISO booting, virtual disks, persistent UEFI settings, and the in-browser display so those moving parts behave like one approachable emulator.
+        </p>
+        <p>
+          QEMU still performs the serious CPU and device emulation underneath; EMUSTAR handles the workflow, recovery controls, and presentation. Think of it as mission control for QEMU, except nobody makes you wear a headset or count backward from ten.
+        </p>
+      </div>
+      <div class="emustar-info-actions">
+        <button class="primary" id="emustarInfoOkButton" type="button">OK</button>
+      </div>
+    </section>
+  </div>
 `;
 
 const els = {
@@ -373,6 +394,9 @@ const els = {
   emulatorSelectedText: document.querySelector("#emulatorSelectedText"),
   emulatorMenu: document.querySelector("#emulatorMenu"),
   emulatorMenuOptions: [...document.querySelectorAll("[data-emulator-option]")],
+  emustarInfoLink: document.querySelector("#emustarInfoLink"),
+  emustarInfoDialog: document.querySelector("#emustarInfoDialog"),
+  emustarInfoOkButton: document.querySelector("#emustarInfoOkButton"),
   processorMode: document.querySelector("#processorMode"),
   nativePanel: document.querySelector("#nativePanel"),
   nativeRuntimeIcon: document.querySelector("#nativeRuntimeIcon"),
@@ -1411,6 +1435,7 @@ const updateBackendUi = () => {
   const externalMode = isExternalMode();
   const runtimeBrand = nativeRuntimeBrand();
   syncEmulatorDropdown();
+  els.emustarInfoLink.hidden = !isEmustarEmulator(els.emulatorMode.value);
   els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode ? "x64" : "x86";
   const selectedMemoryMb = Number(els.memorySize.value) / 1024 / 1024;
   if (isNativeWindowsArm64Mode() && selectedMemoryMb < 4096) {
@@ -1463,6 +1488,14 @@ const updateBackendUi = () => {
 };
 
 els.emulatorMode.addEventListener("change", updateBackendUi);
+els.emustarInfoLink.addEventListener("click", () => {
+  els.emustarInfoDialog.hidden = false;
+  els.emustarInfoOkButton.focus();
+});
+els.emustarInfoOkButton.addEventListener("click", () => {
+  els.emustarInfoDialog.hidden = true;
+  els.emustarInfoLink.focus();
+});
 els.emulatorSelectButton.addEventListener("click", () => {
   setEmulatorMenuOpen(els.emulatorMenu.hidden);
 });

@@ -371,6 +371,37 @@ input[type="text"] {
   position: relative;
 }
 
+.emustar-info-link {
+  justify-self: start;
+  margin-top: 7px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: #ffe45e;
+  font-size: 0.88rem;
+  font-weight: 900;
+  line-height: 1.35;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  filter: drop-shadow(0 0 8px rgba(255, 213, 61, 0.3));
+}
+
+.emustar-info-link:hover,
+.emustar-info-link:focus-visible {
+  color: #fff3a8;
+}
+
+.emustar-info-link:focus-visible {
+  outline: 2px solid #ffe45e;
+  outline-offset: 4px;
+}
+
+.emustar-info-link[hidden] {
+  display: none;
+}
+
 .emulator-select {
   position: relative;
   width: 100%;
@@ -665,6 +696,41 @@ input[type="text"] {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+.emustar-info-panel {
+  justify-items: center;
+  width: min(500px, 100%);
+  border-color: rgba(255, 228, 94, 0.35);
+  text-align: center;
+}
+
+.emustar-info-icon {
+  width: 142px;
+  height: 142px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 24px rgba(28, 184, 255, 0.18));
+}
+
+.emustar-info-panel h2 {
+  font-size: 1.65rem;
+}
+
+.emustar-info-copy {
+  display: grid;
+  gap: 11px;
+  color: #cbd6e3;
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.emustar-info-copy p {
+  margin: 0;
+}
+
+.emustar-info-actions {
+  display: grid;
+  width: 100%;
 }
 
 .console-area {
