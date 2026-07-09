@@ -185,7 +185,17 @@ function Start-Emustar {
   }
 
   Set-VM -VM $vm -AutomaticStartAction Nothing -AutomaticStopAction ShutDown -CheckpointType Disabled
-  Set-VMMemory -VM $vm -DynamicMemoryEnabled $false -StartupBytes ($memoryMb * 1MB)
+  $hostMemoryBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+  if ($hostMemoryBytes -le 10GB -and $memoryMb -gt 2048) {
+    Set-VMMemory -VM $vm `
+      -DynamicMemoryEnabled $true `
+      -StartupBytes 2GB `
+      -MinimumBytes 1GB `
+      -MaximumBytes ($memoryMb * 1MB) `
+      -Buffer 20
+  } else {
+    Set-VMMemory -VM $vm -DynamicMemoryEnabled $false -StartupBytes ($memoryMb * 1MB)
+  }
   Set-VMProcessor -VM $vm -Count $processorCount
 
   $dvd = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1
