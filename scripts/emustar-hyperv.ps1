@@ -213,7 +213,7 @@ function Start-Emustar {
       Set-VMKeyProtector -VM $vm -NewLocalKeyProtector
       Enable-VMTPM -VM $vm
     } elseif ($firmware.SecureBoot.ToString() -ne "On") {
-      Set-VMFirmware -VM $vm -EnableSecureBoot On
+      $warnings.Add("Secure Boot remains off so this installation ISO can boot on the host firmware.")
     }
   } catch {
     $warnings.Add("Secure Boot or virtual TPM could not be configured automatically: $($_.Exception.Message)")

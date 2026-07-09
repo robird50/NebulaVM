@@ -389,7 +389,7 @@ app.innerHTML = `
       <h2 id="emustarInfoTitle">EMUSTAR</h2>
       <div class="emustar-info-copy">
         <p>
-          EMUSTAR is NebulaVM's Windows virtualization runtime. It creates and controls a Generation 2 Hyper-V machine with its own VHDX disk, Secure Boot, virtual TPM, ISO drive, memory, processors, and boot order.
+          EMUSTAR is NebulaVM's Windows virtualization runtime. It creates and controls a Generation 2 Hyper-V machine with its own VHDX disk, Secure Boot capability, virtual TPM, ISO drive, memory, processors, and boot order.
         </p>
         <p>
           Microsoft Hyper-V performs the hardware virtualization; QEMU is not involved. EMUSTAR handles the friendlier controls and keeps the intimidating switches behind the curtain, where intimidating switches are happiest.
@@ -1734,7 +1734,7 @@ const updateBackendUi = () => {
     : "Uses v86 networking support when available.";
   els.placeholderMeta.textContent = nativeMode
     ? emustarMode
-      ? "Windows 11 runs through Hyper-V with Secure Boot, virtual TPM, and a VHDX disk."
+      ? "Windows 11 runs through Hyper-V with UEFI, virtual TPM, and a VHDX disk."
       : nativeUbuntuArm64Mode
       ? `${runtimeBrand} boots Ubuntu ARM64 with a dedicated qcow2 disk.`
       : nativeArm64Mode
