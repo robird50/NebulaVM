@@ -56,7 +56,7 @@ function Get-VmSnapshot {
   }
 
   $security = Get-VMSecurity -VM $Vm -ErrorAction SilentlyContinue
-  $firmware = Get-VMFirmware -VM $Vm -ErrorAction SilentlyContinue
+  $firmware = Get-VMFirmware -VMName $Vm.Name -ErrorAction SilentlyContinue
   $dvd = Get-VMDvdDrive -VM $Vm -ErrorAction SilentlyContinue | Select-Object -First 1
   $disk = Get-VMHardDiskDrive -VM $Vm -ErrorAction SilentlyContinue | Select-Object -First 1
   $addresses = @(
@@ -73,7 +73,7 @@ function Get-VmSnapshot {
     uptimeSeconds = [math]::Floor($Vm.Uptime.TotalSeconds)
     memoryMb = [math]::Round($Vm.MemoryStartup / 1MB)
     processorCount = $Vm.ProcessorCount
-    secureBoot = [bool]$firmware.SecureBoot
+    secureBoot = $firmware.SecureBoot.ToString() -eq "On"
     tpm = [bool]$security.TpmEnabled
     isoPath = $dvd.Path
     diskPath = $disk.Path
