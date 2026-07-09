@@ -1,7 +1,7 @@
 # NebulaVM
 
-NebulaVM is a browser-based virtual machine launcher built with Vite, v86, and
-an optional QEMU Wasm x86_64 backend.
+NebulaVM is a browser-based virtual machine launcher built with Vite, v86,
+EMUSTAR, and optional QEMU backends.
 
 ## Run
 
@@ -54,25 +54,34 @@ is several GB, the browser backend currently stages uploaded media into memory,
 and Windows 11 normally expects UEFI/Secure Boot/TPM support. Lightweight
 64-bit Linux ISOs are much more realistic.
 
-For large x64 ISOs, use `Native QEMU / large ISO`. That mode runs
-`qemu-system-x86_64` from Windows instead of copying the ISO into browser
-memory. For Windows ARM64 ISOs, use `Native QEMU ARM64 / Windows ARM`, which
-runs `qemu-system-aarch64` with ARM64 UEFI firmware. Both modes need QEMU for
-Windows installed, then you paste the full ISO path into the `Local ISO path`
-field. NebulaVM can create a qcow2 install disk in `vm-disks/`.
+For large x64 ISOs, use `EMUSTAR x64`. For Windows ARM64 ISOs, use
+`EMUSTAR ARM64 / Windows`. Both modes need QEMU for Windows installed, then you
+paste the full ISO path into the `Local ISO path` field. NebulaVM can create a
+qcow2 install disk in `vm-disks/`.
 
-When NebulaVM is hosted on Netlify, Native QEMU can still work through a local
+When NebulaVM is hosted on Netlify, EMUSTAR can still work through a local
 bridge on the same PC. Start NebulaVM locally with `npm.cmd run dev`, keep that
 terminal open, then use the Netlify site. The hosted app will try
 `http://127.0.0.1:5174` and `http://localhost:5174` for the native QEMU API.
 This is still required because browsers cannot launch desktop programs by
 themselves.
 
+## EMUSTAR
+
+EMUSTAR is NebulaVM's viewport-first native runtime layer. It manages QEMU
+profiles, virtual disks, persistent UEFI state, boot priority, embedded noVNC
+display, and process diagnostics behind a simpler interface. The display choice
+is saved, and UEFI settings can be reset without deleting the virtual disk.
+
+EMUSTAR uses the open-source QEMU executable as its CPU and device emulation
+engine. It is not presented as an independent rewrite of QEMU. QEMU remains
+licensed by and attributed to the QEMU project under its own license.
+
 ## Chromebook Workaround
 
 A Chromebook cannot realistically run the Windows 11 ISO locally inside the
 browser. Use `Remote VM / browser stream` instead. Run Windows 11 on another PC,
-home server, cloud VM, Proxmox host, or native QEMU machine, expose it through a
+home server, cloud VM, Proxmox host, or EMUSTAR/QEMU machine, expose it through a
 browser console such as noVNC or Apache Guacamole, then paste that URL into
 NebulaVM. The Chromebook becomes the display and keyboard while the other
 machine does the VM work.

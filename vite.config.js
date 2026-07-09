@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import net from "node:net";
+import { cpus } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket, { WebSocketServer } from "ws";
@@ -132,6 +133,8 @@ const findFirmwareVars = (arch, qemuPath) => {
 };
 
 let nativeVm = null;
+let nativeVmOutput = "";
+let lastNativeExit = null;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
 
@@ -201,6 +204,31 @@ const nativeVarsName = (profile) => {
   return "nebulavm-native-vars.fd";
 };
 
+const resetNativeFirmware = (body) => {
+  if (nativeVm) {
+    throw new Error("Stop EMUSTAR before resetting its UEFI settings.");
+  }
+
+  const arch = normalizeArch(body.arch);
+  const profile = normalizeNativeProfile(body.profile, arch);
+  const qemu = findExecutable(arch === "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64");
+  const varsTemplate = findFirmwareVars(arch, qemu);
+  if (!qemu || !varsTemplate) {
+    throw new Error("QEMU UEFI firmware variables were not found.");
+  }
+
+  const vmDir = resolve(workspaceDir, "vm-disks");
+  const varsPath = resolve(vmDir, nativeVarsName(profile));
+  const backupPath = `${varsPath}.bak`;
+  mkdirSync(vmDir, { recursive: true });
+  if (existsSync(varsPath)) {
+    copyFileSync(varsPath, backupPath);
+  }
+  copyFileSync(varsTemplate, varsPath);
+
+  return { arch, profile, varsPath, backupPath: existsSync(backupPath) ? backupPath : null };
+};
+
 const nativeStatus = (requestedArch = "x86_64") => {
   const arch = normalizeArch(requestedArch);
   const qemu = findExecutable(arch === "aarch64" ? "qemu-system-aarch64" : "qemu-system-x86_64");
@@ -214,6 +242,9 @@ const nativeStatus = (requestedArch = "x86_64") => {
     running: Boolean(nativeVm),
     pid: nativeVm?.pid || null,
     embeddedDisplay: Boolean(nativeVm?.vncPort),
+    runtime: "EMUSTAR",
+    engine: "QEMU",
+    lastExit: lastNativeExit,
   };
 };
 
@@ -245,6 +276,7 @@ const startNativeVm = async (body) => {
   const qemuBootDevice = diskFirst ? "c" : "d";
   const displayMode = body.displayMode === "external" ? "external" : "viewport";
   const embeddedDisplay = displayMode === "viewport";
+  const vcpuCount = Math.max(2, Math.min(4, cpus().length - 1));
   const vmDir = resolve(workspaceDir, "vm-disks");
   const diskPath = resolve(vmDir, nativeDiskName(profile));
   mkdirSync(vmDir, { recursive: true });
@@ -277,12 +309,16 @@ const startNativeVm = async (body) => {
   const args =
     arch === "aarch64"
       ? [
+          "-name",
+          `EMUSTAR ${profile}`,
           "-machine",
-          "virt",
+          "virt,gic-version=3,highmem=on",
+          "-accel",
+          "tcg,thread=multi",
           "-cpu",
           "max",
           "-smp",
-          "2",
+          `${vcpuCount}`,
           "-m",
           `${memoryMb}M`,
           "-device",
@@ -303,6 +339,8 @@ const startNativeVm = async (body) => {
           "virtio-net-pci,netdev=net0",
         ]
       : [
+          "-name",
+          "EMUSTAR x64",
           "-machine",
           "q35",
           "-cpu",
@@ -360,17 +398,34 @@ const startNativeVm = async (body) => {
 
   child.vncPort = vnc?.port || null;
   nativeVm = child;
-  let recentOutput = "";
+  nativeVmOutput = "";
+  lastNativeExit = null;
   const capture = (chunk) => {
-    recentOutput = `${recentOutput}${chunk}`.slice(-4000);
+    nativeVmOutput = `${nativeVmOutput}${chunk}`.slice(-4000);
   };
   child.stdout.on("data", capture);
   child.stderr.on("data", capture);
-  child.on("exit", () => {
-    nativeVm = null;
+  child.on("exit", (code, signal) => {
+    lastNativeExit = {
+      code,
+      signal,
+      output: nativeVmOutput.trim(),
+      at: new Date().toISOString(),
+    };
+    if (nativeVm === child) {
+      nativeVm = null;
+    }
   });
-  child.on("error", () => {
-    nativeVm = null;
+  child.on("error", (error) => {
+    lastNativeExit = {
+      code: null,
+      signal: null,
+      output: error.message,
+      at: new Date().toISOString(),
+    };
+    if (nativeVm === child) {
+      nativeVm = null;
+    }
   });
 
   if (embeddedDisplay) {
@@ -391,13 +446,13 @@ const startNativeVm = async (body) => {
     args,
     bootOrder: diskFirst ? "disk-first" : "cdrom-first",
     displayMode,
-    diskPath: existsSync(diskPath) ? diskPath : null,
+    diskPath: body.createDisk !== false && existsSync(diskPath) ? diskPath : null,
     ovmf,
     ovmfVarsPath,
     vncPath: embeddedDisplay ? nativeVncPath : null,
     vncPort: vnc?.port || null,
     get recentOutput() {
-      return recentOutput;
+      return nativeVmOutput;
     },
   };
 };
@@ -478,8 +533,15 @@ const nativeQemuPlugin = () => ({
             diskPath: result.diskPath,
             displayMode: result.displayMode,
             ovmf: result.ovmf,
+            ovmfVarsPath: result.ovmfVarsPath,
             vncPath: result.vncPath,
           });
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/native-qemu/reset-firmware") {
+          const body = await readJsonBody(req);
+          json(res, 200, { ok: true, ...resetNativeFirmware(body) });
           return;
         }
 

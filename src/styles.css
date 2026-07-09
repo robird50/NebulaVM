@@ -495,6 +495,44 @@ input[type="text"] {
   margin: 0;
 }
 
+.emustar-runtime-heading {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 2px;
+}
+
+.emustar-runtime-heading img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.3));
+}
+
+.emustar-runtime-heading strong,
+.emustar-runtime-heading small {
+  display: block;
+}
+
+.emustar-runtime-heading strong {
+  color: #f4f8fb;
+  font-size: 0.94rem;
+}
+
+.emustar-runtime-heading small {
+  margin-top: 2px;
+  color: #9eacbc;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.emustar-reset-firmware {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
 .native-status {
   grid-column: 1 / -1;
   margin: 0;
