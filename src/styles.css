@@ -255,6 +255,194 @@ h2 {
   padding: 18px;
 }
 
+.display-identity {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.emustar-console-mark {
+  display: none;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.emustar-console-kicker {
+  display: none;
+}
+
+.screen-mode-icon {
+  width: 178px;
+  height: 142px;
+  margin-bottom: 14px;
+  object-fit: contain;
+  filter: drop-shadow(0 14px 28px rgba(27, 196, 255, 0.2));
+}
+
+.screen-mode-icon[hidden] {
+  display: none;
+}
+
+.workspace.is-emustar-mode {
+  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+}
+
+.workspace.is-emustar-mode .controls,
+.workspace.is-emustar-mode .console-area {
+  background: #0a1019;
+  backdrop-filter: none;
+}
+
+.workspace.is-emustar-mode .controls {
+  border-color: rgba(255, 228, 94, 0.42);
+  border-top: 3px solid #ffe45e;
+  box-shadow:
+    0 20px 70px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.workspace.is-emustar-mode .console-area {
+  position: relative;
+  border-color: rgba(60, 211, 255, 0.38);
+  border-top: 3px solid #3cd3ff;
+  box-shadow:
+    0 20px 70px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.workspace.is-emustar-mode .controls .kicker {
+  color: #ffe45e;
+}
+
+.workspace.is-emustar-mode .console-area .kicker {
+  color: #60dcff;
+}
+
+.workspace.is-emustar-mode .emustar-console-mark {
+  display: block;
+  filter: drop-shadow(0 0 14px rgba(60, 211, 255, 0.25));
+}
+
+.workspace.is-emustar-mode .emustar-console-kicker {
+  display: block;
+  margin-bottom: 2px;
+  color: #ffe45e;
+  font-size: 0.64rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.workspace.is-emustar-mode .emulator-select {
+  border-color: rgba(255, 228, 94, 0.56);
+  background: #080d14;
+  box-shadow: inset 3px 0 0 #ffe45e;
+}
+
+.workspace.is-emustar-mode .drop-zone {
+  border-color: rgba(60, 211, 255, 0.54);
+  background: #0d1822;
+}
+
+.workspace.is-emustar-mode .drop-zone.is-dragging,
+.workspace.is-emustar-mode .drop-zone.has-file {
+  border-color: #60dcff;
+  background: #102431;
+}
+
+.workspace.is-emustar-mode .drop-icon {
+  background: #ffe45e;
+  color: #11100a;
+  box-shadow: 0 0 0 5px rgba(255, 228, 94, 0.11);
+}
+
+.workspace.is-emustar-mode select,
+.workspace.is-emustar-mode input[type="text"] {
+  border-color: rgba(96, 220, 255, 0.25);
+  background: #080d14;
+}
+
+.workspace.is-emustar-mode .native-panel {
+  border-color: rgba(60, 211, 255, 0.34);
+  background: #0c1622;
+}
+
+.workspace.is-emustar-mode .emustar-runtime-heading {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+
+.workspace.is-emustar-mode .emustar-runtime-heading img {
+  width: 44px;
+  height: 44px;
+}
+
+.workspace.is-emustar-mode .emustar-host-share {
+  border-top-color: rgba(255, 228, 94, 0.26);
+}
+
+.workspace.is-emustar-mode .controls .primary {
+  background: #ffe45e;
+  color: #171305;
+}
+
+.workspace.is-emustar-mode .controls .secondary {
+  border-color: rgba(96, 220, 255, 0.22);
+  background: #111b27;
+}
+
+.workspace.is-emustar-mode .screen-shell {
+  border-color: rgba(96, 220, 255, 0.58);
+  background-color: #02060a;
+  box-shadow:
+    0 0 0 1px rgba(255, 228, 94, 0.1),
+    0 18px 46px rgba(0, 0, 0, 0.34);
+}
+
+.workspace.is-emustar-mode .screen-placeholder {
+  max-width: 520px;
+}
+
+.workspace.is-emustar-mode .screen-placeholder strong {
+  color: #f7fbff;
+  font-size: 1.18rem;
+}
+
+.workspace.is-emustar-mode .screen-placeholder small {
+  color: #a8bac8;
+}
+
+.workspace.is-emustar-mode .metric-row > span {
+  border: 1px solid rgba(96, 220, 255, 0.16);
+  background: #111b27;
+}
+
+.workspace.is-emustar-mode .metric-row .ai-summary-pill {
+  border-color: rgba(255, 228, 94, 0.3);
+  background: #121b24;
+}
+
+.workspace.is-emustar-mode .metric-row .ai-summary-pill::before {
+  background: #ffe45e;
+  color: #171305;
+}
+
+.workspace.is-emustar-mode .terminal-panel {
+  border-color: rgba(255, 228, 94, 0.25);
+  background: #05090e;
+}
+
+.workspace.is-emustar-mode .terminal-header {
+  border-bottom-color: rgba(96, 220, 255, 0.16);
+  color: #ffe45e;
+}
+
+.workspace.is-emustar-mode .terminal-panel pre {
+  color: #75e3ff;
+}
+
 .panel-header,
 .machine-topbar,
 .terminal-header {

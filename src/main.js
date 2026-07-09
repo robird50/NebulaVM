@@ -93,12 +93,12 @@ app.innerHTML = `
       </div>
     </section>
 
-    <section class="workspace" aria-label="Virtual machine workspace">
+    <section class="workspace" id="workspace" aria-label="Virtual machine workspace">
       <aside class="panel controls" aria-label="Virtual machine controls">
         <div class="panel-header">
           <div>
-            <p class="kicker">Media</p>
-            <h2>Boot source</h2>
+            <p class="kicker" id="mediaKicker">Media</p>
+            <h2 id="bootSourceTitle">Boot source</h2>
           </div>
         </div>
 
@@ -240,6 +240,7 @@ app.innerHTML = `
           <div class="emustar-runtime-heading">
             <img id="nativeRuntimeIcon" src="/assets/emustar-icon.png" alt="" />
             <span>
+              <span class="emustar-console-kicker">Nebula Console</span>
               <strong id="nativeRuntimeName">EMUSTAR</strong>
               <small id="nativeRuntimeAttribution">NebulaVM runtime powered by QEMU</small>
             </span>
@@ -337,9 +338,12 @@ app.innerHTML = `
 
       <section class="console-area" aria-label="Virtual machine display">
         <div class="machine-topbar">
-          <div>
-            <p class="kicker">Display</p>
-            <h2 id="machineTitle">Awaiting boot media</h2>
+          <div class="display-identity">
+            <img class="emustar-console-mark" src="/assets/emustar-icon.png" alt="" />
+            <div>
+              <p class="kicker" id="displayKicker">Display</p>
+              <h2 id="machineTitle">Awaiting boot media</h2>
+            </div>
           </div>
           <div class="metric-row">
             <span id="uptimeMetric">00:00</span>
@@ -361,8 +365,9 @@ app.innerHTML = `
             <div class="native-display" id="nativeDisplay" hidden></div>
             <iframe class="remote-frame" id="remoteFrame" title="Remote VM display" hidden></iframe>
             <div class="screen-placeholder" id="screenPlaceholder">
-              <span class="orbital"></span>
-              <strong>Drop an ISO to begin</strong>
+              <img class="screen-mode-icon" id="screenModeIcon" src="/assets/emustar-icon.png" alt="" hidden />
+              <span class="orbital" id="screenOrbital"></span>
+              <strong id="placeholderTitle">Drop an ISO to begin</strong>
               <small id="placeholderMeta">Legacy x86, 32-bit Linux, DOS, hobby OS, and vintage Windows images work best.</small>
             </div>
           </div>
@@ -370,7 +375,7 @@ app.innerHTML = `
 
         <div class="terminal-panel">
           <div class="terminal-header">
-            <span>Activity</span>
+            <span id="activityLabel">Activity</span>
             <button id="clearLogButton" type="button">Clear</button>
           </div>
           <pre id="logOutput" aria-live="polite"></pre>
@@ -411,6 +416,9 @@ const els = {
   emulatorSelectedText: document.querySelector("#emulatorSelectedText"),
   emulatorMenu: document.querySelector("#emulatorMenu"),
   emulatorMenuOptions: [...document.querySelectorAll("[data-emulator-option]")],
+  workspace: document.querySelector("#workspace"),
+  mediaKicker: document.querySelector("#mediaKicker"),
+  bootSourceTitle: document.querySelector("#bootSourceTitle"),
   emustarInfoLink: document.querySelector("#emustarInfoLink"),
   emustarInfoDialog: document.querySelector("#emustarInfoDialog"),
   emustarInfoOkButton: document.querySelector("#emustarInfoOkButton"),
@@ -454,6 +462,11 @@ const els = {
   nativeDisplay: document.querySelector("#nativeDisplay"),
   remoteFrame: document.querySelector("#remoteFrame"),
   placeholderMeta: document.querySelector("#placeholderMeta"),
+  placeholderTitle: document.querySelector("#placeholderTitle"),
+  screenModeIcon: document.querySelector("#screenModeIcon"),
+  screenOrbital: document.querySelector("#screenOrbital"),
+  displayKicker: document.querySelector("#displayKicker"),
+  activityLabel: document.querySelector("#activityLabel"),
   machineTitle: document.querySelector("#machineTitle"),
   powerState: document.querySelector("#powerState"),
   uptimeMetric: document.querySelector("#uptimeMetric"),
@@ -726,6 +739,7 @@ const updateMediaWarning = () => {
 
 const updateButtons = (busy = false) => {
   const externalMode = isExternalMode();
+  const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   const hasBootMedia = isNativeMode()
     ? Boolean(els.nativeIsoPath.value.trim())
     : isRemoteMode()
@@ -741,6 +755,8 @@ const updateButtons = (busy = false) => {
   els.loadStateButton.disabled = externalMode;
   els.nativeResetFirmwareButton.disabled =
     busy || !isNativeMode() || Boolean(state.emulator) || nativeUnavailable;
+  els.bootButton.textContent = emustarMode ? "Launch EMUSTAR" : "Boot VM";
+  els.stopButton.textContent = emustarMode ? "End session" : "Stop";
   els.pauseButton.textContent = state.running ? "Pause" : "Resume";
 };
 
@@ -1500,8 +1516,20 @@ const updateBackendUi = () => {
   const remoteMode = isRemoteMode();
   const externalMode = isExternalMode();
   const runtimeBrand = nativeRuntimeBrand();
+  const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   syncEmulatorDropdown();
-  els.emustarInfoLink.hidden = !isEmustarEmulator(els.emulatorMode.value);
+  els.workspace.classList.toggle("is-emustar-mode", emustarMode);
+  els.emustarInfoLink.hidden = !emustarMode;
+  els.mediaKicker.textContent = emustarMode ? "Nebula Host" : "Media";
+  els.bootSourceTitle.textContent = emustarMode ? "Mission media" : "Boot source";
+  els.displayKicker.textContent = emustarMode ? "Nebula Console" : "Display";
+  els.activityLabel.textContent = emustarMode ? "Mission log" : "Activity";
+  els.screenModeIcon.hidden = !emustarMode;
+  els.screenOrbital.hidden = emustarMode;
+  els.placeholderTitle.textContent = emustarMode ? "EMUSTAR viewport standing by" : "Drop an ISO to begin";
+  if (!state.emulator && !state.isoFile) {
+    els.machineTitle.textContent = emustarMode ? "EMUSTAR Control Deck" : "Awaiting boot media";
+  }
   els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode ? "x64" : "x86";
   const selectedMemoryMb = Number(els.memorySize.value) / 1024 / 1024;
   if (isNativeWindowsArm64Mode() && selectedMemoryMb < 4096) {

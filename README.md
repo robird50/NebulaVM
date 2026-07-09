@@ -76,6 +76,8 @@ EMUSTAR is NebulaVM's viewport-first native runtime layer. It manages QEMU
 profiles, virtual disks, persistent UEFI state, boot priority, embedded noVNC
 display, and process diagnostics behind a simpler interface. The display choice
 is saved, and UEFI settings can be reset without deleting the virtual disk.
+Selecting an EMUSTAR profile activates the dedicated Nebula Console interface;
+other emulator modes keep the standard NebulaVM workspace.
 
 EMUSTAR uses the open-source QEMU executable as its CPU and device emulation
 engine. It is not presented as an independent rewrite of QEMU. QEMU remains
