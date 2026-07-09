@@ -138,15 +138,15 @@ app.innerHTML = `
                   <span>Nebula x64 / QEMU Wasm</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu">
-                  <img class="emulator-menu-icon" src="/assets/nebulavm-emulator-icon.png" alt="" />
+                  <img class="emulator-menu-icon" src="/assets/emustar-icon.png" alt="" />
                   <span>EMUSTAR x64</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu-arm64">
-                  <img class="emulator-menu-icon" src="/assets/nebulavm-emulator-icon.png" alt="" />
+                  <img class="emulator-menu-icon" src="/assets/emustar-icon.png" alt="" />
                   <span>EMUSTAR ARM64 / Windows</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="native-qemu-ubuntu-arm64">
-                  <img class="emulator-menu-icon" src="/assets/nebulavm-emulator-icon.png" alt="" />
+                  <img class="emulator-menu-icon" src="/assets/emustar-icon.png" alt="" />
                   <span>EMUSTAR ARM64 / Ubuntu</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="remote-vm">
@@ -211,7 +211,7 @@ app.innerHTML = `
 
         <div class="native-panel" id="nativePanel" hidden>
           <div class="emustar-runtime-heading">
-            <img src="/assets/nebulavm-emulator-icon.png" alt="" />
+            <img src="/assets/emustar-icon.png" alt="" />
             <span>
               <strong>EMUSTAR</strong>
               <small>NebulaVM runtime powered by QEMU</small>
@@ -514,6 +514,8 @@ const nativeModeLabel = () =>
     : isNativeWindowsArm64Mode()
       ? "EMUSTAR ARM64 / Windows"
       : "EMUSTAR x64";
+const isEmustarEmulator = (value) =>
+  value === "native-qemu" || value === "native-qemu-arm64" || value === "native-qemu-ubuntu-arm64";
 const isNebulaEmulator = (value) =>
   value === "v86" ||
   value === "qemu-x64" ||
@@ -537,6 +539,9 @@ const syncEmulatorDropdown = () => {
   const selectedValue = els.emulatorMode.value;
   els.emulatorSelectedText.textContent = getEmulatorLabel(selectedValue);
   els.emulatorSelectedIcon.classList.toggle("emulator-menu-icon-empty", !isNebulaEmulator(selectedValue));
+  els.emulatorSelectedIcon.src = isEmustarEmulator(selectedValue)
+    ? "/assets/emustar-icon.png"
+    : "/assets/nebulavm-emulator-icon.png";
 
   els.emulatorMenuOptions.forEach((option) => {
     const selected = option.dataset.emulatorOption === selectedValue;
