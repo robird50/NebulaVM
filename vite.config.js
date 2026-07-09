@@ -2,10 +2,12 @@ import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import dgram from "node:dgram";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { cpus, networkInterfaces } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import WebSocket, { WebSocketServer } from "ws";
 
@@ -151,6 +153,165 @@ const readJsonBody = (req) =>
     });
     req.on("error", rejectBody);
   });
+
+const driveImportDirectory = resolve(workspaceDir, "vm-disks", "imports");
+let driveImportJob = null;
+
+const sanitizeFilename = (value) => {
+  const cleaned = String(value || "")
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/^\.+|\.+$/g, "")
+    .slice(0, 120);
+  return cleaned || "google-drive.iso";
+};
+
+const parseContentDispositionFilename = (header) => {
+  const value = String(header || "");
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1].replace(/^"|"$/g, ""));
+    } catch {
+      return utf8Match[1].replace(/^"|"$/g, "");
+    }
+  }
+
+  const plainMatch = value.match(/filename="?([^";]+)"?/i);
+  return plainMatch?.[1] || "";
+};
+
+const parseGoogleDriveFileId = (value) => {
+  const input = String(value || "").trim();
+  if (!input) throw new Error("Paste a Google Drive file share link first.");
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(input)) return input;
+
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new Error("Paste a full Google Drive file link, not a Chromebook path.");
+  }
+
+  const host = url.hostname.toLowerCase();
+  if (!/(^|\.)drive\.google\.com$/.test(host) && !/(^|\.)googleusercontent\.com$/.test(host)) {
+    throw new Error("Only Google Drive file links are supported here.");
+  }
+
+  const pathMatch = url.pathname.match(/\/file\/d\/([^/]+)/i);
+  const id = pathMatch?.[1] || url.searchParams.get("id") || "";
+  if (!/^[a-zA-Z0-9_-]{20,}$/.test(id)) {
+    throw new Error("That Google Drive link does not include a downloadable file ID.");
+  }
+  return id;
+};
+
+const downloadResponseFromGoogleDrive = async (fileId) => {
+  const directUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}&confirm=t`;
+  let response = await fetch(directUrl, { redirect: "follow" });
+  if (!response.ok) {
+    throw new Error(`Google Drive returned HTTP ${response.status}.`);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("text/html")) {
+    return response;
+  }
+
+  const html = await response.text();
+  const hrefMatch = html.match(/href="([^"]*(?:uc|download)[^"]*confirm=[^"]+)"/i);
+  if (hrefMatch) {
+    const nextUrl = new URL(hrefMatch[1].replaceAll("&amp;", "&"), response.url).toString();
+    response = await fetch(nextUrl, { redirect: "follow" });
+    if (!response.ok) {
+      throw new Error(`Google Drive returned HTTP ${response.status}.`);
+    }
+    if (!(response.headers.get("content-type") || "").toLowerCase().includes("text/html")) {
+      return response;
+    }
+  }
+
+  if (/access denied|need access|request access|sign in/i.test(html)) {
+    throw new Error("Google Drive blocked the file. Set sharing to 'Anyone with the link can view'.");
+  }
+  if (/quota|too many users|download quota/i.test(html)) {
+    throw new Error("Google Drive says this file hit a download limit.");
+  }
+  throw new Error("Google Drive did not return the ISO file. Make sure the link is shared publicly.");
+};
+
+const driveJobSnapshot = (job = driveImportJob) => {
+  if (!job) return { ok: true, job: null };
+  return {
+    ok: true,
+    job: {
+      id: job.id,
+      state: job.state,
+      message: job.message,
+      bytesReceived: job.bytesReceived,
+      totalBytes: job.totalBytes,
+      isoPath: job.isoPath,
+      error: job.error,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt,
+    },
+  };
+};
+
+const startGoogleDriveIsoImport = (driveUrl) => {
+  if (driveImportJob?.state === "running") {
+    throw new Error("A Google Drive ISO import is already running.");
+  }
+
+  const fileId = parseGoogleDriveFileId(driveUrl);
+  const job = {
+    id: randomBytes(8).toString("hex"),
+    state: "running",
+    message: "Connecting to Google Drive...",
+    bytesReceived: 0,
+    totalBytes: 0,
+    isoPath: "",
+    error: "",
+    startedAt: new Date().toISOString(),
+    completedAt: "",
+  };
+  driveImportJob = job;
+
+  (async () => {
+    mkdirSync(driveImportDirectory, { recursive: true });
+    const response = await downloadResponseFromGoogleDrive(fileId);
+    job.message = "Downloading ISO to the NebulaVM host...";
+    job.totalBytes = Number(response.headers.get("content-length") || 0);
+
+    const headerName = parseContentDispositionFilename(response.headers.get("content-disposition"));
+    const baseName = sanitizeFilename(headerName || `google-drive-${fileId}.iso`);
+    const isoName = baseName.toLowerCase().endsWith(".iso") ? baseName : `${baseName}.iso`;
+    const finalPath = resolve(driveImportDirectory, `${Date.now()}-${isoName}`);
+    const tempPath = `${finalPath}.part`;
+
+    const source = Readable.from(async function* progressChunks() {
+      for await (const chunk of Readable.fromWeb(response.body)) {
+        job.bytesReceived += chunk.length;
+        yield chunk;
+      }
+    }());
+    await pipeline(source, createWriteStream(tempPath));
+    renameSync(tempPath, finalPath);
+
+    job.state = "complete";
+    job.message = "Google Drive ISO imported.";
+    job.isoPath = finalPath;
+    job.completedAt = new Date().toISOString();
+  })().catch((error) => {
+    job.state = "error";
+    job.message = "Google Drive ISO import failed.";
+    job.error = error.message || String(error);
+    job.completedAt = new Date().toISOString();
+  });
+
+  return job;
+};
 
 const stripPathQuotes = (value) => String(value || "").trim().replace(/^"|"$/g, "");
 
@@ -735,8 +896,8 @@ const nativeQemuPlugin = () => ({
       const url = new URL(req.url || "/", "http://localhost");
       const isNativeQemuApi = url.pathname.startsWith("/api/native-qemu");
       const isHyperVApi = url.pathname.startsWith("/api/emustar-hyperv");
-      const isHostInfoApi = url.pathname === "/api/emustar-host/info";
-      if (!isNativeQemuApi && !isHyperVApi && !isHostInfoApi) {
+      const isHostApi = url.pathname.startsWith("/api/emustar-host/");
+      if (!isNativeQemuApi && !isHyperVApi && !isHostApi) {
         next();
         return;
       }
@@ -755,7 +916,7 @@ const nativeQemuPlugin = () => ({
       }
 
       try {
-        if (req.method === "GET" && isHostInfoApi) {
+        if (req.method === "GET" && url.pathname === "/api/emustar-host/info") {
           const configuredHost = server.config.server.host;
           const sharingEnabled =
             configuredHost === true || configuredHost === "0.0.0.0" || configuredHost === "::";
@@ -779,6 +940,18 @@ const nativeQemuPlugin = () => ({
             accessToken: hostAccessToken,
           });
           return;
+        }
+
+        if (url.pathname === "/api/emustar-host/drive-import") {
+          if (req.method === "POST") {
+            const body = await readJsonBody(req);
+            json(res, 200, driveJobSnapshot(startGoogleDriveIsoImport(body.driveUrl || body.url)));
+            return;
+          }
+          if (req.method === "GET") {
+            json(res, 200, driveJobSnapshot());
+            return;
+          }
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") {

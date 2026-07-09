@@ -783,6 +783,35 @@ input[type="text"] {
   line-height: 1.4;
 }
 
+.drive-import-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid rgba(255, 221, 61, 0.26);
+  border-radius: 8px;
+  background: rgba(255, 221, 61, 0.055);
+}
+
+.drive-import-panel .field {
+  min-width: 0;
+}
+
+.drive-import-panel .secondary {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+.drive-import-panel small {
+  grid-column: 1 / -1;
+  color: #f6e49a;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
 .native-status {
   grid-column: 1 / -1;
   margin: 0;

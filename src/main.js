@@ -58,6 +58,7 @@ const state = {
   nativeRuntimeName: null,
   nativeMonitorTimer: null,
   viewportSummaryTimer: null,
+  driveImportPolling: false,
 };
 
 app.innerHTML = `
@@ -258,6 +259,15 @@ app.innerHTML = `
             <input id="nativeIsoPath" type="text" placeholder="C:\\Users\\Dell\\Downloads\\Win11.iso" />
           </label>
 
+          <div class="drive-import-panel">
+            <label class="field full-span">
+              <span>Google Drive ISO link</span>
+              <input id="driveIsoUrl" type="text" placeholder="https://drive.google.com/file/d/..." />
+            </label>
+            <button class="secondary" id="driveImportButton" type="button">Import Drive ISO</button>
+            <small id="driveImportStatus">No Drive import running.</small>
+          </div>
+
           <label class="toggle-row">
             <input type="checkbox" id="nativeCreateDisk" checked />
             <span>
@@ -431,6 +441,9 @@ const els = {
   emustarShareStatus: document.querySelector("#emustarShareStatus"),
   nativeDisplayMode: document.querySelector("#nativeDisplayMode"),
   nativeIsoPath: document.querySelector("#nativeIsoPath"),
+  driveIsoUrl: document.querySelector("#driveIsoUrl"),
+  driveImportButton: document.querySelector("#driveImportButton"),
+  driveImportStatus: document.querySelector("#driveImportStatus"),
   nativeCreateDisk: document.querySelector("#nativeCreateDisk"),
   nativeDiskHelp: document.querySelector("#nativeDiskHelp"),
   nativeDiskSize: document.querySelector("#nativeDiskSize"),
@@ -557,6 +570,43 @@ const fetchHyperVJson = async (path, options) => {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
       const response = await fetch(`${base}/api/emustar-hyperv/${path}`, {
+        cache: "no-store",
+        ...options,
+        headers,
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.toLowerCase().includes("application/json")) {
+        continue;
+      }
+
+      const data = await response.json();
+      state.nativeQemuApiBase = base;
+      return { response, data, base };
+    } catch (error) {
+      lastError = error instanceof TypeError ? new Error(nativeQemuBridgeMessage) : error;
+    }
+  }
+
+  throw new Error(lastError.message || nativeQemuBridgeMessage);
+};
+
+const fetchEmustarHostJson = async (path, options) => {
+  const bridgeBases = [
+    state.nativeQemuApiBase,
+    window.location.origin,
+    "http://127.0.0.1:5174",
+    "http://localhost:5174",
+  ].filter(Boolean);
+  const uniqueBridgeBases = [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
+  let lastError = new Error(nativeQemuBridgeMessage);
+
+  for (const base of uniqueBridgeBases) {
+    try {
+      const headers = new Headers(options?.headers || {});
+      if (state.nativeHostToken) {
+        headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+      }
+      const response = await fetch(`${base}/api/emustar-host/${path}`, {
         cache: "no-store",
         ...options,
         headers,
@@ -1729,6 +1779,96 @@ const autoAdoptSharedHyperV = async () => {
   }
 };
 
+const driveImportStatusText = (job) => {
+  if (!job) return "No Drive import running.";
+  if (job.state === "complete") return `Imported to ${job.isoPath}`;
+  if (job.state === "error") return job.error || "Google Drive ISO import failed.";
+  const received = formatBytes(job.bytesReceived || 0);
+  const total = job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : "";
+  return `${job.message || "Importing Google Drive ISO..."} ${received}${total}`;
+};
+
+const applyDriveImportJob = (job) => {
+  els.driveImportStatus.textContent = driveImportStatusText(job);
+  const running = job?.state === "running";
+  els.driveImportButton.disabled = running;
+  els.driveIsoUrl.disabled = running;
+
+  if (job?.state === "complete" && job.isoPath) {
+    els.nativeIsoPath.value = job.isoPath;
+    updateButtons();
+  }
+};
+
+const pollDriveImport = async () => {
+  if (state.driveImportPolling) return null;
+  state.driveImportPolling = true;
+  try {
+    while (true) {
+      const { data } = await fetchEmustarHostJson("drive-import");
+      const job = data.job;
+      applyDriveImportJob(job);
+
+      if (!job || job.state === "complete" || job.state === "error") {
+        return job;
+      }
+      await new Promise((resolvePoll) => window.setTimeout(resolvePoll, 2000));
+    }
+  } finally {
+    state.driveImportPolling = false;
+  }
+};
+
+const importDriveIso = async () => {
+  const driveUrl = els.driveIsoUrl.value.trim();
+  if (!driveUrl) {
+    els.driveImportStatus.textContent = "Paste a Google Drive ISO link first.";
+    return;
+  }
+
+  els.driveImportButton.disabled = true;
+  els.driveIsoUrl.disabled = true;
+  els.driveImportStatus.textContent = "Starting Google Drive import...";
+  try {
+    const { response, data } = await fetchEmustarHostJson("drive-import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ driveUrl }),
+    });
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Google Drive import failed to start.");
+    }
+
+    applyDriveImportJob(data.job);
+    const job = await pollDriveImport();
+    if (job?.state === "complete") {
+      log(`Google Drive ISO imported to ${job.isoPath}.`);
+    } else if (job?.state === "error") {
+      log(`Google Drive import failed: ${job.error}`);
+    }
+  } catch (error) {
+    els.driveImportStatus.textContent = error.message;
+    log(`Google Drive import failed: ${error.message}`);
+  } finally {
+    els.driveImportButton.disabled = false;
+    els.driveIsoUrl.disabled = false;
+    updateButtons();
+  }
+};
+
+const refreshDriveImportStatus = async () => {
+  if (!isHyperVMode()) return;
+  try {
+    const { data } = await fetchEmustarHostJson("drive-import");
+    applyDriveImportJob(data.job);
+    if (data.job?.state === "running") {
+      void pollDriveImport();
+    }
+  } catch {
+    els.driveImportStatus.textContent = "Drive import is unavailable from this page.";
+  }
+};
+
 const resetNativeFirmware = async () => {
   if (!isNativeQemuMode() || state.emulator) return;
 
@@ -1867,6 +2007,9 @@ const updateBackendUi = () => {
   updateButtons();
   void updateEmustarHostInfo();
   void updateNativeStatus();
+  if (nativeMode) {
+    void refreshDriveImportStatus();
+  }
   void updateBrowserQemuCapabilities();
 };
 
@@ -1922,6 +2065,12 @@ els.processorMode.addEventListener("change", () => {
   updateBackendUi();
 });
 els.nativeIsoPath.addEventListener("input", () => updateButtons());
+els.driveIsoUrl.addEventListener("input", () => {
+  if (!els.driveIsoUrl.value.trim()) {
+    els.driveImportStatus.textContent = "No Drive import running.";
+  }
+});
+els.driveImportButton.addEventListener("click", importDriveIso);
 els.nativeCreateDisk.addEventListener("change", () => updateButtons());
 els.nativeDisplayMode.addEventListener("change", () => {
   window.localStorage.setItem("nebulavm.emustar.display", els.nativeDisplayMode.value);
