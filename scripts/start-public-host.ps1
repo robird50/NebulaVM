@@ -6,6 +6,7 @@ $nodePath = "C:\Program Files\nodejs\node.exe"
 $vitePath = Join-Path $projectRoot "node_modules\vite\bin\vite.js"
 $cloudflaredPath = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
 $publicUrlPath = Join-Path $projectRoot ".nebulavm-public-url"
+$hostTokenPath = Join-Path $projectRoot ".nebulavm-host-token"
 $cloudflaredLogPath = Join-Path $projectRoot ".nebulavm-cloudflared.log"
 $hyperVModule = Get-ChildItem `
   "$env:SystemRoot\System32\WindowsPowerShell\v1.0\Modules\Hyper-V" `
@@ -32,7 +33,18 @@ function Start-NebulaGuest {
 
 function Test-NebulaHost {
   try {
-    $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:5174/api/emustar-hyperv/status" -TimeoutSec 2
+    $headers = @{}
+    if (Test-Path -LiteralPath $hostTokenPath) {
+      $token = (Get-Content -LiteralPath $hostTokenPath -Raw).Trim()
+      if ($token) {
+        $headers.Authorization = "Bearer $token"
+      }
+    }
+    $response = Invoke-WebRequest `
+      -UseBasicParsing `
+      -Uri "http://127.0.0.1:5174/api/emustar-host/info" `
+      -Headers $headers `
+      -TimeoutSec 5
     return $response.StatusCode -eq 200
   } catch {
     return $false
@@ -98,6 +110,22 @@ function Start-NebulaTunnel {
   throw "The NebulaVM public tunnel did not become ready."
 }
 
+function Sync-PublicUrlFromLog {
+  if (-not (Test-Path -LiteralPath $cloudflaredLogPath)) {
+    return
+  }
+
+  $match = Select-String `
+    -Path $cloudflaredLogPath `
+    -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" `
+    -AllMatches |
+    Select-Object -Last 1
+  if ($match) {
+    $publicUrl = $match.Matches.Value | Select-Object -Last 1
+    Set-Content -LiteralPath $publicUrlPath -Value $publicUrl -Encoding ASCII
+  }
+}
+
 Set-Location $projectRoot
 while ($true) {
   try {
@@ -106,6 +134,7 @@ while ($true) {
     $tunnel = Start-NebulaTunnel
     while (-not $tunnel.HasExited) {
       Start-Sleep -Seconds 5
+      Sync-PublicUrlFromLog
       Start-NebulaHost
       Start-NebulaGuest
     }
@@ -114,6 +143,10 @@ while ($true) {
       -LiteralPath $cloudflaredLogPath `
       -Value "[$(Get-Date -Format o)] Host supervisor: $($_.Exception.Message)"
   }
-  Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
+  if (-not (Get-Process cloudflared -ErrorAction SilentlyContinue)) {
+    Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
+  } else {
+    Sync-PublicUrlFromLog
+  }
   Start-Sleep -Seconds 5
 }

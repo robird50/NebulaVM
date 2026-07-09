@@ -647,12 +647,73 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
     log(`${runtimeName} display connected in browser.`);
   });
   rfb.addEventListener("disconnect", () => {
+    if (state.nativeRfb === rfb) {
+      state.nativeRfb = null;
+    }
     if (state.emulator) {
       log(`${runtimeName} display disconnected.`);
     }
   });
 
   return rfb;
+};
+
+const closeHyperVConsole = async () => {
+  try {
+    await fetchHyperVJson("close-console", { method: "POST" });
+  } catch {
+    // Closing the host viewer is best-effort; the browser display still works without it.
+  }
+};
+
+const adoptRunningHyperVViewport = async (status, base) => {
+  if (!isHyperVMode() || status.vm?.state !== "Running" || !status.vncReady || !status.vncPath) {
+    return false;
+  }
+
+  els.nativeDisplayMode.value = "viewport";
+  window.localStorage.setItem("nebulavm.emustar.display", "viewport");
+  els.screenPlaceholder.hidden = true;
+  els.screenContainer.querySelector(".vga-text").hidden = true;
+  els.screenContainer.querySelector(".vga-canvas").hidden = true;
+  els.qemuTerminal.hidden = true;
+  els.qemuTerminal.textContent = "";
+  els.remoteFrame.hidden = true;
+  els.remoteFrame.src = "about:blank";
+
+  state.nativeRuntimeName = "EMUSTAR";
+  state.nativeQemuApiBase = base;
+  state.running = true;
+  if (!state.startedAt) {
+    state.startedAt = Date.now();
+    clearStatsTimer();
+    state.statsTimer = window.setInterval(updateUptime, 1000);
+  }
+
+  if (!state.nativeRfb) {
+    state.nativeRfb = connectNativeDisplay(base, status.vncPath, "EMUSTAR", status.vncPassword || "");
+    log("Attached to the running EMUSTAR display in the browser viewport.");
+  }
+
+  if (!state.emulator) {
+    state.emulator = {
+      stop: async () => {
+        state.nativeRfb?.disconnect();
+      },
+      destroy: async () => {
+        state.nativeRfb?.disconnect();
+      },
+    };
+  }
+
+  els.machineTitle.textContent = "EMUSTAR Control Deck";
+  setPowerState("EMUSTAR Hyper-V", "running");
+  setViewportSummary("EMUSTAR display is live in the browser");
+  updateUptime();
+  updateButtons();
+  monitorNativeVm();
+  await closeHyperVConsole();
+  return true;
 };
 
 const setPowerState = (label, mode = "off") => {
@@ -1058,6 +1119,7 @@ const monitorNativeVm = () => {
             status.vncPassword || "",
           );
           log("EMUSTAR browser display is ready.");
+          await closeHyperVConsole();
         }
         return;
       }
@@ -1599,6 +1661,9 @@ const updateNativeStatus = async () => {
         const vmState = status.vm ? ` VM: ${status.vm.state}.` : "";
         els.nativeStatus.dataset.mode = "ready";
         els.nativeStatus.textContent = `EMUSTAR ready with Microsoft Hyper-V${bridgeLabel}.${vmState}`;
+        if (await adoptRunningHyperVViewport(status, base)) {
+          els.nativeStatus.textContent = `EMUSTAR display is live in the browser viewport${bridgeLabel}.`;
+        }
       } else if (status.restartRequired) {
         els.nativeStatus.dataset.mode = "missing";
         els.nativeStatus.textContent =
@@ -1640,6 +1705,28 @@ const updateNativeStatus = async () => {
   }
 
   updateButtons();
+};
+
+const autoAdoptSharedHyperV = async () => {
+  if (!state.nativeHostToken) return;
+
+  try {
+    const { data: status, base } = await fetchHyperVJson("status");
+    if (status.vm?.state !== "Running" || !status.vncReady) {
+      return;
+    }
+
+    if (!isHyperVMode()) {
+      els.emulatorMode.value = "emustar-hyperv";
+      syncEmulatorDropdown();
+      updateBackendUi();
+    }
+
+    await adoptRunningHyperVViewport(status, base);
+    void updateEmustarHostInfo();
+  } catch {
+    // The shared host may still be warming up; normal status checks will keep trying.
+  }
 };
 
 const resetNativeFirmware = async () => {
@@ -1873,6 +1960,7 @@ window.addEventListener("beforeunload", stopEmulator);
 
 log("NebulaVM ready.");
 updateBackendUi();
+void autoAdoptSharedHyperV();
 updateButtons();
 updateViewportSummary();
 state.viewportSummaryTimer = window.setInterval(updateViewportSummary, 3000);

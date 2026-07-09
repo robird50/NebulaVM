@@ -811,6 +811,11 @@ const nativeQemuPlugin = () => ({
           return;
         }
 
+        if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/close-console") {
+          json(res, 200, await runHyperVAction("CloseConsole"));
+          return;
+        }
+
         if (req.method === "GET" && url.pathname === "/api/native-qemu/status") {
           json(res, 200, nativeStatus(url.searchParams.get("arch")));
           return;

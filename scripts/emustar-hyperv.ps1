@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("Status", "Start", "Stop", "Reset", "OpenConsole")]
+  [ValidateSet("Status", "Start", "Stop", "Reset", "OpenConsole", "CloseConsole")]
   [string]$Action,
 
   [string]$ConfigBase64 = ""
@@ -210,6 +210,8 @@ function Start-Emustar {
     }
     if ([string]$config.displayMode -eq "external") {
       Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
+    } else {
+      Close-EmustarConsole | Out-Null
     }
     return [ordered]@{
       ok = $true
@@ -299,6 +301,8 @@ function Start-Emustar {
 
   if ([string]$config.displayMode -eq "external") {
     Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
+  } else {
+    Close-EmustarConsole | Out-Null
   }
 
   $vm = Get-VM -Name $vmName
@@ -340,6 +344,18 @@ function Open-EmustarConsole {
   return [ordered]@{ ok = $true; vm = Get-VmSnapshot -Vm $vm }
 }
 
+function Close-EmustarConsole {
+  $closed = 0
+  Get-Process vmconnect -ErrorAction SilentlyContinue |
+    Where-Object { $_.MainWindowTitle -like "*$vmName*" } |
+    ForEach-Object {
+      Stop-Process -Id $_.Id -Force
+      $closed += 1
+    }
+
+  return [ordered]@{ ok = $true; closed = $closed }
+}
+
 try {
   $result = switch ($Action) {
     "Status" { Get-Status }
@@ -347,6 +363,7 @@ try {
     "Stop" { Stop-Emustar }
     "Reset" { Reset-Emustar }
     "OpenConsole" { Open-EmustarConsole }
+    "CloseConsole" { Close-EmustarConsole }
   }
   $result | ConvertTo-Json -Depth 8 -Compress
 } catch {
