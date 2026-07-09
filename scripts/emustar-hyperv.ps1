@@ -205,16 +205,18 @@ function Start-Emustar {
     Add-VMDvdDrive -VM $vm -Path $isoPath | Out-Null
   }
 
-  Set-VMFirmware -VM $vm -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows
-
   try {
     $security = Get-VMSecurity -VM $vm
+    $firmware = Get-VMFirmware -VMName $vm.Name
     if (-not $security.TpmEnabled) {
+      Set-VMFirmware -VM $vm -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows
       Set-VMKeyProtector -VM $vm -NewLocalKeyProtector
       Enable-VMTPM -VM $vm
+    } elseif ($firmware.SecureBoot.ToString() -ne "On") {
+      Set-VMFirmware -VM $vm -EnableSecureBoot On
     }
   } catch {
-    $warnings.Add("Virtual TPM could not be enabled automatically: $($_.Exception.Message)")
+    $warnings.Add("Secure Boot or virtual TPM could not be configured automatically: $($_.Exception.Message)")
   }
 
   $firstBootDevice = Get-BootDevice -Vm $vm -DiskFirst $diskFirst
