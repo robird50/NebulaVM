@@ -5,6 +5,7 @@ dist/
 .env
 .env.*
 vm-disks/
+.nebulavm-host-token
 *.iso
 *.img
 *.raw

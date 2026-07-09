@@ -81,14 +81,32 @@ EMUSTAR uses the open-source QEMU executable as its CPU and device emulation
 engine. It is not presented as an independent rewrite of QEMU. QEMU remains
 licensed by and attributed to the QEMU project under its own license.
 
+## EMUSTAR Host Mode
+
+Host Mode lets another desktop, laptop, or Chromebook use EMUSTAR without
+installing QEMU. QEMU and the VM files stay on the Windows host; the client
+opens a protected browser link and receives the VM display through noVNC.
+
+Start the host on the computer that has QEMU installed:
+
+```powershell
+npm.cmd run host
+```
+
+Choose an EMUSTAR emulator locally and use **Copy browser link**. Open that link
+on another computer connected to the same network. Keep the host computer and
+terminal running while the client uses the VM.
+
+The share link contains a private access token. Native VM API requests and the
+VNC WebSocket reject remote connections that do not provide that token. The
+token is stored locally in `.nebulavm-host-token` and is excluded from Git.
+
 ## Chromebook Workaround
 
 A Chromebook cannot realistically run the Windows 11 ISO locally inside the
-browser. Use `Remote VM / browser stream` instead. Run Windows 11 on another PC,
-home server, cloud VM, Proxmox host, or EMUSTAR/QEMU machine, expose it through a
-browser console such as noVNC or Apache Guacamole, then paste that URL into
-NebulaVM. The Chromebook becomes the display and keyboard while the other
-machine does the VM work.
+browser. Use EMUSTAR Host Mode to run the VM on another computer and control it
+through the Chromebook browser. `Remote VM / browser stream` remains available
+for existing noVNC, Guacamole, cloud-console, and remote-desktop URLs.
 
 ## Notes
 

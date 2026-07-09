@@ -1,13 +1,90 @@
 import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import dgram from "node:dgram";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
-import { cpus } from "node:os";
+import { cpus, networkInterfaces } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket, { WebSocketServer } from "ws";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
+const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
+
+const resolveHostAccessToken = () => {
+  const environmentToken = String(process.env.NEBULAVM_HOST_TOKEN || "").trim();
+  if (environmentToken) return environmentToken;
+  if (existsSync(hostTokenPath)) {
+    const savedToken = readFileSync(hostTokenPath, "utf8").trim();
+    if (savedToken) return savedToken;
+  }
+
+  const token = randomBytes(24).toString("hex");
+  writeFileSync(hostTokenPath, token, { encoding: "utf8", mode: 0o600 });
+  return token;
+};
+
+const hostAccessToken = resolveHostAccessToken();
+
+const requestHostname = (req) => {
+  try {
+    return new URL(`http://${req.headers.host || "localhost"}`).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+};
+
+const isLoopbackRequest = (req) => {
+  const hostname = requestHostname(req);
+  const remoteAddress = String(req.socket?.remoteAddress || "").toLowerCase();
+  const loopbackHost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  const loopbackConnection =
+    remoteAddress === "127.0.0.1" ||
+    remoteAddress === "::1" ||
+    remoteAddress === "::ffff:127.0.0.1";
+  return loopbackHost && loopbackConnection;
+};
+
+const requestAccessToken = (req, url) => {
+  const authorization = String(req.headers.authorization || "");
+  if (authorization.toLowerCase().startsWith("bearer ")) {
+    return authorization.slice(7).trim();
+  }
+  return url.searchParams.get("token") || "";
+};
+
+const isAuthorizedHostRequest = (req, url) =>
+  isLoopbackRequest(req) || requestAccessToken(req, url) === hostAccessToken;
+
+const primaryLanAddress = () =>
+  new Promise((resolveAddress) => {
+    const socket = dgram.createSocket("udp4");
+    let settled = false;
+    const finish = (address = "") => {
+      if (settled) return;
+      settled = true;
+      socket.close();
+      resolveAddress(address);
+    };
+    socket.once("error", () => finish());
+    socket.connect(53, "1.1.1.1", () => finish(socket.address().address));
+  });
+
+const lanAddresses = async () => {
+  const addresses = Object.values(networkInterfaces())
+    .flat()
+    .filter(
+      (address) =>
+        address &&
+        address.family === "IPv4" &&
+        !address.internal &&
+        !address.address.startsWith("169.254."),
+    )
+    .map((address) => address.address);
+  const primary = await primaryLanAddress();
+  return [...new Set([primary, ...addresses].filter(Boolean))];
+};
 
 const resolveCommitId = () => {
   if (process.env.COMMIT_REF) {
@@ -41,7 +118,7 @@ const setNativeQemuCors = (req, res) => {
   const origin = req.headers.origin || "*";
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
   res.setHeader("Access-Control-Allow-Private-Network", "true");
   res.setHeader("Vary", "Origin");
 };
@@ -500,6 +577,11 @@ const nativeQemuPlugin = () => ({
     server.httpServer?.on("upgrade", (req, socket, head) => {
       const url = new URL(req.url || "/", "http://localhost");
       if (url.pathname !== nativeVncPath) return;
+      if (!isAuthorizedHostRequest(req, url)) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
 
       nativeVncWss.handleUpgrade(req, socket, head, (ws) => {
         nativeVncWss.emit("connection", ws, req);
@@ -508,7 +590,9 @@ const nativeQemuPlugin = () => ({
 
     server.middlewares.use(async (req, res, next) => {
       const url = new URL(req.url || "/", "http://localhost");
-      if (!url.pathname.startsWith("/api/native-qemu")) {
+      const isNativeQemuApi = url.pathname.startsWith("/api/native-qemu");
+      const isHostInfoApi = url.pathname === "/api/emustar-host/info";
+      if (!isNativeQemuApi && !isHostInfoApi) {
         next();
         return;
       }
@@ -521,7 +605,31 @@ const nativeQemuPlugin = () => ({
         return;
       }
 
+      if (!isAuthorizedHostRequest(req, url)) {
+        json(res, 401, { error: "This EMUSTAR host link is missing a valid access token." });
+        return;
+      }
+
       try {
+        if (req.method === "GET" && isHostInfoApi) {
+          const configuredHost = server.config.server.host;
+          const sharingEnabled =
+            configuredHost === true || configuredHost === "0.0.0.0" || configuredHost === "::";
+          const port = Number(server.config.server.port) || 5173;
+          const shareUrls = sharingEnabled
+            ? (await lanAddresses()).map(
+                (address) => `http://${address}:${port}/#token=${encodeURIComponent(hostAccessToken)}`,
+              )
+            : [];
+          json(res, 200, {
+            ok: true,
+            sharingEnabled,
+            shareUrls,
+            accessToken: hostAccessToken,
+          });
+          return;
+        }
+
         if (req.method === "GET" && url.pathname === "/api/native-qemu/status") {
           json(res, 200, nativeStatus(url.searchParams.get("arch")));
           return;

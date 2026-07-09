@@ -36,6 +36,13 @@ if (isMobileOrTabletDevice()) {
   document.documentElement.classList.add("is-mobile-device");
 }
 
+const sharedHostTokenFromUrl = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
+if (sharedHostTokenFromUrl) {
+  window.localStorage.setItem("nebulavm.emustar.hostToken", sharedHostTokenFromUrl);
+}
+const savedHostToken =
+  sharedHostTokenFromUrl || window.localStorage.getItem("nebulavm.emustar.hostToken") || "";
+
 const state = {
   isoFile: null,
   emulator: null,
@@ -46,6 +53,7 @@ const state = {
   nativeQemuApiAvailable: null,
   nativeQemuReady: false,
   nativeQemuApiBase: null,
+  nativeHostToken: savedHostToken,
   nativeRfb: null,
   nativeRuntimeName: null,
   nativeMonitorTimer: null,
@@ -237,6 +245,15 @@ app.innerHTML = `
             </span>
           </div>
 
+          <div class="emustar-host-share" id="emustarHostShare" hidden>
+            <label class="field full-span">
+              <span>Browser access link</span>
+              <input id="emustarShareUrl" type="text" readonly />
+            </label>
+            <button class="secondary" id="emustarCopyShareButton" type="button">Copy browser link</button>
+            <small id="emustarShareStatus">Checking host access...</small>
+          </div>
+
           <label class="field full-span">
             <span>Display</span>
             <select id="nativeDisplayMode">
@@ -402,6 +419,10 @@ const els = {
   nativeRuntimeIcon: document.querySelector("#nativeRuntimeIcon"),
   nativeRuntimeName: document.querySelector("#nativeRuntimeName"),
   nativeRuntimeAttribution: document.querySelector("#nativeRuntimeAttribution"),
+  emustarHostShare: document.querySelector("#emustarHostShare"),
+  emustarShareUrl: document.querySelector("#emustarShareUrl"),
+  emustarCopyShareButton: document.querySelector("#emustarCopyShareButton"),
+  emustarShareStatus: document.querySelector("#emustarShareStatus"),
   nativeDisplayMode: document.querySelector("#nativeDisplayMode"),
   nativeIsoPath: document.querySelector("#nativeIsoPath"),
   nativeCreateDisk: document.querySelector("#nativeCreateDisk"),
@@ -480,9 +501,14 @@ const fetchNativeQemuJson = async (path, options) => {
 
   for (const base of uniqueBridgeBases) {
     try {
+      const headers = new Headers(options?.headers || {});
+      if (state.nativeHostToken) {
+        headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+      }
       const response = await fetch(`${base}/api/native-qemu/${path}`, {
         cache: "no-store",
         ...options,
+        headers,
       });
       const contentType = response.headers.get("content-type") || "";
 
@@ -501,9 +527,49 @@ const fetchNativeQemuJson = async (path, options) => {
   throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
+const updateEmustarHostInfo = async () => {
+  const emustarMode = isEmustarEmulator(els.emulatorMode.value);
+  els.emustarHostShare.hidden = !emustarMode;
+  if (!emustarMode) return;
+
+  els.emustarCopyShareButton.disabled = true;
+  els.emustarShareStatus.textContent = "Checking host access...";
+  try {
+    const headers = new Headers();
+    if (state.nativeHostToken) {
+      headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+    }
+    const response = await fetch("/api/emustar-host/info", {
+      cache: "no-store",
+      headers,
+    });
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("application/json")) {
+      throw new Error("Host sharing is available when NebulaVM is running locally.");
+    }
+    const info = await response.json();
+    if (!response.ok || !info.ok) {
+      throw new Error(info.error || "EMUSTAR Host Mode is unavailable.");
+    }
+
+    const [shareUrl] = info.shareUrls || [];
+    els.emustarShareUrl.value = shareUrl || "";
+    els.emustarCopyShareButton.disabled = !shareUrl;
+    els.emustarShareStatus.textContent = shareUrl
+      ? "Ready for another computer on the same network."
+      : "Run npm run host to create a browser access link.";
+  } catch (error) {
+    els.emustarShareUrl.value = "";
+    els.emustarShareStatus.textContent = error.message;
+  }
+};
+
 const nativeWebSocketUrl = (base, path) => {
   const url = new URL(path, base);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  if (state.nativeHostToken) {
+    url.searchParams.set("token", state.nativeHostToken);
+  }
   return url.toString();
 };
 
@@ -1483,6 +1549,7 @@ const updateBackendUi = () => {
   els.ramMetric.textContent = `${Number(els.memorySize.value) / 1024 / 1024} MB RAM`;
   updateMediaWarning();
   updateButtons();
+  void updateEmustarHostInfo();
   void updateNativeStatus();
   void updateBrowserQemuCapabilities();
 };
@@ -1495,6 +1562,18 @@ els.emustarInfoLink.addEventListener("click", () => {
 els.emustarInfoOkButton.addEventListener("click", () => {
   els.emustarInfoDialog.hidden = true;
   els.emustarInfoLink.focus();
+});
+els.emustarCopyShareButton.addEventListener("click", async () => {
+  const shareUrl = els.emustarShareUrl.value;
+  if (!shareUrl) return;
+  try {
+    await navigator.clipboard.writeText(shareUrl);
+    els.emustarShareStatus.textContent = "Browser link copied.";
+  } catch {
+    els.emustarShareUrl.focus();
+    els.emustarShareUrl.select();
+    els.emustarShareStatus.textContent = "Link selected. Copy it with Ctrl+C.";
+  }
 });
 els.emulatorSelectButton.addEventListener("click", () => {
   setEmulatorMenuOpen(els.emulatorMenu.hidden);

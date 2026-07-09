@@ -564,6 +564,37 @@ input[type="text"] {
   width: 100%;
 }
 
+.emustar-host-share {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px 10px;
+  align-items: end;
+  padding-top: 12px;
+  border-top: 1px solid rgba(145, 217, 207, 0.2);
+}
+
+.emustar-host-share[hidden] {
+  display: none;
+}
+
+.emustar-host-share .field {
+  min-width: 0;
+}
+
+.emustar-host-share .secondary {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+.emustar-host-share small {
+  grid-column: 1 / -1;
+  color: #aeb9c8;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
 .native-status {
   grid-column: 1 / -1;
   margin: 0;
@@ -1077,8 +1108,13 @@ pre {
   .field-grid,
   .button-row,
   .button-row.compact,
-  .display-choice-actions {
+  .display-choice-actions,
+  .emustar-host-share {
     grid-template-columns: 1fr;
+  }
+
+  .emustar-host-share small {
+    grid-column: 1;
   }
 
   .machine-topbar {
