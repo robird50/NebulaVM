@@ -10,10 +10,7 @@ import { fileURLToPath } from "node:url";
 import WebSocket, { WebSocketServer } from "ws";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
-const dataDirectory = process.env.NEBULAVM_DATA_DIR
-  ? resolve(process.env.NEBULAVM_DATA_DIR)
-  : workspaceDir;
-const hostTokenPath = resolve(dataDirectory, ".nebulavm-host-token");
+const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
 
 const resolveHostAccessToken = () => {
   const environmentToken = String(process.env.NEBULAVM_HOST_TOKEN || "").trim();
@@ -24,7 +21,6 @@ const resolveHostAccessToken = () => {
   }
 
   const token = randomBytes(24).toString("hex");
-  mkdirSync(dirname(hostTokenPath), { recursive: true });
   writeFileSync(hostTokenPath, token, { encoding: "utf8", mode: 0o600 });
   return token;
 };
@@ -219,9 +215,7 @@ let lastNativeExit = null;
 let activeNativeRuntimeName = null;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
-const hyperVScriptPath = process.env.NEBULAVM_HYPERV_SCRIPT
-  ? resolve(process.env.NEBULAVM_HYPERV_SCRIPT)
-  : resolve(workspaceDir, "scripts", "emustar-hyperv.ps1");
+const hyperVScriptPath = resolve(workspaceDir, "scripts", "emustar-hyperv.ps1");
 
 const runHyperVAction = (action, config = {}) =>
   new Promise((resolveAction, rejectAction) => {
@@ -698,9 +692,7 @@ const nativeQemuPlugin = () => ({
             200,
             await runHyperVAction("Start", {
               ...body,
-              vmDirectory: process.env.NEBULAVM_VM_DIR
-                ? resolve(process.env.NEBULAVM_VM_DIR)
-                : resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
+              vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
             }),
           );
           return;

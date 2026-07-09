@@ -12,32 +12,6 @@ npm.cmd run dev
 
 Open the local URL Vite prints, then drop an `.iso`, `.img`, `.bin`, or `.raw` file into the boot media box.
 
-## Windows Desktop App
-
-NebulaVM includes a native Windows shell that opens the Nebula interface in its
-own application window and controls EMUSTAR without opening Hyper-V Manager.
-
-Run it from source:
-
-```powershell
-npm.cmd run desktop
-```
-
-Build the portable Windows executable:
-
-```powershell
-npm.cmd run desktop:build
-```
-
-The finished app is written to:
-
-```text
-release/NebulaVM-1.0.0-portable.exe
-```
-
-The desktop app automatically selects EMUSTAR, detects a Windows x64 ISO in the
-Downloads folder, and reuses the local NebulaVM host when it is already running.
-
 ## x86_64 Backend
 
 Use the `64-bit x86_64 processor` option, or the `Nebula x64 / QEMU Wasm`

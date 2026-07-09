@@ -1,49 +1,18 @@
 {
   "name": "nebulavm",
   "version": "1.0.0",
-  "description": "Nebula-themed desktop and browser interface for local virtual machines.",
-  "author": "robird50",
   "private": true,
   "type": "module",
-  "main": "desktop/main.cjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "host": "vite --host 0.0.0.0 --port 5174 --strictPort",
     "build": "vite build",
-    "preview": "vite preview --host 127.0.0.1",
-    "desktop": "electron .",
-    "desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop.ps1"
+    "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
     "@novnc/novnc": "^1.7.0",
     "v86": "^0.5.424",
     "vite": "^8.1.3",
     "ws": "^8.21.0"
-  },
-  "devDependencies": {
-    "electron": "^37.2.0",
-    "electron-builder": "^26.0.12"
-  },
-  "build": {
-    "appId": "app.nebulavm.desktop",
-    "productName": "NebulaVM",
-    "artifactName": "NebulaVM-${version}-portable.${ext}",
-    "directories": {
-      "output": "release"
-    },
-    "asar": false,
-    "files": [
-      "desktop/**",
-      "src/**",
-      "public/**",
-      "scripts/**",
-      "index.html",
-      "vite.config.js",
-      "package.json"
-    ],
-    "win": {
-      "target": "portable",
-      "icon": "public/assets/nebulavm-emulator-icon.png"
-    }
   }
 }

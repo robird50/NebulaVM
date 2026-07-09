@@ -4,7 +4,6 @@
 
 [build.environment]
   NODE_VERSION = "22"
-  ELECTRON_SKIP_BINARY_DOWNLOAD = "1"
 
 [[headers]]
   for = "/*"
