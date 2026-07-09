@@ -1804,7 +1804,10 @@ els.processorMode.addEventListener("change", () => {
         : "v86";
   updateBackendUi();
 });
-els.nativeIsoPath.addEventListener("input", () => updateButtons());
+els.nativeIsoPath.addEventListener("input", () => {
+  window.localStorage.setItem("nebulavm.emustar.isoPath", els.nativeIsoPath.value.trim());
+  updateButtons();
+});
 els.nativeCreateDisk.addEventListener("change", () => updateButtons());
 els.nativeDisplayMode.addEventListener("change", () => {
   window.localStorage.setItem("nebulavm.emustar.display", els.nativeDisplayMode.value);
@@ -1840,6 +1843,19 @@ els.clearLogButton.addEventListener("click", () => {
 });
 
 window.addEventListener("beforeunload", stopEmulator);
+
+const launchParams = new URLSearchParams(window.location.search);
+if (launchParams.get("desktop") === "1") {
+  document.documentElement.classList.add("is-desktop-app");
+  els.emulatorMode.value = "emustar-hyperv";
+  els.nativeDisplayMode.value = "external";
+  els.memorySize.value = "4294967296";
+  els.bootOrder.value = "213";
+  els.nativeIsoPath.value =
+    launchParams.get("iso") ||
+    window.localStorage.getItem("nebulavm.emustar.isoPath") ||
+    "";
+}
 
 log("NebulaVM ready.");
 updateBackendUi();
