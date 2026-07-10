@@ -1031,35 +1031,6 @@ input[type="text"] {
   font-weight: 800;
 }
 
-.viewport-aspect-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 0 8px 0 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
-  color: #c5d0de;
-  font-size: 0.83rem;
-  font-weight: 800;
-}
-
-.viewport-aspect-control span {
-  color: #9fb0c2;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-}
-
-.viewport-aspect-control select {
-  width: auto;
-  min-width: 84px;
-  min-height: 26px;
-  padding: 0 24px 0 8px;
-  border-radius: 999px;
-  background: #0f151e;
-  font-size: 0.82rem;
-}
-
 .metric-row .ai-summary-pill {
   width: fit-content;
   max-width: none;
@@ -1147,11 +1118,6 @@ input[type="text"] {
     linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
     #030507;
   background-size: 28px 28px;
-}
-
-.screen-shell.has-fixed-aspect:not(:fullscreen):not(.is-fullscreen) {
-  aspect-ratio: var(--viewport-aspect, 16 / 9);
-  min-height: 0;
 }
 
 .screen-shell:fullscreen,

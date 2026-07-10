@@ -383,19 +383,6 @@ app.innerHTML = `
               </span>
             </span>
             <span id="ramMetric">128 MB RAM</span>
-            <label class="viewport-aspect-control" title="Change the viewport shape without stretching the VM display">
-              <span>Aspect</span>
-              <select id="viewportAspect">
-                <option value="auto">Auto</option>
-                <option value="4 / 3">4:3</option>
-                <option value="5 / 4">5:4</option>
-                <option value="16 / 10">16:10</option>
-                <option value="16 / 9">16:9</option>
-                <option value="21 / 9">21:9</option>
-                <option value="32 / 9">32:9</option>
-                <option value="9 / 16">9:16 portrait</option>
-              </select>
-            </label>
             <button class="secondary compact-button" id="fullscreenButton" type="button">Fullscreen</button>
           </div>
         </div>
@@ -520,7 +507,6 @@ const els = {
   uptimeMetric: document.querySelector("#uptimeMetric"),
   viewportSummaryMetric: document.querySelector("#viewportSummaryMetric"),
   ramMetric: document.querySelector("#ramMetric"),
-  viewportAspect: document.querySelector("#viewportAspect"),
   logOutput: document.querySelector("#logOutput"),
   clearLogButton: document.querySelector("#clearLogButton"),
 };
@@ -529,19 +515,6 @@ const savedNativeDisplayMode = window.localStorage.getItem("nebulavm.emustar.dis
 if (savedNativeDisplayMode === "viewport" || savedNativeDisplayMode === "external") {
   els.nativeDisplayMode.value = savedNativeDisplayMode;
 }
-
-const viewportAspectOptions = new Set([...els.viewportAspect.options].map((option) => option.value));
-const savedViewportAspect = window.localStorage.getItem("nebulavm.viewport.aspect") || "auto";
-if (viewportAspectOptions.has(savedViewportAspect)) {
-  els.viewportAspect.value = savedViewportAspect;
-}
-
-const applyViewportAspect = () => {
-  const value = viewportAspectOptions.has(els.viewportAspect.value) ? els.viewportAspect.value : "auto";
-  els.screenShell.classList.toggle("has-fixed-aspect", value !== "auto");
-  els.screenShell.style.setProperty("--viewport-aspect", value === "auto" ? "16 / 9" : value);
-};
-applyViewportAspect();
 
 const formatBytes = (bytes) => {
   if (!Number.isFinite(bytes)) return "0 B";
@@ -2224,11 +2197,6 @@ els.driveImportButton.addEventListener("click", importDriveIso);
 els.nativeCreateDisk.addEventListener("change", () => updateButtons());
 els.nativeDisplayMode.addEventListener("change", () => {
   window.localStorage.setItem("nebulavm.emustar.display", els.nativeDisplayMode.value);
-});
-els.viewportAspect.addEventListener("change", () => {
-  window.localStorage.setItem("nebulavm.viewport.aspect", els.viewportAspect.value);
-  applyViewportAspect();
-  requestGuestDesktopResize(`aspect ${els.viewportAspect.options[els.viewportAspect.selectedIndex]?.textContent || "change"}`);
 });
 els.nativeResetFirmwareButton.addEventListener("click", resetNativeFirmware);
 els.nativeConsoleButton.addEventListener("click", openHyperVConsole);
