@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("Status", "Start", "Stop", "Reset", "OpenConsole", "CloseConsole")]
+  [ValidateSet("Status", "Start", "Stop", "Reset", "OpenConsole", "CloseConsole", "ResizeDisplay")]
   [string]$Action,
 
   [string]$ConfigBase64 = ""
@@ -356,6 +356,153 @@ function Close-EmustarConsole {
   return [ordered]@{ ok = $true; closed = $closed }
 }
 
+function Get-GuestCredential {
+  $projectRoot = Split-Path -Parent $PSScriptRoot
+  $credentialsPath = Join-Path $projectRoot ".nebulavm-guest-credentials.json"
+  if (-not (Test-Path -LiteralPath $credentialsPath)) {
+    throw "The EMUSTAR guest credentials file is missing. Finish guest setup before resizing the desktop."
+  }
+
+  $credentials = Get-Content -LiteralPath $credentialsPath -Raw | ConvertFrom-Json
+  $securePassword = ConvertTo-SecureString ([string]$credentials.adminPassword) -AsPlainText -Force
+  return [pscredential]::new([string]$credentials.username, $securePassword)
+}
+
+function Resize-EmustarDisplay {
+  $config = Read-Config
+  Assert-HyperVReady
+  $vm = Get-VM -Name $vmName -ErrorAction Stop
+  if ($vm.State -ne "Running") {
+    throw "Start the EMUSTAR VM before resizing the guest display."
+  }
+
+  $width = [math]::Min(7680, [math]::Max(640, [int]$config.width))
+  $height = [math]::Min(4320, [math]::Max(360, [int]$config.height))
+  $width = $width - ($width % 2)
+  $height = $height - ($height % 2)
+  $accepted = $false
+  $method = ""
+  $resultCode = $null
+
+  try {
+    if ($vm.State -eq "Off") {
+      Set-VMVideo `
+        -VMName $vmName `
+        -ResolutionType Single `
+        -HorizontalResolution $width `
+        -VerticalResolution $height | Out-Null
+      $accepted = $true
+      $method = "hyperv-video"
+    } else {
+      $warnings.Add("Hyper-V video size changes apply only while the VM is off, so NebulaVM tried live guest resize instead.")
+    }
+  } catch {
+    $warnings.Add("Hyper-V video resize was not accepted: $($_.Exception.Message)")
+  }
+
+  if (-not $accepted) {
+    try {
+      $credential = Get-GuestCredential
+      $guestResult = Invoke-Command -VMName $vmName -Credential $credential -ScriptBlock {
+        param([int]$Width, [int]$Height)
+
+        $typeDefinition = @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class NebulaDisplay {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+  public struct DEVMODE {
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string dmDeviceName;
+    public short dmSpecVersion;
+    public short dmDriverVersion;
+    public short dmSize;
+    public short dmDriverExtra;
+    public int dmFields;
+    public int dmPositionX;
+    public int dmPositionY;
+    public int dmDisplayOrientation;
+    public int dmDisplayFixedOutput;
+    public short dmColor;
+    public short dmDuplex;
+    public short dmYResolution;
+    public short dmTTOption;
+    public short dmCollate;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string dmFormName;
+    public short dmLogPixels;
+    public int dmBitsPerPel;
+    public int dmPelsWidth;
+    public int dmPelsHeight;
+    public int dmDisplayFlags;
+    public int dmDisplayFrequency;
+    public int dmICMMethod;
+    public int dmICMIntent;
+    public int dmMediaType;
+    public int dmDitherType;
+    public int dmReserved1;
+    public int dmReserved2;
+    public int dmPanningWidth;
+    public int dmPanningHeight;
+  }
+
+  [DllImport("user32.dll", CharSet = CharSet.Ansi)]
+  public static extern int EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
+
+  [DllImport("user32.dll", CharSet = CharSet.Ansi)]
+  public static extern int ChangeDisplaySettings(ref DEVMODE devMode, int flags);
+}
+"@
+
+        if (-not ("NebulaDisplay" -as [type])) {
+          Add-Type -TypeDefinition $typeDefinition
+        }
+
+        $current = New-Object NebulaDisplay+DEVMODE
+        $current.dmSize = [Runtime.InteropServices.Marshal]::SizeOf($current)
+        [NebulaDisplay]::EnumDisplaySettings($null, -1, [ref]$current) | Out-Null
+
+        $current.dmPelsWidth = $Width
+        $current.dmPelsHeight = $Height
+        $current.dmFields = $current.dmFields -bor 0x80000 -bor 0x100000
+        $result = [NebulaDisplay]::ChangeDisplaySettings([ref]$current, 1)
+        if ($result -ne 0) {
+          $result = [NebulaDisplay]::ChangeDisplaySettings([ref]$current, 0)
+        }
+
+        [ordered]@{
+          ok = $result -eq 0
+          result = $result
+          width = $Width
+          height = $Height
+        }
+      } -ArgumentList $width, $height
+
+      $accepted = [bool]$guestResult.ok
+      $method = "guest-display"
+      $resultCode = $guestResult.result
+    } catch {
+      $warnings.Add("Live Windows guest resize was not accepted: $($_.Exception.Message)")
+    }
+  }
+
+  if (-not $accepted) {
+    $warnings.Add("NebulaVM requested a noVNC desktop resize; if the guest VNC server refuses it, the browser can scale but cannot invent extra OS desktop pixels.")
+  }
+
+  return [ordered]@{
+    ok = $true
+    accepted = $accepted
+    method = $method
+    result = $resultCode
+    width = $width
+    height = $height
+    warnings = $warnings
+    vm = Get-VmSnapshot -Vm (Get-VM -Name $vmName -ErrorAction SilentlyContinue)
+  }
+}
+
 try {
   $result = switch ($Action) {
     "Status" { Get-Status }
@@ -364,6 +511,7 @@ try {
     "Reset" { Reset-Emustar }
     "OpenConsole" { Open-EmustarConsole }
     "CloseConsole" { Close-EmustarConsole }
+    "ResizeDisplay" { Resize-EmustarDisplay }
   }
   $result | ConvertTo-Json -Depth 8 -Compress
 } catch {

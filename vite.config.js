@@ -488,9 +488,10 @@ const nativeVncPath = "/api/native-qemu/vnc";
 const hyperVGuestVncPath = "/api/emustar-hyperv/vnc";
 const hyperVScriptPath = resolve(workspaceDir, "scripts", "emustar-hyperv.ps1");
 
-const runHyperVAction = (action, config = {}) =>
+const runHyperVAction = (action, config = {}, timeoutMs = 30000) =>
   new Promise((resolveAction, rejectAction) => {
     const configBase64 = Buffer.from(JSON.stringify(config), "utf8").toString("base64");
+    let settled = false;
     const child = spawn(
       "powershell.exe",
       [
@@ -514,25 +515,37 @@ const runHyperVAction = (action, config = {}) =>
     );
     let stdout = "";
     let stderr = "";
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish(() => rejectAction(new Error(`${action} timed out while waiting for Hyper-V.`)));
+    }, timeoutMs);
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    child.on("error", rejectAction);
+    child.on("error", (error) => finish(() => rejectAction(error)));
     child.on("exit", (code) => {
-      const output = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
-      try {
-        const result = JSON.parse(output || "{}");
-        if (code === 0 && result.ok !== false) {
-          resolveAction(result);
-          return;
+      finish(() => {
+        const output = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
+        try {
+          const result = JSON.parse(output || "{}");
+          if (code === 0 && result.ok !== false) {
+            resolveAction(result);
+            return;
+          }
+          rejectAction(new Error(result.error || stderr.trim() || `Hyper-V action failed with code ${code}.`));
+        } catch {
+          rejectAction(new Error(stderr.trim() || stdout.trim() || `Hyper-V action failed with code ${code}.`));
         }
-        rejectAction(new Error(result.error || stderr.trim() || `Hyper-V action failed with code ${code}.`));
-      } catch {
-        rejectAction(new Error(stderr.trim() || stdout.trim() || `Hyper-V action failed with code ${code}.`));
-      }
+      });
     });
   });
 
@@ -1062,7 +1075,7 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") {
-          json(res, 200, await withHyperVDisplayStatus(await runHyperVAction("Status")));
+          json(res, 200, await withHyperVDisplayStatus(await runHyperVAction("Status", {}, 10000)));
           return;
         }
 
@@ -1071,7 +1084,7 @@ const nativeQemuPlugin = () => ({
           const result = await runHyperVAction("Start", {
               ...body,
               vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
-            });
+            }, 120000);
           json(res, 200, await withHyperVDisplayStatus(result));
           return;
         }
@@ -1093,6 +1106,12 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/close-console") {
           json(res, 200, await runHyperVAction("CloseConsole"));
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/resize-display") {
+          const body = await readJsonBody(req);
+          json(res, 200, await runHyperVAction("ResizeDisplay", body, 12000));
           return;
         }
 

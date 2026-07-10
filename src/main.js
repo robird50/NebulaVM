@@ -77,6 +77,8 @@ const state = {
   nativeRfb: null,
   nativeRuntimeName: null,
   nativeMonitorTimer: null,
+  guestResizeTimer: null,
+  lastGuestResize: "",
   viewportSummaryTimer: null,
   driveImportPolling: false,
 };
@@ -638,6 +640,64 @@ const fetchHyperVJson = async (path, options) => {
   throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
+const viewportDesktopSize = () => {
+  const rect = (els.nativeDisplay.hidden ? els.screenContainer : els.nativeDisplay).getBoundingClientRect();
+  const width = Math.max(640, Math.min(7680, Math.round(rect.width)));
+  const height = Math.max(360, Math.min(4320, Math.round(rect.height)));
+  return {
+    width: width - (width % 2),
+    height: height - (height % 2),
+  };
+};
+
+const requestRfbDesktopResize = () => {
+  const rfb = state.nativeRfb;
+  if (!rfb) return;
+
+  rfb.background = "#05070a";
+  rfb.scaleViewport = true;
+  rfb.resizeSession = true;
+  window.requestAnimationFrame(() => {
+    if (state.nativeRfb === rfb && typeof rfb._requestRemoteResize === "function") {
+      rfb._requestRemoteResize();
+    }
+  });
+};
+
+const requestGuestDesktopResize = (reason = "viewport") => {
+  requestRfbDesktopResize();
+
+  if (els.emulatorMode.value !== "emustar-hyperv" || state.nativeRuntimeName !== "EMUSTAR" || !state.running) {
+    return;
+  }
+
+  window.clearTimeout(state.guestResizeTimer);
+  state.guestResizeTimer = window.setTimeout(async () => {
+    const { width, height } = viewportDesktopSize();
+    const resizeKey = `${width}x${height}`;
+    if (state.lastGuestResize === resizeKey) return;
+    state.lastGuestResize = resizeKey;
+
+    try {
+      const { response, data } = await fetchHyperVJson("resize-display", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ width, height }),
+      });
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "The guest rejected the display resize.");
+      }
+      if (data.accepted) {
+        log(`Extended EMUSTAR desktop to ${data.width}x${data.height} for ${reason}.`);
+      } else {
+        log("Asked the guest to extend its desktop; if it refuses, NebulaVM will keep the image contained without stretching.");
+      }
+    } catch (error) {
+      log(`Guest display resize unavailable: ${error.message}`);
+    }
+  }, 350);
+};
+
 const fetchEmustarHostJson = async (path, options) => {
   const bridgeBases = [
     state.nativeQemuApiBase,
@@ -765,6 +825,7 @@ const nativeWebSocketUrl = (base, path) => {
 const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   if (!vncPath) return null;
 
+  state.lastGuestResize = "";
   els.nativeDisplay.hidden = false;
   const status = document.createElement("span");
   status.className = "native-display-status";
@@ -772,8 +833,9 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   els.nativeDisplay.replaceChildren(status);
 
   const rfb = new RFB(els.nativeDisplay, nativeWebSocketUrl(base, vncPath));
+  rfb.background = "#05070a";
   rfb.scaleViewport = true;
-  rfb.resizeSession = false;
+  rfb.resizeSession = true;
   rfb.viewOnly = false;
   rfb.focusOnClick = true;
   rfb.addEventListener("credentialsrequired", () => {
@@ -781,6 +843,7 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   });
   rfb.addEventListener("connect", () => {
     status.remove();
+    requestGuestDesktopResize(`${runtimeName} viewport`);
     log(`${runtimeName} display connected in browser.`);
   });
   rfb.addEventListener("disconnect", () => {
@@ -2165,6 +2228,7 @@ els.nativeDisplayMode.addEventListener("change", () => {
 els.viewportAspect.addEventListener("change", () => {
   window.localStorage.setItem("nebulavm.viewport.aspect", els.viewportAspect.value);
   applyViewportAspect();
+  requestGuestDesktopResize(`aspect ${els.viewportAspect.options[els.viewportAspect.selectedIndex]?.textContent || "change"}`);
 });
 els.nativeResetFirmwareButton.addEventListener("click", resetNativeFirmware);
 els.nativeConsoleButton.addEventListener("click", openHyperVConsole);
@@ -2174,6 +2238,7 @@ const updateFullscreenButton = () => {
   const isFullscreen = document.fullscreenElement === els.screenShell;
   els.fullscreenButton.textContent = isFullscreen ? "Exit fullscreen" : "Fullscreen";
   els.screenShell.classList.toggle("is-fullscreen", isFullscreen);
+  requestGuestDesktopResize(isFullscreen ? "fullscreen" : "windowed viewport");
 };
 
 const toggleFullscreen = async () => {
@@ -2191,6 +2256,7 @@ const toggleFullscreen = async () => {
 
 els.fullscreenButton.addEventListener("click", toggleFullscreen);
 document.addEventListener("fullscreenchange", updateFullscreenButton);
+window.addEventListener("resize", () => requestGuestDesktopResize("browser resize"));
 
 els.clearLogButton.addEventListener("click", () => {
   els.logOutput.textContent = "";
