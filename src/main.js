@@ -10,6 +10,9 @@ import "./styles.css";
 
 const app = document.querySelector("#app");
 const COMMIT_ID = typeof __NEBULAVM_COMMIT__ === "string" ? __NEBULAVM_COMMIT__ : "local";
+const HOST_TOKEN_STORAGE_KEY = "nebulavm.emustar.hostToken";
+const HOST_SESSION_STORAGE_KEY = "nebulavm.emustar.sessionId";
+const isNetlifyLauncher = /\.netlify\.app$/i.test(window.location.hostname);
 
 const isMobileOrTabletDevice = () => {
   if (navigator.userAgentData?.mobile) {
@@ -38,10 +41,26 @@ if (isMobileOrTabletDevice()) {
 
 const sharedHostTokenFromUrl = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
 if (sharedHostTokenFromUrl) {
-  window.localStorage.setItem("nebulavm.emustar.hostToken", sharedHostTokenFromUrl);
+  window.sessionStorage.setItem(HOST_TOKEN_STORAGE_KEY, sharedHostTokenFromUrl);
+  const hashParams = new URLSearchParams(window.location.hash.slice(1));
+  hashParams.delete("token");
+  const cleanHash = hashParams.toString();
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}${cleanHash ? `#${cleanHash}` : ""}`,
+  );
 }
-const savedHostToken =
-  sharedHostTokenFromUrl || window.localStorage.getItem("nebulavm.emustar.hostToken") || "";
+const legacyHostToken = window.localStorage.getItem(HOST_TOKEN_STORAGE_KEY) || "";
+if (!sharedHostTokenFromUrl && legacyHostToken && !window.sessionStorage.getItem(HOST_TOKEN_STORAGE_KEY)) {
+  window.sessionStorage.setItem(HOST_TOKEN_STORAGE_KEY, legacyHostToken);
+}
+window.localStorage.removeItem(HOST_TOKEN_STORAGE_KEY);
+const savedHostToken = sharedHostTokenFromUrl || window.sessionStorage.getItem(HOST_TOKEN_STORAGE_KEY) || "";
+const savedSessionId =
+  window.sessionStorage.getItem(HOST_SESSION_STORAGE_KEY) ||
+  (crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+window.sessionStorage.setItem(HOST_SESSION_STORAGE_KEY, savedSessionId);
 
 const state = {
   isoFile: null,
@@ -54,6 +73,7 @@ const state = {
   nativeQemuReady: false,
   nativeQemuApiBase: null,
   nativeHostToken: savedHostToken,
+  nativeSessionId: savedSessionId,
   nativeRfb: null,
   nativeRuntimeName: null,
   nativeMonitorTimer: null,
@@ -512,8 +532,9 @@ const log = (message) => {
   els.logOutput.scrollTop = els.logOutput.scrollHeight;
 };
 
-const nativeQemuBridgeMessage =
-  "Native runtimes need the local NebulaVM bridge. Run NebulaVM locally with npm run host, then keep this page open.";
+const nativeQemuBridgeMessage = isNetlifyLauncher
+  ? "NebulaVM is looking for a live host session. Keep the Windows host PC online, then refresh this page."
+  : "Native runtimes need the local NebulaVM bridge. Run NebulaVM locally with npm run host, then keep this page open.";
 
 const fetchNativeQemuJson = async (path, options) => {
   const bridgeBases = [
@@ -639,7 +660,7 @@ const fetchNetlifyHostRegistry = async () => {
     const publicUrl = String(data.host.publicUrl).replace(/\/$/, "");
     state.nativeQemuApiBase = publicUrl;
     state.nativeHostToken = String(data.host.accessToken);
-    window.localStorage.setItem("nebulavm.emustar.hostToken", state.nativeHostToken);
+    window.sessionStorage.setItem(HOST_TOKEN_STORAGE_KEY, state.nativeHostToken);
     return { ...data.host, publicUrl, stale: data.stale };
   } catch {
     return null;
@@ -688,11 +709,14 @@ const updateEmustarHostInfo = async () => {
       throw new Error(info.error || "EMUSTAR Host Mode is unavailable.");
     }
 
-    const [shareUrl] = info.shareUrls || [];
+    const [hostShareUrl] = info.shareUrls || [];
+    const shareUrl = isNetlifyLauncher ? window.location.origin : hostShareUrl;
     els.emustarShareUrl.value = shareUrl || "";
     els.emustarCopyShareButton.disabled = !shareUrl;
     els.emustarShareStatus.textContent = shareUrl
-      ? info.publicUrl
+      ? isNetlifyLauncher
+        ? "Stable launcher ready. This tab creates a private host session automatically."
+        : info.publicUrl
         ? "Ready from any network while this host stays online."
         : "Ready for another computer on the same network."
       : "Run npm run host to create a browser access link.";
