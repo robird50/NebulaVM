@@ -189,7 +189,7 @@ function Start-Emustar {
   $isoProvided = -not [string]::IsNullOrWhiteSpace($isoPath)
   if ($isoProvided) {
     if (-not [IO.Path]::IsPathRooted($isoPath)) {
-      throw "Enter an absolute ISO path, such as C:\Users\Dell\Downloads\Win11.iso."
+      throw "Enter an absolute ISO path, such as C:\Users\Dell\Downloads\Your.iso."
     }
     if (-not (Test-Path -LiteralPath $isoPath -PathType Leaf)) {
       throw "The ISO file does not exist: $isoPath"
@@ -198,34 +198,11 @@ function Start-Emustar {
       throw "EMUSTAR Hyper-V currently accepts CD-ROM ISO files."
     }
   }
+  if (-not $isoProvided) {
+    throw "Choose an ISO path or import one from Google Drive before launching EMUSTAR."
+  }
 
   $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
-  if ($vm -and -not $isoProvided) {
-    Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown
-    if ($vm.State -eq "Off") {
-      Set-LowHostMemoryProfile -Vm $vm -MemoryMb 3072
-      Set-InstalledWindowsBoot -Vm $vm -DetachDvd $true
-      Start-VM -VM $vm | Out-Null
-      $vm = Get-VM -Name $vmName
-    }
-    if ([string]$config.displayMode -eq "external") {
-      Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
-    } else {
-      Close-EmustarConsole | Out-Null
-    }
-    return [ordered]@{
-      ok = $true
-      engine = "Microsoft Hyper-V"
-      created = $false
-      bootOrder = "disk-first"
-      displayMode = [string]$config.displayMode
-      vm = Get-VmSnapshot -Vm $vm
-      warnings = $warnings
-    }
-  }
-  if (-not $vm -and -not $isoProvided) {
-    throw "Choose an ISO the first time EMUSTAR creates a Windows VM."
-  }
 
   $memoryMb = [math]::Min(6144, [math]::Max(2048, [int]$config.memoryMb))
   $diskSizeGb = [math]::Min(256, [math]::Max(64, [int]$config.diskSizeGb))

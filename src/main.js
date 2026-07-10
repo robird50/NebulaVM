@@ -81,6 +81,7 @@ const state = {
   lastGuestResize: "",
   viewportSummaryTimer: null,
   driveImportPolling: false,
+  activeDriveImportId: null,
 };
 
 app.innerHTML = `
@@ -278,7 +279,7 @@ app.innerHTML = `
 
           <label class="field full-span">
             <span>Local ISO path</span>
-            <input id="nativeIsoPath" type="text" placeholder="C:\\Users\\Dell\\Downloads\\Win11.iso" />
+            <input id="nativeIsoPath" type="text" placeholder="C:\\Path\\To\\Your.iso" />
           </label>
 
           <div class="drive-import-panel">
@@ -739,8 +740,8 @@ const connectNetlifyHostRegistry = async () => {
 
   els.nativeStatus.dataset.mode = "ready";
   els.nativeStatus.textContent = host.stale
-    ? "Found a registered host, but it may be stale. Trying anyway..."
-    : "Found the current NebulaVM host. Connecting...";
+    ? "Found a registered host, but it may be stale. Choose an ISO before launching EMUSTAR."
+    : "Found the current NebulaVM host. Choose an ISO before launching EMUSTAR.";
   await autoAdoptSharedHyperV();
 };
 
@@ -1017,7 +1018,7 @@ const updateButtons = (busy = false) => {
   const externalMode = isExternalMode();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   const hasBootMedia = emustarMode
-    ? true
+    ? Boolean(els.nativeIsoPath.value.trim())
     : isNativeMode()
     ? Boolean(els.nativeIsoPath.value.trim())
     : isRemoteMode()
@@ -1678,6 +1679,10 @@ const bootEmulator = async () => {
     log(`Boot blocked: enter a local ISO path for ${nativeModeLabel()}.`);
     return;
   }
+  if (isHyperVMode() && !els.nativeIsoPath.value.trim()) {
+    log("Boot blocked: choose an ISO path or import one from Google Drive before launching EMUSTAR.");
+    return;
+  }
   if (isHyperVMode() && looksLikeArm64Iso(els.nativeIsoPath.value.trim())) {
     log("Boot blocked: EMUSTAR Hyper-V on this Intel PC needs the Windows 11 x64 ISO, not ARM64.");
     return;
@@ -1834,7 +1839,7 @@ const updateNativeStatus = async () => {
         const vmState = status.vm ? ` VM: ${status.vm.state}.` : "";
         els.nativeStatus.dataset.mode = "ready";
         els.nativeStatus.textContent = `EMUSTAR ready with Microsoft Hyper-V${bridgeLabel}.${vmState}`;
-        if (await adoptRunningHyperVViewport(status, base)) {
+        if (state.emulator && await adoptRunningHyperVViewport(status, base)) {
           els.nativeStatus.textContent = `EMUSTAR display is live in the browser viewport${bridgeLabel}.`;
         }
       } else if (status.restartRequired) {
@@ -1881,7 +1886,7 @@ const updateNativeStatus = async () => {
 };
 
 const autoAdoptSharedHyperV = async () => {
-  if (!state.nativeHostToken) return;
+  if (!state.nativeHostToken || !state.emulator) return;
 
   try {
     const { data: status, base } = await fetchHyperVJson("status");
@@ -1917,8 +1922,9 @@ const applyDriveImportJob = (job) => {
   els.driveImportButton.disabled = running;
   els.driveIsoUrl.disabled = running;
 
-  if (job?.state === "complete" && job.isoPath) {
+  if (job?.state === "complete" && job.isoPath && job.id === state.activeDriveImportId) {
     els.nativeIsoPath.value = job.isoPath;
+    state.activeDriveImportId = null;
     updateButtons();
   }
 };
@@ -1962,6 +1968,7 @@ const importDriveIso = async () => {
       throw new Error(data.error || "Google Drive import failed to start.");
     }
 
+    state.activeDriveImportId = data.job?.id || null;
     applyDriveImportJob(data.job);
     const job = await pollDriveImport();
     if (job?.state === "complete") {
@@ -2114,7 +2121,7 @@ const updateBackendUi = () => {
     : "Uses v86 networking support when available.";
   els.placeholderMeta.textContent = nativeMode
     ? emustarMode
-      ? "Windows 11 runs through Hyper-V with UEFI, virtual TPM, and a VHDX disk."
+      ? "Choose or import an ISO to launch an EMUSTAR Hyper-V machine."
       : nativeUbuntuArm64Mode
       ? `${runtimeBrand} boots Ubuntu ARM64 with a dedicated qcow2 disk.`
       : nativeArm64Mode
