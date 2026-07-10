@@ -182,10 +182,26 @@ const parseContentDispositionFilename = (header) => {
   return plainMatch?.[1] || "";
 };
 
-const parseGoogleDriveFileId = (value) => {
+const decodeHtmlAttribute = (value) =>
+  String(value || "")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&quot;", "\"")
+    .replaceAll("&#39;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
+
+const parseAttributes = (tag) => {
+  const attributes = {};
+  for (const match of String(tag || "").matchAll(/([a-zA-Z0-9_-]+)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/g)) {
+    attributes[match[1].toLowerCase()] = decodeHtmlAttribute(match[3] ?? match[4] ?? match[5] ?? "");
+  }
+  return attributes;
+};
+
+const parseGoogleDriveFile = (value) => {
   const input = String(value || "").trim();
   if (!input) throw new Error("Paste a Google Drive file share link first.");
-  if (/^[a-zA-Z0-9_-]{20,}$/.test(input)) return input;
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(input)) return { fileId: input, resourceKey: "" };
 
   let url;
   try {
@@ -204,41 +220,132 @@ const parseGoogleDriveFileId = (value) => {
   if (!/^[a-zA-Z0-9_-]{20,}$/.test(id)) {
     throw new Error("That Google Drive link does not include a downloadable file ID.");
   }
-  return id;
+  return { fileId: id, resourceKey: url.searchParams.get("resourcekey") || "" };
 };
 
-const downloadResponseFromGoogleDrive = async (fileId) => {
-  const directUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}&confirm=t`;
-  let response = await fetch(directUrl, { redirect: "follow" });
-  if (!response.ok) {
-    throw new Error(`Google Drive returned HTTP ${response.status}.`);
+const addGoogleDriveResourceKey = (url, resourceKey) => {
+  if (!resourceKey) return url;
+  const nextUrl = new URL(url);
+  nextUrl.searchParams.set("resourcekey", resourceKey);
+  return nextUrl.toString();
+};
+
+const splitSetCookieHeader = (value) => {
+  const header = String(value || "");
+  if (!header) return [];
+  return header.split(/,(?=\s*[^;,=\s]+=[^;,]+)/g).map((cookie) => cookie.trim()).filter(Boolean);
+};
+
+const rememberGoogleCookies = (cookieJar, headers) => {
+  const setCookies =
+    typeof headers.getSetCookie === "function" ? headers.getSetCookie() : splitSetCookieHeader(headers.get("set-cookie"));
+  for (const cookie of setCookies) {
+    const pair = String(cookie || "").split(";")[0];
+    const separator = pair.indexOf("=");
+    if (separator > 0) {
+      cookieJar.set(pair.slice(0, separator), pair.slice(separator + 1));
+    }
+  }
+};
+
+const googleCookieHeader = (cookieJar) =>
+  [...cookieJar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+
+const fetchGoogleDrive = async (url, cookieJar) => {
+  const cookie = googleCookieHeader(cookieJar);
+  const response = await fetch(url, {
+    redirect: "follow",
+    headers: {
+      "User-Agent": "NebulaVM Drive Importer/1.0",
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
+  });
+  rememberGoogleCookies(cookieJar, response.headers);
+  return response;
+};
+
+const findGoogleDriveConfirmationUrl = (html, responseUrl, resourceKey) => {
+  for (const formMatch of html.matchAll(/<form\b[\s\S]*?<\/form>/gi)) {
+    const form = formMatch[0];
+    const formOpen = form.match(/<form\b[^>]*>/i)?.[0] || "";
+    const formAttrs = parseAttributes(formOpen);
+    const isDownloadForm =
+      formAttrs.id === "download-form" ||
+      /(?:^|\/)(?:uc|download)(?:\?|$)/i.test(formAttrs.action || "") ||
+      /name=["'](?:confirm|uuid|export)["']/i.test(form);
+    if (!isDownloadForm) {
+      continue;
+    }
+
+    if (formAttrs.action) {
+      const nextUrl = new URL(formAttrs.action, responseUrl);
+      for (const inputMatch of form.matchAll(/<input\b[^>]*>/gi)) {
+        const inputAttrs = parseAttributes(inputMatch[0]);
+        if (inputAttrs.name && inputAttrs.value != null) {
+          nextUrl.searchParams.set(inputAttrs.name, inputAttrs.value);
+        }
+      }
+      return addGoogleDriveResourceKey(nextUrl.toString(), resourceKey);
+    }
   }
 
-  const contentType = response.headers.get("content-type") || "";
-  if (!contentType.toLowerCase().includes("text/html")) {
-    return response;
-  }
-
-  const html = await response.text();
-  const hrefMatch = html.match(/href="([^"]*(?:uc|download)[^"]*confirm=[^"]+)"/i);
+  const hrefMatch = html.match(/href=["']([^"']*(?:uc|download)[^"']*(?:confirm|uuid)=[^"']+)["']/i);
   if (hrefMatch) {
-    const nextUrl = new URL(hrefMatch[1].replaceAll("&amp;", "&"), response.url).toString();
-    response = await fetch(nextUrl, { redirect: "follow" });
+    return addGoogleDriveResourceKey(new URL(decodeHtmlAttribute(hrefMatch[1]), responseUrl).toString(), resourceKey);
+  }
+
+  const downloadUrlMatch = html.match(/"downloadUrl"\s*:\s*"([^"]+)"/i);
+  if (downloadUrlMatch) {
+    const downloadUrl = decodeHtmlAttribute(downloadUrlMatch[1])
+      .replaceAll("\\u003d", "=")
+      .replaceAll("\\u0026", "&")
+      .replaceAll("\\/", "/");
+    return addGoogleDriveResourceKey(
+      new URL(downloadUrl, responseUrl).toString(),
+      resourceKey,
+    );
+  }
+
+  return "";
+};
+
+const downloadResponseFromGoogleDrive = async (fileId, resourceKey = "") => {
+  const cookieJar = new Map();
+  let nextUrl = addGoogleDriveResourceKey(
+    `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`,
+    resourceKey,
+  );
+  let lastHtml = "";
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const response = await fetchGoogleDrive(nextUrl, cookieJar);
     if (!response.ok) {
       throw new Error(`Google Drive returned HTTP ${response.status}.`);
     }
-    if (!(response.headers.get("content-type") || "").toLowerCase().includes("text/html")) {
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("text/html")) {
       return response;
     }
+
+    const html = await response.text();
+    lastHtml = html;
+    const confirmedUrl = findGoogleDriveConfirmationUrl(html, response.url, resourceKey);
+    if (!confirmedUrl || confirmedUrl === nextUrl) {
+      break;
+    }
+    nextUrl = confirmedUrl;
   }
 
-  if (/access denied|need access|request access|sign in/i.test(html)) {
+  if (/access denied|need access|request access|sign in|you need permission/i.test(lastHtml)) {
     throw new Error("Google Drive blocked the file. Set sharing to 'Anyone with the link can view'.");
   }
-  if (/quota|too many users|download quota/i.test(html)) {
+  if (/quota|too many users|download quota|download limit/i.test(lastHtml)) {
     throw new Error("Google Drive says this file hit a download limit.");
   }
-  throw new Error("Google Drive did not return the ISO file. Make sure the link is shared publicly.");
+  throw new Error(
+    "Google Drive did not return the ISO file. Use the file share link, set it to 'Anyone with the link can view', then try again.",
+  );
 };
 
 const driveJobSnapshot = (job = driveImportJob) => {
@@ -264,7 +371,7 @@ const startGoogleDriveIsoImport = (driveUrl) => {
     throw new Error("A Google Drive ISO import is already running.");
   }
 
-  const fileId = parseGoogleDriveFileId(driveUrl);
+  const { fileId, resourceKey } = parseGoogleDriveFile(driveUrl);
   const job = {
     id: randomBytes(8).toString("hex"),
     state: "running",
@@ -280,7 +387,7 @@ const startGoogleDriveIsoImport = (driveUrl) => {
 
   (async () => {
     mkdirSync(driveImportDirectory, { recursive: true });
-    const response = await downloadResponseFromGoogleDrive(fileId);
+    const response = await downloadResponseFromGoogleDrive(fileId, resourceKey);
     job.message = "Downloading ISO to the NebulaVM host...";
     job.totalBytes = Number(response.headers.get("content-length") || 0);
 
