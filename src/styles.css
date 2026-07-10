@@ -384,6 +384,19 @@ h2 {
   background: #080d14;
 }
 
+.workspace.is-emustar-mode .advanced-options {
+  border-color: rgba(255, 228, 94, 0.26);
+  background: #090f17;
+}
+
+.workspace.is-emustar-mode .advanced-options summary::after {
+  border-color: #ffe45e;
+}
+
+.workspace.is-emustar-mode .advanced-options summary small {
+  color: #a9dff0;
+}
+
 .workspace.is-emustar-mode .native-panel {
   border-color: rgba(60, 211, 255, 0.34);
   background: #0c1622;
@@ -542,6 +555,72 @@ h2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+.advanced-options {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.advanced-options summary {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  min-height: 48px;
+  padding: 10px 42px 10px 13px;
+  color: #edf2f7;
+  cursor: pointer;
+  list-style: none;
+}
+
+.advanced-options summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-options summary::after {
+  position: absolute;
+  top: 50%;
+  right: 15px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid #91d9cf;
+  border-bottom: 2px solid #91d9cf;
+  content: "";
+  transform: translateY(-65%) rotate(45deg);
+  transition: transform 160ms ease;
+}
+
+.advanced-options[open] summary::after {
+  transform: translateY(-35%) rotate(225deg);
+}
+
+.advanced-options summary:focus-visible {
+  outline: 2px solid #91d9cf;
+  outline-offset: -2px;
+}
+
+.advanced-options summary span {
+  font-size: 0.88rem;
+  font-weight: 950;
+}
+
+.advanced-options summary small {
+  color: #96a4b5;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.advanced-options-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+
+.advanced-options[open] summary {
+  margin-bottom: 2px;
 }
 
 .field {

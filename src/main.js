@@ -126,6 +126,12 @@ app.innerHTML = `
           </div>
         </div>
 
+        <div class="button-row main-actions">
+          <button class="primary" id="bootButton" type="button" disabled>Boot VM</button>
+          <button class="secondary" id="pauseButton" type="button" disabled>Pause</button>
+          <button class="danger" id="stopButton" type="button" disabled>Stop</button>
+        </div>
+
         <label class="drop-zone" id="dropZone" for="isoInput">
           <input id="isoInput" type="file" accept=".iso,.img,.bin,.raw" hidden />
           <span class="drop-icon" aria-hidden="true">+</span>
@@ -250,121 +256,124 @@ app.innerHTML = `
           </label>
         </div>
 
-        <div class="native-panel" id="nativePanel" hidden>
-          <div class="emustar-runtime-heading">
-            <img id="nativeRuntimeIcon" src="/assets/emustar-icon.png" alt="" />
-            <span>
-              <span class="emustar-console-kicker">Nebula Console</span>
-              <strong id="nativeRuntimeName">EMUSTAR</strong>
-              <small id="nativeRuntimeAttribution">Native virtualization runtime</small>
-            </span>
-          </div>
+        <details class="advanced-options" id="advancedOptions">
+          <summary>
+            <span>More options</span>
+            <small>Runtime, storage, network, and state tools</small>
+          </summary>
 
-          <div class="emustar-host-share" id="emustarHostShare" hidden>
-            <label class="field full-span">
-              <span>Browser access link</span>
-              <input id="emustarShareUrl" type="text" readonly />
+          <div class="advanced-options-body">
+            <div class="native-panel" id="nativePanel" hidden>
+              <div class="emustar-runtime-heading">
+                <img id="nativeRuntimeIcon" src="/assets/emustar-icon.png" alt="" />
+                <span>
+                  <span class="emustar-console-kicker">Nebula Console</span>
+                  <strong id="nativeRuntimeName">EMUSTAR</strong>
+                  <small id="nativeRuntimeAttribution">Native virtualization runtime</small>
+                </span>
+              </div>
+
+              <div class="emustar-host-share" id="emustarHostShare" hidden>
+                <label class="field full-span">
+                  <span>Browser access link</span>
+                  <input id="emustarShareUrl" type="text" readonly />
+                </label>
+                <button class="secondary" id="emustarCopyShareButton" type="button">Copy browser link</button>
+                <small id="emustarShareStatus">Checking host access...</small>
+              </div>
+
+              <label class="field full-span">
+                <span>Display</span>
+                <select id="nativeDisplayMode">
+                  <option value="viewport" selected>Browser desktop</option>
+                  <option value="external">Host console</option>
+                </select>
+              </label>
+
+              <label class="field full-span">
+                <span>Local ISO path</span>
+                <input id="nativeIsoPath" type="text" placeholder="C:\\Path\\To\\Your.iso" />
+              </label>
+
+              <div class="drive-import-panel">
+                <label class="field full-span">
+                  <span>Google Drive ISO link</span>
+                  <input id="driveIsoUrl" type="text" placeholder="https://drive.google.com/file/d/..." />
+                </label>
+                <button class="secondary" id="driveImportButton" type="button">Import Drive ISO</button>
+                <small id="driveImportStatus">No Drive import running.</small>
+              </div>
+
+              <label class="toggle-row">
+                <input type="checkbox" id="nativeCreateDisk" checked />
+                <span>
+                  <strong>Create install disk</strong>
+                  <small id="nativeDiskHelp">Uses a virtual disk in the NebulaVM folder.</small>
+                </span>
+              </label>
+
+              <label class="field">
+                <span>Disk size</span>
+                <select id="nativeDiskSize">
+                  <option value="64" selected>64 GB</option>
+                  <option value="80">80 GB</option>
+                  <option value="128">128 GB</option>
+                  <option value="256">256 GB</option>
+                </select>
+              </label>
+
+              <button
+                class="secondary emustar-reset-firmware"
+                id="nativeResetFirmwareButton"
+                type="button"
+                title="Restore clean UEFI settings without deleting the virtual disk"
+              >Reset UEFI</button>
+
+              <button
+                class="secondary emustar-reset-firmware"
+                id="nativeConsoleButton"
+                type="button"
+                title="Open the EMUSTAR setup console on this host"
+                hidden
+              >Open host console</button>
+
+              <p class="native-status" id="nativeStatus">Checking EMUSTAR...</p>
+            </div>
+
+            <div class="native-panel" id="remotePanel" hidden>
+              <label class="field full-span">
+                <span>Remote VM URL</span>
+                <input id="remoteVmUrl" type="text" placeholder="https://your-vm-host/vnc.html" />
+              </label>
+              <p class="native-status" id="remoteStatus">
+                Use a noVNC, Guacamole, cloud console, or remote desktop web URL.
+              </p>
+            </div>
+
+            <label class="toggle-row">
+              <input type="checkbox" id="networking" />
+              <span>
+                <strong>Network adapter</strong>
+                <small id="networkingHelp">Uses v86 networking support when available.</small>
+              </span>
             </label>
-            <button class="secondary" id="emustarCopyShareButton" type="button">Copy browser link</button>
-            <small id="emustarShareStatus">Checking host access...</small>
-          </div>
 
-          <label class="field full-span">
-            <span>Display</span>
-            <select id="nativeDisplayMode">
-              <option value="viewport" selected>Browser desktop</option>
-              <option value="external">Host console</option>
-            </select>
-          </label>
-
-          <label class="field full-span">
-            <span>Local ISO path</span>
-            <input id="nativeIsoPath" type="text" placeholder="C:\\Path\\To\\Your.iso" />
-          </label>
-
-          <div class="drive-import-panel">
-            <label class="field full-span">
-              <span>Google Drive ISO link</span>
-              <input id="driveIsoUrl" type="text" placeholder="https://drive.google.com/file/d/..." />
+            <label class="toggle-row">
+              <input type="checkbox" id="autostart" checked />
+              <span>
+                <strong>Auto-start after boot</strong>
+                <small>Start the emulator as soon as it is created.</small>
+              </span>
             </label>
-            <button class="secondary" id="driveImportButton" type="button">Import Drive ISO</button>
-            <small id="driveImportStatus">No Drive import running.</small>
+
+            <div class="button-row compact">
+              <button class="secondary" id="resetButton" type="button" disabled>Reset</button>
+              <button class="secondary" id="saveStateButton" type="button" disabled>Save state</button>
+              <button class="secondary" id="loadStateButton" type="button">Load state</button>
+              <input id="stateInput" type="file" accept=".bin,.state" hidden />
+            </div>
           </div>
-
-          <label class="toggle-row">
-            <input type="checkbox" id="nativeCreateDisk" checked />
-            <span>
-              <strong>Create install disk</strong>
-              <small id="nativeDiskHelp">Uses a virtual disk in the NebulaVM folder.</small>
-            </span>
-          </label>
-
-          <label class="field">
-            <span>Disk size</span>
-            <select id="nativeDiskSize">
-              <option value="64" selected>64 GB</option>
-              <option value="80">80 GB</option>
-              <option value="128">128 GB</option>
-              <option value="256">256 GB</option>
-            </select>
-          </label>
-
-          <button
-            class="secondary emustar-reset-firmware"
-            id="nativeResetFirmwareButton"
-            type="button"
-            title="Restore clean UEFI settings without deleting the virtual disk"
-          >Reset UEFI</button>
-
-          <button
-            class="secondary emustar-reset-firmware"
-            id="nativeConsoleButton"
-            type="button"
-            title="Open the EMUSTAR setup console on this host"
-            hidden
-          >Open host console</button>
-
-          <p class="native-status" id="nativeStatus">Checking EMUSTAR...</p>
-        </div>
-
-        <div class="native-panel" id="remotePanel" hidden>
-          <label class="field full-span">
-            <span>Remote VM URL</span>
-            <input id="remoteVmUrl" type="text" placeholder="https://your-vm-host/vnc.html" />
-          </label>
-          <p class="native-status" id="remoteStatus">
-            Use a noVNC, Guacamole, cloud console, or remote desktop web URL.
-          </p>
-        </div>
-
-        <label class="toggle-row">
-          <input type="checkbox" id="networking" />
-          <span>
-            <strong>Network adapter</strong>
-            <small id="networkingHelp">Uses v86 networking support when available.</small>
-          </span>
-        </label>
-
-        <label class="toggle-row">
-          <input type="checkbox" id="autostart" checked />
-          <span>
-            <strong>Auto-start after boot</strong>
-            <small>Start the emulator as soon as it is created.</small>
-          </span>
-        </label>
-
-        <div class="button-row">
-          <button class="primary" id="bootButton" type="button" disabled>Boot VM</button>
-          <button class="secondary" id="pauseButton" type="button" disabled>Pause</button>
-          <button class="danger" id="stopButton" type="button" disabled>Stop</button>
-        </div>
-
-        <div class="button-row compact">
-          <button class="secondary" id="resetButton" type="button" disabled>Reset</button>
-          <button class="secondary" id="saveStateButton" type="button" disabled>Save state</button>
-          <button class="secondary" id="loadStateButton" type="button">Load state</button>
-          <input id="stateInput" type="file" accept=".bin,.state" hidden />
-        </div>
+        </details>
       </aside>
 
       <section class="console-area" aria-label="Virtual machine display">
