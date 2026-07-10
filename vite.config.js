@@ -358,9 +358,11 @@ const driveJobSnapshot = (job = driveImportJob) => {
       message: job.message,
       bytesReceived: job.bytesReceived,
       totalBytes: job.totalBytes,
+      speedBytesPerSecond: job.speedBytesPerSecond,
       isoPath: job.isoPath,
       error: job.error,
       startedAt: job.startedAt,
+      downloadStartedAt: job.downloadStartedAt,
       completedAt: job.completedAt,
     },
   };
@@ -378,9 +380,13 @@ const startGoogleDriveIsoImport = (driveUrl) => {
     message: "Connecting to Google Drive...",
     bytesReceived: 0,
     totalBytes: 0,
+    speedBytesPerSecond: 0,
     isoPath: "",
     error: "",
     startedAt: new Date().toISOString(),
+    downloadStartedAt: "",
+    lastSpeedCheckAt: 0,
+    lastSpeedBytes: 0,
     completedAt: "",
   };
   driveImportJob = job;
@@ -390,6 +396,9 @@ const startGoogleDriveIsoImport = (driveUrl) => {
     const response = await downloadResponseFromGoogleDrive(fileId, resourceKey);
     job.message = "Downloading ISO to the NebulaVM host...";
     job.totalBytes = Number(response.headers.get("content-length") || 0);
+    job.downloadStartedAt = new Date().toISOString();
+    job.lastSpeedCheckAt = Date.now();
+    job.lastSpeedBytes = 0;
 
     const headerName = parseContentDispositionFilename(response.headers.get("content-disposition"));
     const baseName = sanitizeFilename(headerName || `google-drive-${fileId}.iso`);
@@ -400,6 +409,13 @@ const startGoogleDriveIsoImport = (driveUrl) => {
     const source = Readable.from(async function* progressChunks() {
       for await (const chunk of Readable.fromWeb(response.body)) {
         job.bytesReceived += chunk.length;
+        const now = Date.now();
+        const elapsedSeconds = (now - job.lastSpeedCheckAt) / 1000;
+        if (elapsedSeconds >= 0.5) {
+          job.speedBytesPerSecond = Math.max(0, Math.round((job.bytesReceived - job.lastSpeedBytes) / elapsedSeconds));
+          job.lastSpeedCheckAt = now;
+          job.lastSpeedBytes = job.bytesReceived;
+        }
         yield chunk;
       }
     }());
@@ -408,6 +424,7 @@ const startGoogleDriveIsoImport = (driveUrl) => {
 
     job.state = "complete";
     job.message = "Google Drive ISO imported.";
+    job.speedBytesPerSecond = 0;
     job.isoPath = finalPath;
     job.completedAt = new Date().toISOString();
   })().catch((error) => {

@@ -302,6 +302,22 @@ app.innerHTML = `
                 </label>
                 <button class="secondary" id="driveImportButton" type="button">Import Drive ISO</button>
                 <small id="driveImportStatus">No Drive import running.</small>
+                <div class="drive-import-progress" id="driveImportProgress" hidden>
+                  <div
+                    class="drive-import-track"
+                    role="progressbar"
+                    aria-label="Google Drive ISO import progress"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow="0"
+                  >
+                    <span id="driveImportProgressFill"></span>
+                  </div>
+                  <div class="drive-import-stats">
+                    <span id="driveImportProgressText">0% - 0 B</span>
+                    <span id="driveImportSpeed">0 KB/s</span>
+                  </div>
+                </div>
               </div>
 
               <label class="toggle-row">
@@ -476,6 +492,10 @@ const els = {
   driveIsoUrl: document.querySelector("#driveIsoUrl"),
   driveImportButton: document.querySelector("#driveImportButton"),
   driveImportStatus: document.querySelector("#driveImportStatus"),
+  driveImportProgress: document.querySelector("#driveImportProgress"),
+  driveImportProgressFill: document.querySelector("#driveImportProgressFill"),
+  driveImportProgressText: document.querySelector("#driveImportProgressText"),
+  driveImportSpeed: document.querySelector("#driveImportSpeed"),
   nativeCreateDisk: document.querySelector("#nativeCreateDisk"),
   nativeDiskHelp: document.querySelector("#nativeDiskHelp"),
   nativeDiskSize: document.querySelector("#nativeDiskSize"),
@@ -1925,8 +1945,48 @@ const driveImportStatusText = (job) => {
   return `${job.message || "Importing Google Drive ISO..."} ${received}${total}`;
 };
 
+const formatTransferSpeed = (bytesPerSecond) => {
+  const speed = Math.max(0, Number(bytesPerSecond) || 0);
+  if (speed >= 1024 * 1024) {
+    return `${(speed / 1024 / 1024).toFixed(1)} MB/s`;
+  }
+  return `${Math.round(speed / 1024)} KB/s`;
+};
+
+const driveImportPercent = (job) => {
+  const received = Number(job?.bytesReceived) || 0;
+  const total = Number(job?.totalBytes) || 0;
+  if (job?.state === "complete") return 100;
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(100, (received / total) * 100));
+};
+
+const updateDriveImportProgress = (job) => {
+  const hasProgress = Boolean(job) && (job.state === "running" || job.state === "complete");
+  els.driveImportProgress.hidden = !hasProgress;
+  if (!hasProgress) {
+    els.driveImportProgressFill.style.width = "0%";
+    els.driveImportProgress.querySelector(".drive-import-track").setAttribute("aria-valuenow", "0");
+    els.driveImportProgressText.textContent = "0% - 0 B";
+    els.driveImportSpeed.textContent = "0 KB/s";
+    return;
+  }
+
+  const percent = driveImportPercent(job);
+  const received = formatBytes(job.bytesReceived || 0);
+  const total = job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : "";
+  const percentText = job.state === "complete" ? "100%" : job.totalBytes ? `${Math.floor(percent)}%` : "Preparing";
+  const speedText = job.state === "complete" ? "Complete" : formatTransferSpeed(job.speedBytesPerSecond);
+
+  els.driveImportProgressFill.style.width = `${percent}%`;
+  els.driveImportProgress.querySelector(".drive-import-track").setAttribute("aria-valuenow", String(Math.round(percent)));
+  els.driveImportProgressText.textContent = `${percentText} - ${received}${total}`;
+  els.driveImportSpeed.textContent = speedText;
+};
+
 const applyDriveImportJob = (job) => {
   els.driveImportStatus.textContent = driveImportStatusText(job);
+  updateDriveImportProgress(job);
   const running = job?.state === "running";
   els.driveImportButton.disabled = running;
   els.driveIsoUrl.disabled = running;
@@ -1950,7 +2010,7 @@ const pollDriveImport = async () => {
       if (!job || job.state === "complete" || job.state === "error") {
         return job;
       }
-      await new Promise((resolvePoll) => window.setTimeout(resolvePoll, 2000));
+      await new Promise((resolvePoll) => window.setTimeout(resolvePoll, 1000));
     }
   } finally {
     state.driveImportPolling = false;
@@ -1961,12 +2021,20 @@ const importDriveIso = async () => {
   const driveUrl = els.driveIsoUrl.value.trim();
   if (!driveUrl) {
     els.driveImportStatus.textContent = "Paste a Google Drive ISO link first.";
+    updateDriveImportProgress(null);
     return;
   }
 
   els.driveImportButton.disabled = true;
   els.driveIsoUrl.disabled = true;
   els.driveImportStatus.textContent = "Starting Google Drive import...";
+  updateDriveImportProgress({
+    state: "running",
+    message: "Starting Google Drive import...",
+    bytesReceived: 0,
+    totalBytes: 0,
+    speedBytesPerSecond: 0,
+  });
   try {
     const { response, data } = await fetchEmustarHostJson("drive-import", {
       method: "POST",
@@ -1987,6 +2055,7 @@ const importDriveIso = async () => {
     }
   } catch (error) {
     els.driveImportStatus.textContent = error.message;
+    updateDriveImportProgress(null);
     log(`Google Drive import failed: ${error.message}`);
   } finally {
     els.driveImportButton.disabled = false;
@@ -2005,6 +2074,7 @@ const refreshDriveImportStatus = async () => {
     }
   } catch {
     els.driveImportStatus.textContent = "Drive import is unavailable from this page.";
+    updateDriveImportProgress(null);
   }
 };
 
@@ -2207,6 +2277,7 @@ els.nativeIsoPath.addEventListener("input", () => updateButtons());
 els.driveIsoUrl.addEventListener("input", () => {
   if (!els.driveIsoUrl.value.trim()) {
     els.driveImportStatus.textContent = "No Drive import running.";
+    updateDriveImportProgress(null);
   }
 });
 els.driveImportButton.addEventListener("click", importDriveIso);
