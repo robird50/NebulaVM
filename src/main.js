@@ -17,6 +17,7 @@ const GOOGLE_PICKER_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const GOOGLE_PICKER_APP_ID =
   import.meta.env.VITE_GOOGLE_APP_ID || (GOOGLE_PICKER_CLIENT_ID.match(/^\d+/)?.[0] || "");
 const GOOGLE_DRIVE_PICKER_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const GOOGLE_DRIVE_OAUTH_STATE_KEY = "nebulavm.googleDrive.oauthState";
 const isNetlifyLauncher = /\.netlify\.app$/i.test(window.location.hostname);
 
 const isMobileOrTabletDevice = () => {
@@ -67,6 +68,44 @@ const savedSessionId =
   (crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 window.sessionStorage.setItem(HOST_SESSION_STORAGE_KEY, savedSessionId);
 
+const googleDriveOAuthParams = new URLSearchParams(window.location.hash.slice(1));
+const expectedGoogleDriveOAuthState = window.sessionStorage.getItem(GOOGLE_DRIVE_OAUTH_STATE_KEY) || "";
+const googleDriveOAuthStateMatches =
+  expectedGoogleDriveOAuthState && googleDriveOAuthParams.get("state") === expectedGoogleDriveOAuthState;
+const googleDriveOAuthAccessTokenFromUrl = googleDriveOAuthStateMatches
+  ? googleDriveOAuthParams.get("access_token") || ""
+  : "";
+const googleDriveOAuthExpiresInFromUrl = googleDriveOAuthStateMatches
+  ? Number(googleDriveOAuthParams.get("expires_in") || 3600) || 3600
+  : 0;
+const googleDriveOAuthErrorFromUrl = googleDriveOAuthStateMatches
+  ? googleDriveOAuthParams.get("error_description") || googleDriveOAuthParams.get("error") || ""
+  : "";
+const shouldResumeGoogleDrivePicker = Boolean(googleDriveOAuthAccessTokenFromUrl);
+if (googleDriveOAuthStateMatches) {
+  window.sessionStorage.removeItem(GOOGLE_DRIVE_OAUTH_STATE_KEY);
+  for (const key of [
+    "access_token",
+    "authuser",
+    "error",
+    "error_description",
+    "expires_in",
+    "hd",
+    "prompt",
+    "scope",
+    "state",
+    "token_type",
+  ]) {
+    googleDriveOAuthParams.delete(key);
+  }
+  const cleanHash = googleDriveOAuthParams.toString();
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}${cleanHash ? `#${cleanHash}` : ""}`,
+  );
+}
+
 const state = {
   isoFile: null,
   emulator: null,
@@ -94,6 +133,10 @@ const state = {
   googlePickerAccessToken: "",
   googlePickerTokenExpiresAt: 0,
 };
+if (googleDriveOAuthAccessTokenFromUrl) {
+  state.googlePickerAccessToken = googleDriveOAuthAccessTokenFromUrl;
+  state.googlePickerTokenExpiresAt = Date.now() + googleDriveOAuthExpiresInFromUrl * 1000;
+}
 
 app.innerHTML = `
   <main class="mobile-unsupported" aria-labelledby="mobileUnsupportedTitle">
@@ -806,12 +849,6 @@ const googlePickerConfigMessage =
 const googlePickerConfigured = () =>
   Boolean(GOOGLE_PICKER_API_KEY && GOOGLE_PICKER_CLIENT_ID && GOOGLE_PICKER_APP_ID);
 
-const googlePickerDetailError = (detail) => {
-  if (!detail) return "Google Drive Picker failed.";
-  if (typeof detail === "string") return detail;
-  return detail.error_description || detail.message || detail.type || detail.error || "Google Drive Picker failed.";
-};
-
 const scriptLoaders = new Map();
 
 const loadExternalScript = (src, id) => {
@@ -855,16 +892,6 @@ const loadExternalScript = (src, id) => {
   return loader;
 };
 
-const loadGoogleIdentityServices = async () => {
-  if (window.google?.accounts?.oauth2) return window.google.accounts.oauth2;
-
-  await loadExternalScript("https://accounts.google.com/gsi/client", "google-identity-services");
-  if (!window.google?.accounts?.oauth2) {
-    throw new Error("Google sign-in loaded, but OAuth was not available.");
-  }
-  return window.google.accounts.oauth2;
-};
-
 const loadGooglePickerApi = async () => {
   if (window.google?.picker) return window.google.picker;
 
@@ -890,47 +917,31 @@ const loadGooglePickerApi = async () => {
   return window.google.picker;
 };
 
-const requestGoogleDriveAccessToken = async () => {
-  const tokenStillValid =
-    state.googlePickerAccessToken && state.googlePickerTokenExpiresAt > Date.now() + 60 * 1000;
-  if (tokenStillValid) return state.googlePickerAccessToken;
+const warmGoogleDrivePicker = () => {
+  void loadGooglePickerApi().catch(() => {});
+};
 
-  const oauth = await loadGoogleIdentityServices();
+const createNonce = () =>
+  crypto.getRandomValues
+    ? Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("")
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const settle = (callback, value) => {
-      if (settled) return;
-      settled = true;
-      callback(value);
-    };
+const googleDriveRedirectUri = () => `${window.location.origin}${window.location.pathname}`;
 
-    const tokenClient = oauth.initTokenClient({
-      client_id: GOOGLE_PICKER_CLIENT_ID,
-      scope: GOOGLE_DRIVE_PICKER_SCOPE,
-      callback: (response) => {
-        if (response?.error) {
-          settle(reject, new Error(googlePickerDetailError(response)));
-          return;
-        }
+const startGoogleDriveRedirectSignIn = () => {
+  const oauthState = `nebulavm-drive-${createNonce()}`;
+  window.sessionStorage.setItem(GOOGLE_DRIVE_OAUTH_STATE_KEY, oauthState);
 
-        const accessToken = response?.access_token || "";
-        if (!accessToken) {
-          settle(reject, new Error("Google Drive did not return an access token."));
-          return;
-        }
+  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authUrl.searchParams.set("client_id", GOOGLE_PICKER_CLIENT_ID);
+  authUrl.searchParams.set("redirect_uri", googleDriveRedirectUri());
+  authUrl.searchParams.set("response_type", "token");
+  authUrl.searchParams.set("scope", GOOGLE_DRIVE_PICKER_SCOPE);
+  authUrl.searchParams.set("include_granted_scopes", "true");
+  authUrl.searchParams.set("prompt", "consent select_account");
+  authUrl.searchParams.set("state", oauthState);
 
-        state.googlePickerAccessToken = accessToken;
-        state.googlePickerTokenExpiresAt = Date.now() + (Number(response.expires_in || 0) || 3600) * 1000;
-        settle(resolve, accessToken);
-      },
-      error_callback: (error) => {
-        settle(reject, new Error(googlePickerDetailError(error)));
-      },
-    });
-
-    tokenClient.requestAccessToken({ prompt: "consent select_account" });
-  });
+  window.location.assign(authUrl.toString());
 };
 
 const openGoogleDrivePickerDialog = ({ accessToken, onPicked, onCanceled, onError }) => {
@@ -1035,6 +1046,15 @@ const openGoogleDrivePicker = async () => {
     return;
   }
 
+  const tokenStillValid =
+    state.googlePickerAccessToken && state.googlePickerTokenExpiresAt > Date.now() + 60 * 1000;
+  if (!tokenStillValid) {
+    els.drivePickerButton.disabled = true;
+    els.driveImportStatus.textContent = "Opening Google Drive sign-in...";
+    startGoogleDriveRedirectSignIn();
+    return;
+  }
+
   let pickerFinished = false;
   let pickerDialog = null;
   let pickerWatchdog = 0;
@@ -1075,9 +1095,8 @@ const openGoogleDrivePicker = async () => {
   els.driveImportStatus.textContent = "Connecting to Google Drive...";
 
   try {
-    const pickerReady = loadGooglePickerApi();
-    const accessToken = await requestGoogleDriveAccessToken();
-    await pickerReady;
+    const accessToken = state.googlePickerAccessToken;
+    await loadGooglePickerApi();
 
     els.driveImportStatus.textContent = "Google Drive connected. Opening file list...";
     log("Google Drive account connected.");
@@ -2766,10 +2785,6 @@ els.processorMode.addEventListener("change", () => {
 els.nativeIsoPath.addEventListener("input", () => updateButtons());
 els.drivePickerButton.addEventListener("click", openGoogleDrivePicker);
 if (googlePickerConfigured()) {
-  const warmGoogleDrivePicker = () => {
-    void loadGoogleIdentityServices().catch(() => {});
-    void loadGooglePickerApi().catch(() => {});
-  };
   window.setTimeout(warmGoogleDrivePicker, 500);
   els.drivePickerButton.addEventListener("pointerenter", warmGoogleDrivePicker, { once: true });
   els.drivePickerButton.addEventListener("focus", warmGoogleDrivePicker, { once: true });
@@ -2814,6 +2829,17 @@ window.addEventListener("beforeunload", stopEmulator);
 
 log("NebulaVM ready.");
 updateBackendUi();
+if (googleDriveOAuthErrorFromUrl) {
+  els.driveImportStatus.textContent = `Google Drive sign-in failed: ${googleDriveOAuthErrorFromUrl}`;
+  log(`Google Drive sign-in failed: ${googleDriveOAuthErrorFromUrl}`);
+}
+if (shouldResumeGoogleDrivePicker) {
+  els.driveImportStatus.textContent = "Google Drive connected. Opening file list...";
+  log("Google Drive redirect completed.");
+  window.setTimeout(() => {
+    void openGoogleDrivePicker();
+  }, 500);
+}
 void autoAdoptSharedHyperV();
 void connectNetlifyHostRegistry();
 updateButtons();
