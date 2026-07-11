@@ -122,7 +122,7 @@ const setNativeQemuCors = (req, res) => {
   const origin = req.headers.origin || "*";
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-NebulaVM-Filename");
   res.setHeader("Access-Control-Allow-Private-Network", "true");
   res.setHeader("Vary", "Origin");
 };
@@ -382,6 +382,39 @@ const driveJobSnapshot = (job = driveImportJob) => {
       downloadStartedAt: job.downloadStartedAt,
       completedAt: job.completedAt,
     },
+  };
+};
+
+const decodeHeaderFilename = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+};
+
+const saveBrowserIsoUpload = async (req) => {
+  mkdirSync(driveImportDirectory, { recursive: true });
+  const headerName = decodeHeaderFilename(req.headers["x-nebulavm-filename"]);
+  const baseName = sanitizeFilename(headerName || "browser-upload.iso");
+  const mediaName = /\.(iso|img|bin|raw)$/i.test(baseName) ? baseName : `${baseName}.iso`;
+  const finalPath = resolve(driveImportDirectory, `${Date.now()}-${mediaName}`);
+  const tempPath = `${finalPath}.part`;
+
+  await pipeline(req, createWriteStream(tempPath));
+  const bytesReceived = existsSync(tempPath) ? statSync(tempPath).size : 0;
+  if (bytesReceived <= 0) {
+    throw new Error("The browser upload was empty.");
+  }
+  renameSync(tempPath, finalPath);
+
+  return {
+    ok: true,
+    message: "Browser ISO uploaded to the NebulaVM host.",
+    isoPath: finalPath,
+    bytesReceived,
   };
 };
 
@@ -1233,6 +1266,11 @@ const nativeQemuPlugin = () => ({
             json(res, 200, driveJobSnapshot());
             return;
           }
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-host/upload-iso") {
+          json(res, 200, await saveBrowserIsoUpload(req));
+          return;
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") {

@@ -918,13 +918,21 @@ input[type="text"] {
   overflow-wrap: anywhere;
 }
 
+.drive-import-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .drive-import-panel .field {
+  grid-column: 1 / -1;
   min-width: 0;
 }
 
 .drive-import-panel .secondary {
   min-height: 42px;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .drive-import-panel small {
