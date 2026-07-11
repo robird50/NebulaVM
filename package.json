@@ -10,6 +10,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@googleworkspace/drive-picker-element": "^0.7.3",
     "@netlify/blobs": "^10.7.9",
     "@novnc/novnc": "^1.7.0",
     "v86": "^0.5.424",
