@@ -77,6 +77,10 @@ const state = {
   nativeRfb: null,
   nativeRuntimeName: null,
   nativeMonitorTimer: null,
+  hyperVConsoleTimer: null,
+  hyperVConsoleActive: false,
+  hyperVConsoleCleanup: null,
+  hyperVConsoleFrameUrl: null,
   guestResizeTimer: null,
   lastGuestResize: "",
   viewportSummaryTimer: null,
@@ -643,6 +647,56 @@ const fetchHyperVJson = async (path, options) => {
   throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
+const fetchHyperVFrame = async () => {
+  const bridgeBases = [
+    state.nativeQemuApiBase,
+    window.location.origin,
+    "http://127.0.0.1:5174",
+    "http://localhost:5174",
+  ].filter(Boolean);
+  const uniqueBridgeBases = [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
+  let lastError = new Error(nativeQemuBridgeMessage);
+
+  for (const base of uniqueBridgeBases) {
+    try {
+      const headers = new Headers();
+      if (state.nativeHostToken) {
+        headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+      }
+      const response = await fetch(`${base}/api/emustar-hyperv/console-frame`, {
+        cache: "no-store",
+        headers,
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!response.ok || !contentType.toLowerCase().startsWith("image/")) {
+        let message = response.statusText || "Hyper-V setup console frame was unavailable.";
+        if (contentType.toLowerCase().includes("application/json")) {
+          try {
+            const data = await response.json();
+            message = data.error || message;
+          } catch {
+            // Keep the response status text when the error body is not usable JSON.
+          }
+        }
+        throw new Error(message);
+      }
+
+      state.nativeQemuApiBase = base;
+      return {
+        blob: await response.blob(),
+        width: Number(response.headers.get("X-NebulaVM-Frame-Width")) || 0,
+        height: Number(response.headers.get("X-NebulaVM-Frame-Height")) || 0,
+        title: decodeURIComponent(response.headers.get("X-NebulaVM-Frame-Title") || ""),
+        base,
+      };
+    } catch (error) {
+      lastError = error instanceof TypeError ? new Error(nativeQemuBridgeMessage) : error;
+    }
+  }
+
+  throw new Error(lastError.message || nativeQemuBridgeMessage);
+};
+
 const viewportDesktopSize = () => {
   const rect = (els.nativeDisplay.hidden ? els.screenContainer : els.nativeDisplay).getBoundingClientRect();
   const width = Math.max(640, Math.min(7680, Math.round(rect.width)));
@@ -828,6 +882,9 @@ const nativeWebSocketUrl = (base, path) => {
 const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   if (!vncPath) return null;
 
+  if (runtimeName === "EMUSTAR") {
+    stopHyperVSetupConsole();
+  }
   state.lastGuestResize = "";
   els.nativeDisplay.hidden = false;
   const status = document.createElement("span");
@@ -869,11 +926,171 @@ const closeHyperVConsole = async () => {
   }
 };
 
+const stopHyperVSetupConsole = () => {
+  state.hyperVConsoleActive = false;
+  if (state.hyperVConsoleTimer) {
+    window.clearTimeout(state.hyperVConsoleTimer);
+    state.hyperVConsoleTimer = null;
+  }
+  if (state.hyperVConsoleCleanup) {
+    state.hyperVConsoleCleanup();
+    state.hyperVConsoleCleanup = null;
+  }
+  if (state.hyperVConsoleFrameUrl) {
+    URL.revokeObjectURL(state.hyperVConsoleFrameUrl);
+    state.hyperVConsoleFrameUrl = null;
+  }
+};
+
+const sendHyperVConsoleInput = async (payload) => {
+  if (!state.hyperVConsoleActive) return;
+  try {
+    await fetchHyperVJson("console-input", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    log(`Hyper-V setup input failed: ${error.message}`);
+  }
+};
+
+const startHyperVSetupConsole = (base) => {
+  stopHyperVSetupConsole();
+
+  state.hyperVConsoleActive = true;
+  state.nativeQemuApiBase = base || state.nativeQemuApiBase || window.location.origin;
+  els.screenPlaceholder.hidden = true;
+  els.screenContainer.querySelector(".vga-text").hidden = true;
+  els.screenContainer.querySelector(".vga-canvas").hidden = true;
+  els.qemuTerminal.hidden = true;
+  els.qemuTerminal.textContent = "";
+  els.remoteFrame.hidden = true;
+  els.remoteFrame.src = "about:blank";
+  els.nativeDisplay.hidden = false;
+
+  const shell = document.createElement("div");
+  shell.className = "hyperv-console-bridge";
+  shell.tabIndex = 0;
+
+  const image = document.createElement("img");
+  image.alt = "Hyper-V setup console";
+  image.draggable = false;
+
+  const overlay = document.createElement("div");
+  overlay.className = "hyperv-console-overlay";
+  overlay.textContent = "Hyper-V setup console";
+
+  const status = document.createElement("span");
+  status.className = "native-display-status";
+  status.textContent = "Opening Hyper-V setup inside the browser viewport...";
+
+  shell.append(image, overlay, status);
+  els.nativeDisplay.replaceChildren(shell);
+  shell.focus({ preventScroll: true });
+
+  const clickHandler = (event) => {
+    const rect = image.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    shell.focus();
+    void sendHyperVConsoleInput({
+      type: "click",
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+  };
+
+  const keyHandler = (event) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const specialKeys = new Set([
+      "Enter",
+      "Escape",
+      "Backspace",
+      "Delete",
+      "Tab",
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "Home",
+      "End",
+      "PageUp",
+      "PageDown",
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5",
+      "F6",
+      "F7",
+      "F8",
+      "F9",
+      "F10",
+      "F11",
+      "F12",
+    ]);
+
+    if (event.key.length === 1) {
+      event.preventDefault();
+      void sendHyperVConsoleInput({ type: "text", text: event.key });
+      return;
+    }
+
+    if (specialKeys.has(event.key)) {
+      event.preventDefault();
+      void sendHyperVConsoleInput({ type: "key", key: event.key, shiftKey: event.shiftKey });
+    }
+  };
+
+  const pasteHandler = (event) => {
+    const text = event.clipboardData?.getData("text") || "";
+    if (!text) return;
+    event.preventDefault();
+    void sendHyperVConsoleInput({ type: "text", text });
+  };
+
+  image.addEventListener("click", clickHandler);
+  shell.addEventListener("keydown", keyHandler);
+  shell.addEventListener("paste", pasteHandler);
+  state.hyperVConsoleCleanup = () => {
+    image.removeEventListener("click", clickHandler);
+    shell.removeEventListener("keydown", keyHandler);
+    shell.removeEventListener("paste", pasteHandler);
+  };
+
+  const pollFrame = async () => {
+    if (!state.hyperVConsoleActive) return;
+    try {
+      const frame = await fetchHyperVFrame();
+      const nextFrameUrl = URL.createObjectURL(frame.blob);
+      if (state.hyperVConsoleFrameUrl) {
+        URL.revokeObjectURL(state.hyperVConsoleFrameUrl);
+      }
+      state.hyperVConsoleFrameUrl = nextFrameUrl;
+      image.src = nextFrameUrl;
+      if (frame.width) image.width = frame.width;
+      if (frame.height) image.height = frame.height;
+      status.textContent = "Use Tab, arrows, Enter, and paste text here to finish setup.";
+      setViewportSummary("Hyper-V setup is mirrored in browser");
+      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 1100);
+    } catch (error) {
+      status.textContent = `Hyper-V setup mirror waiting: ${error.message}`;
+      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 1800);
+    }
+  };
+
+  void pollFrame();
+  log("Mirroring the Hyper-V setup console inside the browser viewport.");
+};
+
 const adoptRunningHyperVViewport = async (status, base) => {
   if (!isHyperVMode() || status.vm?.state !== "Running" || !status.vncReady || !status.vncPath) {
     return false;
   }
 
+  stopHyperVSetupConsole();
   els.nativeDisplayMode.value = "viewport";
   window.localStorage.setItem("nebulavm.emustar.display", "viewport");
   els.screenPlaceholder.hidden = true;
@@ -1315,6 +1532,7 @@ const monitorNativeVm = () => {
           els.nativeDisplayMode.value === "viewport" &&
           status.vncReady
         ) {
+          stopHyperVSetupConsole();
           state.nativeRfb = connectNativeDisplay(
             state.nativeQemuApiBase || window.location.origin,
             status.vncPath,
@@ -1323,11 +1541,20 @@ const monitorNativeVm = () => {
           );
           log("EMUSTAR browser display is ready.");
           await closeHyperVConsole();
+        } else if (
+          hyperVRuntime &&
+          !state.nativeRfb &&
+          els.nativeDisplayMode.value === "viewport" &&
+          !status.vncReady &&
+          !state.hyperVConsoleActive
+        ) {
+          startHyperVSetupConsole(state.nativeQemuApiBase || window.location.origin);
         }
         return;
       }
 
       clearNativeMonitor();
+      stopHyperVSetupConsole();
       state.nativeRfb?.disconnect();
       state.nativeRfb = null;
       state.emulator = null;
@@ -1380,6 +1607,7 @@ const createDemoBootImage = () => {
 
 const stopEmulator = async () => {
   clearNativeMonitor();
+  stopHyperVSetupConsole();
   if (!state.emulator) return;
 
   const emulator = state.emulator;
@@ -1510,6 +1738,7 @@ const bootQemuX64 = async () => {
 };
 
 const showNativeDisplayStatus = (message) => {
+  stopHyperVSetupConsole();
   els.nativeDisplay.hidden = false;
   const status = document.createElement("span");
   status.className = "native-display-status";
@@ -1609,7 +1838,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   showNativeDisplayStatus(
     displayMode === "external"
       ? "Starting the EMUSTAR Hyper-V host console..."
-      : "Starting EMUSTAR. Browser desktop access becomes available after Windows setup.",
+      : "Starting EMUSTAR setup inside the browser viewport...",
   );
 
   const { response, data: result, base } = await fetchHyperVJson("start", {
@@ -1636,9 +1865,11 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   state.nativeRfb = rfb;
   state.emulator = {
     stop: async () => {
+      stopHyperVSetupConsole();
       rfb?.disconnect();
     },
     destroy: async () => {
+      stopHyperVSetupConsole();
       rfb?.disconnect();
     },
   };
@@ -1662,10 +1893,8 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
     showNativeDisplayStatus("EMUSTAR is running in the Hyper-V host console.");
     log("The Hyper-V setup console opened on the host computer.");
   } else if (!result.vncReady) {
-    showNativeDisplayStatus(
-      "EMUSTAR is running. The browser display will connect automatically when Windows is ready.",
-    );
-    log("Waiting for the Windows guest display service.");
+    startHyperVSetupConsole(base);
+    log("Using the browser viewport for Hyper-V setup until the Windows desktop display is ready.");
   }
 };
 
@@ -2178,7 +2407,7 @@ const updateBackendUi = () => {
     els.nativeCreateDisk.checked = true;
     els.nativeCreateDisk.disabled = emustarMode;
     const [viewportOption, externalOption] = els.nativeDisplayMode.options;
-    viewportOption.textContent = emustarMode ? "Browser desktop (after setup)" : "ISO viewport";
+    viewportOption.textContent = emustarMode ? "Browser setup + desktop" : "ISO viewport";
     externalOption.textContent = emustarMode ? "Hyper-V host console" : "External window";
     state.nativeQemuReady = false;
     els.nativeStatus.dataset.mode = "";

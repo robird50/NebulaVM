@@ -504,6 +504,9 @@ const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
 const hyperVGuestVncPath = "/api/emustar-hyperv/vnc";
 const hyperVScriptPath = resolve(workspaceDir, "scripts", "emustar-hyperv.ps1");
+const hyperVConsoleFrameScriptPath = resolve(workspaceDir, "scripts", "emustar-console-frame.ps1");
+const hyperVConsoleInputScriptPath = resolve(workspaceDir, "scripts", "emustar-console-input.ps1");
+const hyperVConsoleFramePath = resolve(workspaceDir, "vm-disks", "emustar-hyperv", "console-frame.jpg");
 
 const runHyperVAction = (action, config = {}, timeoutMs = 30000) =>
   new Promise((resolveAction, rejectAction) => {
@@ -565,6 +568,84 @@ const runHyperVAction = (action, config = {}, timeoutMs = 30000) =>
       });
     });
   });
+
+const runPowerShellJson = (label, args, timeoutMs = 30000) =>
+  new Promise((resolveAction, rejectAction) => {
+    let settled = false;
+    const child = spawn("powershell.exe", args, {
+      cwd: workspaceDir,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish(() => rejectAction(new Error(`${label} timed out.`)));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => finish(() => rejectAction(error)));
+    child.on("exit", (code) => {
+      finish(() => {
+        const output = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
+        try {
+          const result = JSON.parse(output || "{}");
+          if (code === 0 && result.ok !== false) {
+            resolveAction(result);
+            return;
+          }
+          rejectAction(new Error(result.error || stderr.trim() || `${label} failed with code ${code}.`));
+        } catch {
+          rejectAction(new Error(stderr.trim() || stdout.trim() || `${label} failed with code ${code}.`));
+        }
+      });
+    });
+  });
+
+const runHyperVConsoleFrame = () =>
+  runPowerShellJson(
+    "Hyper-V setup console frame",
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      hyperVConsoleFrameScriptPath,
+      "-OutputPath",
+      hyperVConsoleFramePath,
+    ],
+    15000,
+  );
+
+const runHyperVConsoleInput = (body) =>
+  runPowerShellJson(
+    "Hyper-V setup console input",
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      hyperVConsoleInputScriptPath,
+      "-ConfigBase64",
+      Buffer.from(JSON.stringify(body || {}), "utf8").toString("base64"),
+    ],
+    10000,
+  );
 
 const isPortAvailable = (port) =>
   new Promise((resolvePort) => {
@@ -1123,6 +1204,29 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/close-console") {
           json(res, 200, await runHyperVAction("CloseConsole"));
+          return;
+        }
+
+        if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/console-frame") {
+          const frame = await runHyperVConsoleFrame();
+          if (!frame.outputPath || !existsSync(frame.outputPath)) {
+            throw new Error("Hyper-V setup console frame was not written.");
+          }
+
+          const image = readFileSync(frame.outputPath);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", frame.mimeType || "image/jpeg");
+          res.setHeader("Cache-Control", "no-store");
+          res.setHeader("X-NebulaVM-Frame-Width", String(frame.width || ""));
+          res.setHeader("X-NebulaVM-Frame-Height", String(frame.height || ""));
+          res.setHeader("X-NebulaVM-Frame-Title", encodeURIComponent(frame.title || ""));
+          res.end(image);
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/console-input") {
+          const body = await readJsonBody(req);
+          json(res, 200, await runHyperVConsoleInput(body));
           return;
         }
 
