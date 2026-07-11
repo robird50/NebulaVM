@@ -17,6 +17,7 @@ const GOOGLE_PICKER_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const GOOGLE_PICKER_APP_ID =
   import.meta.env.VITE_GOOGLE_APP_ID || (GOOGLE_PICKER_CLIENT_ID.match(/^\d+/)?.[0] || "");
 const GOOGLE_DRIVE_PICKER_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const GOOGLE_PICKER_TOKEN_TIMEOUT_MS = 45000;
 const isNetlifyLauncher = /\.netlify\.app$/i.test(window.location.hostname);
 
 const isMobileOrTabletDevice = () => {
@@ -94,6 +95,7 @@ const state = {
   googlePickerLibrariesReady: false,
   googlePickerTokenClient: null,
   googlePickerAccessToken: "",
+  googlePickerTokenErrorHandler: null,
 };
 
 app.innerHTML = `
@@ -864,6 +866,11 @@ const loadGooglePickerLibraries = async () => {
     client_id: GOOGLE_PICKER_CLIENT_ID,
     scope: GOOGLE_DRIVE_PICKER_SCOPE,
     callback: () => {},
+    error_callback: (error) => {
+      if (typeof state.googlePickerTokenErrorHandler === "function") {
+        state.googlePickerTokenErrorHandler(error);
+      }
+    },
   });
   state.googlePickerLibrariesReady = true;
 };
@@ -872,21 +879,51 @@ const requestGooglePickerAccessToken = async () => {
   await loadGooglePickerLibraries();
 
   return new Promise((resolveToken, rejectToken) => {
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      finish(
+        new Error(
+          "Google sign-in did not finish. Allow pop-ups for this page, then click Choose from Drive again.",
+        ),
+      );
+    }, GOOGLE_PICKER_TOKEN_TIMEOUT_MS);
+
+    const finish = (error, token = "") => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      state.googlePickerTokenErrorHandler = null;
+      if (error) {
+        rejectToken(error);
+        return;
+      }
+      resolveToken(token);
+    };
+
+    state.googlePickerTokenErrorHandler = (error) => {
+      const reason = error?.message || error?.type || "Google sign-in could not open.";
+      finish(new Error(reason));
+    };
+
     state.googlePickerTokenClient.callback = (response) => {
       if (response?.error) {
-        rejectToken(new Error(response.error_description || response.error));
+        finish(new Error(response.error_description || response.error));
         return;
       }
       if (!response?.access_token) {
-        rejectToken(new Error("Google did not return a Drive access token."));
+        finish(new Error("Google did not return a Drive access token."));
         return;
       }
       state.googlePickerAccessToken = response.access_token;
-      resolveToken(response.access_token);
+      finish(null, response.access_token);
     };
-    state.googlePickerTokenClient.requestAccessToken({
-      prompt: state.googlePickerAccessToken ? "" : "consent",
-    });
+    try {
+      state.googlePickerTokenClient.requestAccessToken({
+        prompt: state.googlePickerAccessToken ? "" : "consent",
+      });
+    } catch (error) {
+      finish(error);
+    }
   });
 };
 
@@ -939,6 +976,7 @@ const openGoogleDrivePicker = async () => {
   els.driveImportStatus.textContent = "Opening Google Drive picker...";
   try {
     const accessToken = await requestGooglePickerAccessToken();
+    els.driveImportStatus.textContent = "Google account connected. Choose an ISO in the Drive picker.";
     const pickerApi = window.google.picker;
     const docsView = new pickerApi.DocsView(pickerApi.ViewId.DOCS)
       .setIncludeFolders(false)
