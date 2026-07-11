@@ -300,6 +300,10 @@ app.innerHTML = `
               </label>
 
               <div class="drive-import-panel">
+                <div class="drive-import-heading">
+                  <img src="/assets/google-drive-icon.webp" alt="" />
+                  <span>Google Drive import</span>
+                </div>
                 <label class="field full-span">
                   <span>Google Drive ISO link</span>
                   <input id="driveIsoUrl" type="text" placeholder="https://drive.google.com/file/d/..." />

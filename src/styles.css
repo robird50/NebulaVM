@@ -893,6 +893,31 @@ input[type="text"] {
   background: rgba(255, 221, 61, 0.055);
 }
 
+.drive-import-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  color: #fef08a;
+  font-size: 0.76rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.drive-import-heading img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px rgba(255, 221, 61, 0.25));
+}
+
+.drive-import-heading span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .drive-import-panel .field {
   min-width: 0;
 }
