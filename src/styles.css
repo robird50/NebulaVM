@@ -67,6 +67,17 @@ button:disabled {
   text-align: center;
 }
 
+.commit-id a {
+  margin-left: 10px;
+  color: #ffdd3d;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.commit-id a:hover {
+  color: #fff176;
+}
+
 .mobile-unsupported {
   display: none;
   width: min(1080px, 100%);
