@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import dgram from "node:dgram";
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { cpus, networkInterfaces } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
@@ -251,12 +251,13 @@ const rememberGoogleCookies = (cookieJar, headers) => {
 const googleCookieHeader = (cookieJar) =>
   [...cookieJar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
 
-const fetchGoogleDrive = async (url, cookieJar) => {
+const fetchGoogleDrive = async (url, cookieJar, extraHeaders = {}) => {
   const cookie = googleCookieHeader(cookieJar);
   const response = await fetch(url, {
     redirect: "follow",
     headers: {
       "User-Agent": "NebulaVM Drive Importer/1.0",
+      ...extraHeaders,
       ...(cookie ? { Cookie: cookie } : {}),
     },
   });
@@ -309,16 +310,32 @@ const findGoogleDriveConfirmationUrl = (html, responseUrl, resourceKey) => {
   return "";
 };
 
-const downloadResponseFromGoogleDrive = async (fileId, resourceKey = "") => {
+const parseContentRange = (header) => {
+  const match = String(header || "").match(/bytes\s+(\d+)-(\d+)\/(\d+|\*)/i);
+  if (!match) return null;
+  return {
+    start: Number(match[1]),
+    end: Number(match[2]),
+    total: match[3] === "*" ? 0 : Number(match[3]),
+  };
+};
+
+const isRetryableDriveError = (error) =>
+  /terminated|aborted|reset|timeout|network|fetch failed|socket|econn|etimedout/i.test(
+    error?.message || String(error || ""),
+  );
+
+const downloadResponseFromGoogleDrive = async (fileId, resourceKey = "", startByte = 0) => {
   const cookieJar = new Map();
   let nextUrl = addGoogleDriveResourceKey(
     `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`,
     resourceKey,
   );
   let lastHtml = "";
+  const extraHeaders = startByte > 0 ? { Range: `bytes=${startByte}-` } : {};
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const response = await fetchGoogleDrive(nextUrl, cookieJar);
+    const response = await fetchGoogleDrive(nextUrl, cookieJar, extraHeaders);
     if (!response.ok) {
       throw new Error(`Google Drive returned HTTP ${response.status}.`);
     }
@@ -393,33 +410,77 @@ const startGoogleDriveIsoImport = (driveUrl) => {
 
   (async () => {
     mkdirSync(driveImportDirectory, { recursive: true });
-    const response = await downloadResponseFromGoogleDrive(fileId, resourceKey);
-    job.message = "Downloading ISO to the NebulaVM host...";
-    job.totalBytes = Number(response.headers.get("content-length") || 0);
-    job.downloadStartedAt = new Date().toISOString();
-    job.lastSpeedCheckAt = Date.now();
-    job.lastSpeedBytes = 0;
+    let finalPath = "";
+    let tempPath = "";
+    const maxAttempts = 8;
 
-    const headerName = parseContentDispositionFilename(response.headers.get("content-disposition"));
-    const baseName = sanitizeFilename(headerName || `google-drive-${fileId}.iso`);
-    const isoName = baseName.toLowerCase().endsWith(".iso") ? baseName : `${baseName}.iso`;
-    const finalPath = resolve(driveImportDirectory, `${Date.now()}-${isoName}`);
-    const tempPath = `${finalPath}.part`;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const resumeFrom = job.bytesReceived;
+      try {
+        const response = await downloadResponseFromGoogleDrive(fileId, resourceKey, resumeFrom);
+        const contentRange = parseContentRange(response.headers.get("content-range"));
+        const rangeHonored = resumeFrom > 0 && response.status === 206 && contentRange?.start === resumeFrom;
 
-    const source = Readable.from(async function* progressChunks() {
-      for await (const chunk of Readable.fromWeb(response.body)) {
-        job.bytesReceived += chunk.length;
-        const now = Date.now();
-        const elapsedSeconds = (now - job.lastSpeedCheckAt) / 1000;
-        if (elapsedSeconds >= 0.5) {
-          job.speedBytesPerSecond = Math.max(0, Math.round((job.bytesReceived - job.lastSpeedBytes) / elapsedSeconds));
-          job.lastSpeedCheckAt = now;
-          job.lastSpeedBytes = job.bytesReceived;
+        if (resumeFrom > 0 && !rangeHonored) {
+          job.message = "Google Drive restarted the stream; restarting import...";
+          job.bytesReceived = 0;
+          job.lastSpeedBytes = 0;
+          job.speedBytesPerSecond = 0;
+          if (tempPath) {
+            writeFileSync(tempPath, "");
+          }
         }
-        yield chunk;
+
+        if (!finalPath) {
+          const headerName = parseContentDispositionFilename(response.headers.get("content-disposition"));
+          const baseName = sanitizeFilename(headerName || `google-drive-${fileId}.iso`);
+          const isoName = baseName.toLowerCase().endsWith(".iso") ? baseName : `${baseName}.iso`;
+          finalPath = resolve(driveImportDirectory, `${Date.now()}-${isoName}`);
+          tempPath = `${finalPath}.part`;
+        }
+
+        const activeRange = parseContentRange(response.headers.get("content-range"));
+        const contentLength = Number(response.headers.get("content-length") || 0);
+        job.totalBytes = activeRange?.total || (job.bytesReceived > 0 ? job.bytesReceived + contentLength : contentLength);
+        job.message =
+          attempt > 1
+            ? `Resuming ISO download after a connection drop (${attempt}/${maxAttempts})...`
+            : "Downloading ISO to the NebulaVM host...";
+        job.downloadStartedAt ||= new Date().toISOString();
+        job.lastSpeedCheckAt = Date.now();
+        job.lastSpeedBytes = job.bytesReceived;
+
+        const source = Readable.from(async function* progressChunks() {
+          if (!response.body) {
+            throw new Error("Google Drive returned an empty download stream.");
+          }
+          for await (const chunk of Readable.fromWeb(response.body)) {
+            job.bytesReceived += chunk.length;
+            const now = Date.now();
+            const elapsedSeconds = (now - job.lastSpeedCheckAt) / 1000;
+            if (elapsedSeconds >= 0.5) {
+              job.speedBytesPerSecond = Math.max(0, Math.round((job.bytesReceived - job.lastSpeedBytes) / elapsedSeconds));
+              job.lastSpeedCheckAt = now;
+              job.lastSpeedBytes = job.bytesReceived;
+            }
+            yield chunk;
+          }
+        }());
+        await pipeline(source, createWriteStream(tempPath, { flags: job.bytesReceived > 0 ? "a" : "w" }));
+        break;
+      } catch (error) {
+        if (tempPath && existsSync(tempPath)) {
+          job.bytesReceived = statSync(tempPath).size;
+        }
+        if (attempt >= maxAttempts || !isRetryableDriveError(error)) {
+          throw error;
+        }
+        job.message = `Connection dropped; retrying Google Drive import (${attempt + 1}/${maxAttempts})...`;
+        job.speedBytesPerSecond = 0;
+        await new Promise((resolveRetry) => setTimeout(resolveRetry, Math.min(2500 * attempt, 10000)));
       }
-    }());
-    await pipeline(source, createWriteStream(tempPath));
+    }
+
     renameSync(tempPath, finalPath);
 
     job.state = "complete";
@@ -430,7 +491,9 @@ const startGoogleDriveIsoImport = (driveUrl) => {
   })().catch((error) => {
     job.state = "error";
     job.message = "Google Drive ISO import failed.";
-    job.error = error.message || String(error);
+    job.error = isRetryableDriveError(error)
+      ? `Google Drive connection kept dropping after multiple resume attempts. Last error: ${error.message || String(error)}`
+      : error.message || String(error);
     job.completedAt = new Date().toISOString();
   });
 
