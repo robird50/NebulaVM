@@ -312,15 +312,8 @@ app.innerHTML = `
                   <img src="/assets/google-drive-icon.webp" alt="" />
                   <span>Google Drive import</span>
                 </div>
-                <label class="field full-span">
-                  <span>Google Drive ISO link</span>
-                  <input id="driveIsoUrl" type="text" placeholder="https://drive.google.com/file/d/..." />
-                </label>
                 <div class="drive-import-actions">
-                  <button class="secondary" id="driveImportButton" type="button">Import Drive ISO</button>
                   <button class="secondary" id="drivePickerButton" type="button">Choose from Drive</button>
-                  <button class="secondary" id="hostUploadButton" type="button">Upload ISO file</button>
-                  <input id="hostUploadInput" type="file" accept=".iso,.img,.bin,.raw" hidden />
                 </div>
                 <small id="driveImportStatus">No Drive import running.</small>
                 <div class="drive-import-progress" id="driveImportProgress" hidden>
@@ -510,11 +503,7 @@ const els = {
   emustarShareStatus: document.querySelector("#emustarShareStatus"),
   nativeDisplayMode: document.querySelector("#nativeDisplayMode"),
   nativeIsoPath: document.querySelector("#nativeIsoPath"),
-  driveIsoUrl: document.querySelector("#driveIsoUrl"),
-  driveImportButton: document.querySelector("#driveImportButton"),
   drivePickerButton: document.querySelector("#drivePickerButton"),
-  hostUploadButton: document.querySelector("#hostUploadButton"),
-  hostUploadInput: document.querySelector("#hostUploadInput"),
   driveImportStatus: document.querySelector("#driveImportStatus"),
   driveImportProgress: document.querySelector("#driveImportProgress"),
   driveImportProgressFill: document.querySelector("#driveImportProgressFill"),
@@ -902,10 +891,7 @@ const requestGooglePickerAccessToken = async () => {
 };
 
 const startPickerDriveImport = async (fileId, fileName, accessToken) => {
-  els.driveImportButton.disabled = true;
   els.drivePickerButton.disabled = true;
-  els.hostUploadButton.disabled = true;
-  els.driveIsoUrl.disabled = true;
   els.driveImportStatus.textContent = `Starting authenticated Google Drive import for ${fileName || "selected file"}...`;
   updateDriveImportProgress({
     state: "running",
@@ -938,10 +924,7 @@ const startPickerDriveImport = async (fileId, fileName, accessToken) => {
     updateDriveImportProgress(null);
     log(`Google Picker import failed: ${error.message}`);
   } finally {
-    els.driveImportButton.disabled = false;
     els.drivePickerButton.disabled = false;
-    els.hostUploadButton.disabled = false;
-    els.driveIsoUrl.disabled = false;
     updateButtons();
   }
 };
@@ -2372,8 +2355,7 @@ const driveImportStatusText = (job) => {
   if (!job) return "No Drive import running.";
   if (job.state === "complete") return `Imported to ${job.isoPath}`;
   if (job.state === "error") {
-    const error = job.error || "Google Drive ISO import failed.";
-    return /download limit|quota/i.test(error) ? `${error} Use Upload ISO file to skip Drive quota.` : error;
+    return job.error || "Google Drive ISO import failed.";
   }
   const received = formatBytes(job.bytesReceived || 0);
   const total = job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : "";
@@ -2419,142 +2401,15 @@ const updateDriveImportProgress = (job) => {
   els.driveImportSpeed.textContent = speedText;
 };
 
-const hostUploadBases = async () => {
-  if (!state.nativeQemuApiBase && isNetlifyLauncher) {
-    await fetchNetlifyHostRegistry();
-  }
-
-  const bases = [
-    state.nativeQemuApiBase,
-    ...(isNetlifyLauncher ? [] : [window.location.origin]),
-    "http://127.0.0.1:5174",
-    "http://localhost:5174",
-  ].filter(Boolean);
-
-  return [...new Set(bases.map((base) => base.replace(/\/$/, "")))].filter((base) => {
-    try {
-      return !/\.netlify\.app$/i.test(new URL(base).hostname);
-    } catch {
-      return false;
-    }
-  });
-};
-
-const uploadIsoToHostBase = (base, file, onProgress) =>
-  new Promise((resolveUpload, rejectUpload) => {
-    const request = new XMLHttpRequest();
-    request.open("POST", `${base}/api/emustar-host/upload-iso`);
-    request.responseType = "json";
-    request.timeout = 0;
-    if (state.nativeHostToken) {
-      request.setRequestHeader("Authorization", `Bearer ${state.nativeHostToken}`);
-    }
-    request.setRequestHeader("Content-Type", "application/octet-stream");
-    request.setRequestHeader("X-NebulaVM-Filename", encodeURIComponent(file.name || "browser-upload.iso"));
-
-    request.upload.onprogress = (event) => {
-      onProgress({
-        loaded: event.loaded,
-        total: event.lengthComputable ? event.total : file.size,
-      });
-    };
-    request.onload = () => {
-      const data = request.response || {};
-      if (request.status >= 200 && request.status < 300 && data.ok) {
-        resolveUpload(data);
-        return;
-      }
-      rejectUpload(new Error(data.error || `Host upload failed with HTTP ${request.status}.`));
-    };
-    request.onerror = () => rejectUpload(new Error(nativeQemuBridgeMessage));
-    request.onabort = () => rejectUpload(new Error("Browser ISO upload was canceled."));
-    request.send(file);
-  });
-
-const uploadIsoToHost = async (file, onProgress) => {
-  const bases = await hostUploadBases();
-  let lastError = new Error(nativeQemuBridgeMessage);
-
-  for (const base of bases) {
-    try {
-      const result = await uploadIsoToHostBase(base, file, onProgress);
-      state.nativeQemuApiBase = base;
-      return result;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError;
-};
-
 const applyDriveImportJob = (job) => {
   els.driveImportStatus.textContent = driveImportStatusText(job);
   updateDriveImportProgress(job);
   const running = job?.state === "running";
-  els.driveImportButton.disabled = running;
-  els.driveIsoUrl.disabled = running;
   els.drivePickerButton.disabled = running;
-  els.hostUploadButton.disabled = running;
 
   if (job?.state === "complete" && job.isoPath && job.id === state.activeDriveImportId) {
     els.nativeIsoPath.value = job.isoPath;
     state.activeDriveImportId = null;
-    updateButtons();
-  }
-};
-
-const importBrowserIsoFile = async (file) => {
-  if (!file) return;
-
-  const startedAt = Date.now();
-  let lastCheckAt = startedAt;
-  let lastCheckBytes = 0;
-  const renderProgress = ({ loaded, total }) => {
-    const now = Date.now();
-    const elapsedSeconds = Math.max(0.001, (now - lastCheckAt) / 1000);
-    const speedBytesPerSecond = Math.max(0, Math.round((loaded - lastCheckBytes) / elapsedSeconds));
-    if (now - lastCheckAt >= 500 || loaded >= total) {
-      lastCheckAt = now;
-      lastCheckBytes = loaded;
-    }
-    updateDriveImportProgress({
-      state: "running",
-      message: "Uploading ISO to the NebulaVM host...",
-      bytesReceived: loaded,
-      totalBytes: total || file.size,
-      speedBytesPerSecond,
-    });
-    els.driveImportStatus.textContent = `Uploading ${file.name || "ISO"} to the NebulaVM host...`;
-  };
-
-  els.driveImportButton.disabled = true;
-  els.drivePickerButton.disabled = true;
-  els.hostUploadButton.disabled = true;
-  els.driveIsoUrl.disabled = true;
-  renderProgress({ loaded: 0, total: file.size });
-
-  try {
-    const result = await uploadIsoToHost(file, renderProgress);
-    els.nativeIsoPath.value = result.isoPath;
-    els.driveImportStatus.textContent = `Uploaded to ${result.isoPath}`;
-    updateDriveImportProgress({
-      state: "complete",
-      bytesReceived: result.bytesReceived || file.size,
-      totalBytes: result.bytesReceived || file.size,
-      speedBytesPerSecond: 0,
-    });
-    log(`Browser ISO uploaded to ${result.isoPath}.`);
-  } catch (error) {
-    els.driveImportStatus.textContent = error.message;
-    updateDriveImportProgress(null);
-    log(`Browser ISO upload failed: ${error.message}`);
-  } finally {
-    els.hostUploadInput.value = "";
-    els.driveImportButton.disabled = false;
-    els.drivePickerButton.disabled = false;
-    els.hostUploadButton.disabled = false;
-    els.driveIsoUrl.disabled = false;
     updateButtons();
   }
 };
@@ -2575,55 +2430,6 @@ const pollDriveImport = async () => {
     }
   } finally {
     state.driveImportPolling = false;
-  }
-};
-
-const importDriveIso = async () => {
-  const driveUrl = els.driveIsoUrl.value.trim();
-  if (!driveUrl) {
-    els.driveImportStatus.textContent = "Paste a Google Drive ISO link first.";
-    updateDriveImportProgress(null);
-    return;
-  }
-
-  els.driveImportButton.disabled = true;
-  els.drivePickerButton.disabled = true;
-  els.driveIsoUrl.disabled = true;
-  els.driveImportStatus.textContent = "Starting Google Drive import...";
-  updateDriveImportProgress({
-    state: "running",
-    message: "Starting Google Drive import...",
-    bytesReceived: 0,
-    totalBytes: 0,
-    speedBytesPerSecond: 0,
-  });
-  try {
-    const { response, data } = await fetchEmustarHostJson("drive-import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ driveUrl }),
-    });
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || "Google Drive import failed to start.");
-    }
-
-    state.activeDriveImportId = data.job?.id || null;
-    applyDriveImportJob(data.job);
-    const job = await pollDriveImport();
-    if (job?.state === "complete") {
-      log(`Google Drive ISO imported to ${job.isoPath}.`);
-    } else if (job?.state === "error") {
-      log(`Google Drive import failed: ${job.error}`);
-    }
-  } catch (error) {
-    els.driveImportStatus.textContent = error.message;
-    updateDriveImportProgress(null);
-    log(`Google Drive import failed: ${error.message}`);
-  } finally {
-    els.driveImportButton.disabled = false;
-    els.drivePickerButton.disabled = false;
-    els.driveIsoUrl.disabled = false;
-    updateButtons();
   }
 };
 
@@ -2837,18 +2643,7 @@ els.processorMode.addEventListener("change", () => {
   updateBackendUi();
 });
 els.nativeIsoPath.addEventListener("input", () => updateButtons());
-els.driveIsoUrl.addEventListener("input", () => {
-  if (!els.driveIsoUrl.value.trim()) {
-    els.driveImportStatus.textContent = "No Drive import running.";
-    updateDriveImportProgress(null);
-  }
-});
-els.driveImportButton.addEventListener("click", importDriveIso);
 els.drivePickerButton.addEventListener("click", openGoogleDrivePicker);
-els.hostUploadButton.addEventListener("click", () => els.hostUploadInput.click());
-els.hostUploadInput.addEventListener("change", () => {
-  void importBrowserIsoFile(els.hostUploadInput.files?.[0]);
-});
 els.nativeCreateDisk.addEventListener("change", () => updateButtons());
 els.nativeDisplayMode.addEventListener("change", () => {
   window.localStorage.setItem("nebulavm.emustar.display", els.nativeDisplayMode.value);
