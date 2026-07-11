@@ -921,7 +921,7 @@ input[type="text"] {
 .drive-import-actions {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 8px;
 }
 

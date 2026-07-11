@@ -53,6 +53,34 @@ credentials are stored only in ignored local files:
 Cloudflare Quick Tunnel URLs can change when the tunnel restarts. Open NebulaVM
 locally and copy the newly displayed browser link after a change.
 
+## Google Drive Picker
+
+NebulaVM can import an ISO through Google's official Picker instead of a public
+Drive share link. This uses Google Identity Services in the browser, then the
+host downloads the selected Drive file with the Drive API `files.get` endpoint
+and `alt=media`.
+
+Create a Google Cloud project, enable the Google Picker API and Google Drive
+API, then configure OAuth and API key restrictions for the origins you use, such
+as:
+
+```text
+https://nebulavm.netlify.app
+http://127.0.0.1:5174
+```
+
+Copy `.env.example` to `.env` and fill in:
+
+```text
+VITE_GOOGLE_API_KEY=your_api_key
+VITE_GOOGLE_CLIENT_ID=your_web_oauth_client_id
+VITE_GOOGLE_APP_ID=your_cloud_project_number
+```
+
+For Netlify, add the same variables in the site's environment variables and
+redeploy. NebulaVM requests the `drive.file` scope so the user explicitly picks
+which Drive file the app can read.
+
 ## Automatic Startup
 
 Install the startup task from an elevated PowerShell window:

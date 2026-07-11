@@ -325,6 +325,16 @@ const isRetryableDriveError = (error) =>
     error?.message || String(error || ""),
   );
 
+const googleDriveApiError = async (response, fallback) => {
+  const text = await response.text();
+  try {
+    const payload = JSON.parse(text);
+    return payload?.error?.message || fallback;
+  } catch {
+    return text.trim() || fallback;
+  }
+};
+
 const downloadResponseFromGoogleDrive = async (fileId, resourceKey = "", startByte = 0) => {
   const cookieJar = new Map();
   let nextUrl = addGoogleDriveResourceKey(
@@ -363,6 +373,48 @@ const downloadResponseFromGoogleDrive = async (fileId, resourceKey = "", startBy
   throw new Error(
     "Google Drive did not return the ISO file. Use the file share link, set it to 'Anyone with the link can view', then try again.",
   );
+};
+
+const fetchGoogleDriveApiMetadata = async (fileId, accessToken) => {
+  const metadataUrl = new URL(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`);
+  metadataUrl.searchParams.set("fields", "id,name,size,mimeType,capabilities/canDownload");
+  metadataUrl.searchParams.set("supportsAllDrives", "true");
+
+  const response = await fetch(metadataUrl, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await googleDriveApiError(response, `Google Drive API returned HTTP ${response.status}.`));
+  }
+
+  const metadata = await response.json();
+  if (metadata.capabilities?.canDownload === false) {
+    throw new Error("Google Drive says this file cannot be downloaded by this account.");
+  }
+  return metadata;
+};
+
+const downloadResponseFromGoogleDriveApi = async (fileId, accessToken, startByte = 0) => {
+  const downloadUrl = new URL(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`);
+  downloadUrl.searchParams.set("alt", "media");
+  downloadUrl.searchParams.set("supportsAllDrives", "true");
+
+  const response = await fetch(downloadUrl, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(startByte > 0 ? { Range: `bytes=${startByte}-` } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(await googleDriveApiError(response, `Google Drive API returned HTTP ${response.status}.`));
+  }
+
+  return response;
 };
 
 const driveJobSnapshot = (job = driveImportJob) => {
@@ -418,16 +470,10 @@ const saveBrowserIsoUpload = async (req) => {
   };
 };
 
-const startGoogleDriveIsoImport = (driveUrl) => {
-  if (driveImportJob?.state === "running") {
-    throw new Error("A Google Drive ISO import is already running.");
-  }
-
-  const { fileId, resourceKey } = parseGoogleDriveFile(driveUrl);
-  const job = {
+const createDriveImportJob = (message = "Connecting to Google Drive...") => ({
     id: randomBytes(8).toString("hex"),
     state: "running",
-    message: "Connecting to Google Drive...",
+    message,
     bytesReceived: 0,
     totalBytes: 0,
     speedBytesPerSecond: 0,
@@ -438,96 +484,153 @@ const startGoogleDriveIsoImport = (driveUrl) => {
     lastSpeedCheckAt: 0,
     lastSpeedBytes: 0,
     completedAt: "",
-  };
+});
+
+const runDriveImportDownload = async (job, options) => {
+  const {
+    getResponse,
+    fallbackName,
+    firstMessage = "Downloading ISO to the NebulaVM host...",
+    resumeMessage = "Resuming ISO download after a connection drop",
+    completeMessage = "Google Drive ISO imported.",
+  } = options;
+
+  mkdirSync(driveImportDirectory, { recursive: true });
+  let finalPath = "";
+  let tempPath = "";
+  const maxAttempts = 8;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const resumeFrom = job.bytesReceived;
+    try {
+      const response = await getResponse(resumeFrom);
+      const contentRange = parseContentRange(response.headers.get("content-range"));
+      const rangeHonored = resumeFrom > 0 && response.status === 206 && contentRange?.start === resumeFrom;
+
+      if (resumeFrom > 0 && !rangeHonored) {
+        job.message = "Google Drive restarted the stream; restarting import...";
+        job.bytesReceived = 0;
+        job.lastSpeedBytes = 0;
+        job.speedBytesPerSecond = 0;
+        if (tempPath) {
+          writeFileSync(tempPath, "");
+        }
+      }
+
+      if (!finalPath) {
+        const headerName = parseContentDispositionFilename(response.headers.get("content-disposition"));
+        const baseName = sanitizeFilename(headerName || fallbackName || "google-drive.iso");
+        const isoName = /\.(iso|img|bin|raw)$/i.test(baseName) ? baseName : `${baseName}.iso`;
+        finalPath = resolve(driveImportDirectory, `${Date.now()}-${isoName}`);
+        tempPath = `${finalPath}.part`;
+      }
+
+      const activeRange = parseContentRange(response.headers.get("content-range"));
+      const contentLength = Number(response.headers.get("content-length") || 0);
+      job.totalBytes = activeRange?.total || (job.bytesReceived > 0 ? job.bytesReceived + contentLength : contentLength);
+      job.message = attempt > 1 ? `${resumeMessage} (${attempt}/${maxAttempts})...` : firstMessage;
+      job.downloadStartedAt ||= new Date().toISOString();
+      job.lastSpeedCheckAt = Date.now();
+      job.lastSpeedBytes = job.bytesReceived;
+
+      const source = Readable.from(async function* progressChunks() {
+        if (!response.body) {
+          throw new Error("Google Drive returned an empty download stream.");
+        }
+        for await (const chunk of Readable.fromWeb(response.body)) {
+          job.bytesReceived += chunk.length;
+          const now = Date.now();
+          const elapsedSeconds = (now - job.lastSpeedCheckAt) / 1000;
+          if (elapsedSeconds >= 0.5) {
+            job.speedBytesPerSecond = Math.max(0, Math.round((job.bytesReceived - job.lastSpeedBytes) / elapsedSeconds));
+            job.lastSpeedCheckAt = now;
+            job.lastSpeedBytes = job.bytesReceived;
+          }
+          yield chunk;
+        }
+      }());
+      await pipeline(source, createWriteStream(tempPath, { flags: job.bytesReceived > 0 ? "a" : "w" }));
+      break;
+    } catch (error) {
+      if (tempPath && existsSync(tempPath)) {
+        job.bytesReceived = statSync(tempPath).size;
+      }
+      if (attempt >= maxAttempts || !isRetryableDriveError(error)) {
+        throw error;
+      }
+      job.message = `Connection dropped; retrying Google Drive import (${attempt + 1}/${maxAttempts})...`;
+      job.speedBytesPerSecond = 0;
+      await new Promise((resolveRetry) => setTimeout(resolveRetry, Math.min(2500 * attempt, 10000)));
+    }
+  }
+
+  renameSync(tempPath, finalPath);
+  job.state = "complete";
+  job.message = completeMessage;
+  job.speedBytesPerSecond = 0;
+  job.isoPath = finalPath;
+  job.completedAt = new Date().toISOString();
+};
+
+const failDriveImportJob = (job, error) => {
+  job.state = "error";
+  job.message = "Google Drive ISO import failed.";
+  job.error = isRetryableDriveError(error)
+    ? `Google Drive connection kept dropping after multiple resume attempts. Last error: ${error.message || String(error)}`
+    : error.message || String(error);
+  job.completedAt = new Date().toISOString();
+};
+
+const startGoogleDriveIsoImport = (driveUrl) => {
+  if (driveImportJob?.state === "running") {
+    throw new Error("A Google Drive ISO import is already running.");
+  }
+
+  const { fileId, resourceKey } = parseGoogleDriveFile(driveUrl);
+  const job = createDriveImportJob("Connecting to Google Drive...");
   driveImportJob = job;
 
   (async () => {
-    mkdirSync(driveImportDirectory, { recursive: true });
-    let finalPath = "";
-    let tempPath = "";
-    const maxAttempts = 8;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const resumeFrom = job.bytesReceived;
-      try {
-        const response = await downloadResponseFromGoogleDrive(fileId, resourceKey, resumeFrom);
-        const contentRange = parseContentRange(response.headers.get("content-range"));
-        const rangeHonored = resumeFrom > 0 && response.status === 206 && contentRange?.start === resumeFrom;
-
-        if (resumeFrom > 0 && !rangeHonored) {
-          job.message = "Google Drive restarted the stream; restarting import...";
-          job.bytesReceived = 0;
-          job.lastSpeedBytes = 0;
-          job.speedBytesPerSecond = 0;
-          if (tempPath) {
-            writeFileSync(tempPath, "");
-          }
-        }
-
-        if (!finalPath) {
-          const headerName = parseContentDispositionFilename(response.headers.get("content-disposition"));
-          const baseName = sanitizeFilename(headerName || `google-drive-${fileId}.iso`);
-          const isoName = baseName.toLowerCase().endsWith(".iso") ? baseName : `${baseName}.iso`;
-          finalPath = resolve(driveImportDirectory, `${Date.now()}-${isoName}`);
-          tempPath = `${finalPath}.part`;
-        }
-
-        const activeRange = parseContentRange(response.headers.get("content-range"));
-        const contentLength = Number(response.headers.get("content-length") || 0);
-        job.totalBytes = activeRange?.total || (job.bytesReceived > 0 ? job.bytesReceived + contentLength : contentLength);
-        job.message =
-          attempt > 1
-            ? `Resuming ISO download after a connection drop (${attempt}/${maxAttempts})...`
-            : "Downloading ISO to the NebulaVM host...";
-        job.downloadStartedAt ||= new Date().toISOString();
-        job.lastSpeedCheckAt = Date.now();
-        job.lastSpeedBytes = job.bytesReceived;
-
-        const source = Readable.from(async function* progressChunks() {
-          if (!response.body) {
-            throw new Error("Google Drive returned an empty download stream.");
-          }
-          for await (const chunk of Readable.fromWeb(response.body)) {
-            job.bytesReceived += chunk.length;
-            const now = Date.now();
-            const elapsedSeconds = (now - job.lastSpeedCheckAt) / 1000;
-            if (elapsedSeconds >= 0.5) {
-              job.speedBytesPerSecond = Math.max(0, Math.round((job.bytesReceived - job.lastSpeedBytes) / elapsedSeconds));
-              job.lastSpeedCheckAt = now;
-              job.lastSpeedBytes = job.bytesReceived;
-            }
-            yield chunk;
-          }
-        }());
-        await pipeline(source, createWriteStream(tempPath, { flags: job.bytesReceived > 0 ? "a" : "w" }));
-        break;
-      } catch (error) {
-        if (tempPath && existsSync(tempPath)) {
-          job.bytesReceived = statSync(tempPath).size;
-        }
-        if (attempt >= maxAttempts || !isRetryableDriveError(error)) {
-          throw error;
-        }
-        job.message = `Connection dropped; retrying Google Drive import (${attempt + 1}/${maxAttempts})...`;
-        job.speedBytesPerSecond = 0;
-        await new Promise((resolveRetry) => setTimeout(resolveRetry, Math.min(2500 * attempt, 10000)));
-      }
-    }
-
-    renameSync(tempPath, finalPath);
-
-    job.state = "complete";
-    job.message = "Google Drive ISO imported.";
-    job.speedBytesPerSecond = 0;
-    job.isoPath = finalPath;
-    job.completedAt = new Date().toISOString();
+    await runDriveImportDownload(job, {
+      getResponse: (resumeFrom) => downloadResponseFromGoogleDrive(fileId, resourceKey, resumeFrom),
+      fallbackName: `google-drive-${fileId}.iso`,
+      firstMessage: "Downloading ISO to the NebulaVM host...",
+      completeMessage: "Google Drive ISO imported.",
+    });
   })().catch((error) => {
-    job.state = "error";
-    job.message = "Google Drive ISO import failed.";
-    job.error = isRetryableDriveError(error)
-      ? `Google Drive connection kept dropping after multiple resume attempts. Last error: ${error.message || String(error)}`
-      : error.message || String(error);
-    job.completedAt = new Date().toISOString();
+    failDriveImportJob(job, error);
+  });
+
+  return job;
+};
+
+const startGoogleDrivePickerImport = ({ fileId, accessToken, fileName }) => {
+  if (driveImportJob?.state === "running") {
+    throw new Error("A Google Drive ISO import is already running.");
+  }
+  if (!/^[a-zA-Z0-9_-]{10,}$/.test(String(fileId || ""))) {
+    throw new Error("Google Picker did not return a usable Drive file ID.");
+  }
+  if (!String(accessToken || "").trim()) {
+    throw new Error("Google Picker did not return an access token.");
+  }
+
+  const job = createDriveImportJob("Connecting to Google Drive API...");
+  driveImportJob = job;
+
+  (async () => {
+    const metadata = await fetchGoogleDriveApiMetadata(fileId, accessToken);
+    const fallbackName = fileName || metadata.name || `google-drive-${fileId}.iso`;
+    job.totalBytes = Number(metadata.size || 0);
+    await runDriveImportDownload(job, {
+      getResponse: (resumeFrom) => downloadResponseFromGoogleDriveApi(fileId, accessToken, resumeFrom),
+      fallbackName,
+      firstMessage: "Downloading selected Drive file to the NebulaVM host...",
+      resumeMessage: "Resuming authenticated Drive download after a connection drop",
+      completeMessage: "Google Drive file imported.",
+    });
+  })().catch((error) => {
+    failDriveImportJob(job, error);
   });
 
   return job;
@@ -1266,6 +1369,12 @@ const nativeQemuPlugin = () => ({
             json(res, 200, driveJobSnapshot());
             return;
           }
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-host/drive-picker-import") {
+          const body = await readJsonBody(req);
+          json(res, 200, driveJobSnapshot(startGoogleDrivePickerImport(body)));
+          return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-host/upload-iso") {
