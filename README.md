@@ -61,12 +61,23 @@ host downloads the selected Drive file with the Drive API `files.get` endpoint
 and `alt=media`.
 
 Create a Google Cloud project, enable the Google Picker API and Google Drive
-API, then configure OAuth and API key restrictions for the origins you use, such
-as:
+API, then configure OAuth and API key restrictions for the origins you use.
+Authorized JavaScript origins:
 
 ```text
+https://nebulavm.online
+https://www.nebulavm.online
 https://nebulavm.netlify.app
 http://127.0.0.1:5174
+```
+
+Authorized redirect URIs:
+
+```text
+https://nebulavm.online/
+https://www.nebulavm.online/
+https://nebulavm.netlify.app/
+http://127.0.0.1:5174/
 ```
 
 Copy `.env.example` to `.env` and fill in:

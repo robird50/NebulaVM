@@ -18,7 +18,9 @@ const GOOGLE_PICKER_APP_ID =
   import.meta.env.VITE_GOOGLE_APP_ID || (GOOGLE_PICKER_CLIENT_ID.match(/^\d+/)?.[0] || "");
 const GOOGLE_DRIVE_PICKER_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_DRIVE_OAUTH_STATE_KEY = "nebulavm.googleDrive.oauthState";
-const isNetlifyLauncher = /\.netlify\.app$/i.test(window.location.hostname);
+const hostedLauncherHostnames = new Set(["nebulavm.online", "www.nebulavm.online"]);
+const isNetlifyLauncher =
+  /\.netlify\.app$/i.test(window.location.hostname) || hostedLauncherHostnames.has(window.location.hostname);
 
 const isMobileOrTabletDevice = () => {
   if (navigator.userAgentData?.mobile) {
@@ -1279,7 +1281,7 @@ const openGoogleDrivePicker = async () => {
 };
 
 const fetchNetlifyHostRegistry = async () => {
-  if (!/\.netlify\.app$/i.test(window.location.hostname)) return null;
+  if (!isNetlifyLauncher) return null;
 
   try {
     const response = await fetch("/.netlify/functions/host-registry", { cache: "no-store" });
