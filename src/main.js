@@ -863,20 +863,36 @@ const emustarHostBaseCandidates = () => {
 
 const browserIsoFileKey = (file) => (file ? `${file.name}:${file.size}:${file.lastModified || 0}` : "");
 
-const uploadBrowserIsoToBase = (base, file, onProgress) =>
+const HOST_UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+const HOST_UPLOAD_MAX_ATTEMPTS = 5;
+
+const createHostUploadId = (file) => {
+  const randomId = crypto.randomUUID
+    ? crypto.randomUUID()
+    : Array.from(crypto.getRandomValues(new Uint8Array(12)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${Date.now()}-${randomId}-${file.size}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+};
+
+const wait = (ms) => new Promise((resolveWait) => window.setTimeout(resolveWait, ms));
+
+const uploadBrowserIsoChunkToBase = (base, file, uploadId, start, end, onProgress) =>
   new Promise((resolveUpload, rejectUpload) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${base}/api/emustar-host/upload-iso`, true);
+    xhr.open("POST", `${base}/api/emustar-host/upload-iso-chunk`, true);
     xhr.responseType = "json";
     if (state.nativeHostToken) {
       xhr.setRequestHeader("Authorization", `Bearer ${state.nativeHostToken}`);
     }
     xhr.setRequestHeader("X-NebulaVM-Filename", encodeURIComponent(file.name));
     xhr.setRequestHeader("X-NebulaVM-Session", state.nativeSessionId);
+    xhr.setRequestHeader("X-NebulaVM-Upload-Id", uploadId);
+    xhr.setRequestHeader("X-NebulaVM-Chunk-Start", String(start));
+    xhr.setRequestHeader("X-NebulaVM-Chunk-End", String(end));
+    xhr.setRequestHeader("X-NebulaVM-Total-Bytes", String(file.size));
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
-      onProgress?.(Math.max(0, Math.min(100, (event.loaded / event.total) * 100)));
+      onProgress?.(Math.max(0, Math.min(100, ((start + event.loaded) / file.size) * 100)));
     };
     xhr.onload = () => {
       const data = xhr.response || {};
@@ -888,8 +904,42 @@ const uploadBrowserIsoToBase = (base, file, onProgress) =>
     };
     xhr.onerror = () => rejectUpload(new Error(nativeQemuBridgeMessage));
     xhr.onabort = () => rejectUpload(new Error("Browser ISO upload was canceled."));
-    xhr.send(file);
+    xhr.send(file.slice(start, end));
   });
+
+const uploadBrowserIsoToBase = async (base, file, onProgress) => {
+  const uploadId = createHostUploadId(file);
+  let uploadedBytes = 0;
+
+  while (uploadedBytes < file.size) {
+    const start = uploadedBytes;
+    const end = Math.min(file.size, start + HOST_UPLOAD_CHUNK_BYTES);
+    let lastChunkError = null;
+
+    for (let attempt = 1; attempt <= HOST_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const data = await uploadBrowserIsoChunkToBase(base, file, uploadId, start, end, onProgress);
+        uploadedBytes = Math.max(end, Number(data.bytesReceived) || end);
+        onProgress?.(Math.max(0, Math.min(100, (uploadedBytes / file.size) * 100)));
+        if (data.complete) return data;
+        lastChunkError = null;
+        break;
+      } catch (error) {
+        lastChunkError = error;
+        if (attempt < HOST_UPLOAD_MAX_ATTEMPTS) {
+          onProgress?.(Math.max(0, Math.min(100, (start / file.size) * 100)));
+          await wait(800 * attempt);
+        }
+      }
+    }
+
+    if (lastChunkError) {
+      throw new Error(`Host upload dropped at ${Math.floor((start / file.size) * 100)}%. ${lastChunkError.message}`);
+    }
+  }
+
+  throw new Error("Host upload finished without a final ISO path.");
+};
 
 const uploadBrowserIsoToHost = async (file, onProgress) => {
   let lastError = new Error(nativeQemuBridgeMessage);
