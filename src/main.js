@@ -199,6 +199,22 @@ app.innerHTML = `
           <span class="drop-icon" aria-hidden="true">+</span>
           <span class="drop-title">Drop ISO or disk image</span>
           <span class="drop-meta" id="isoMeta">No boot media selected</span>
+          <span class="host-staging-progress" id="hostStagingProgress" hidden>
+            <span
+              class="host-staging-track"
+              role="progressbar"
+              aria-label="EMUSTAR host staging progress"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+            >
+              <span id="hostStagingProgressFill"></span>
+            </span>
+            <span class="host-staging-stats">
+              <span id="hostStagingProgressText">0% - 0 B</span>
+              <span id="hostStagingSpeed">0 KB/s</span>
+            </span>
+          </span>
         </label>
         <p class="media-warning" id="mediaWarning" hidden></p>
 
@@ -528,6 +544,10 @@ const els = {
   dropZone: document.querySelector("#dropZone"),
   isoInput: document.querySelector("#isoInput"),
   isoMeta: document.querySelector("#isoMeta"),
+  hostStagingProgress: document.querySelector("#hostStagingProgress"),
+  hostStagingProgressFill: document.querySelector("#hostStagingProgressFill"),
+  hostStagingProgressText: document.querySelector("#hostStagingProgressText"),
+  hostStagingSpeed: document.querySelector("#hostStagingSpeed"),
   mediaWarning: document.querySelector("#mediaWarning"),
   demoButton: document.querySelector("#demoButton"),
   emulatorMode: document.querySelector("#emulatorMode"),
@@ -892,7 +912,12 @@ const uploadBrowserIsoChunkToBase = (base, file, uploadId, start, end, onProgres
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
-      onProgress?.(Math.max(0, Math.min(100, ((start + event.loaded) / file.size) * 100)));
+      const bytesUploaded = Math.min(file.size, start + event.loaded);
+      onProgress?.({
+        bytesUploaded,
+        totalBytes: file.size,
+        percent: Math.max(0, Math.min(100, (bytesUploaded / file.size) * 100)),
+      });
     };
     xhr.onload = () => {
       const data = xhr.response || {};
@@ -920,14 +945,23 @@ const uploadBrowserIsoToBase = async (base, file, onProgress) => {
       try {
         const data = await uploadBrowserIsoChunkToBase(base, file, uploadId, start, end, onProgress);
         uploadedBytes = Math.max(end, Number(data.bytesReceived) || end);
-        onProgress?.(Math.max(0, Math.min(100, (uploadedBytes / file.size) * 100)));
+        onProgress?.({
+          bytesUploaded: uploadedBytes,
+          totalBytes: file.size,
+          percent: Math.max(0, Math.min(100, (uploadedBytes / file.size) * 100)),
+        });
         if (data.complete) return data;
         lastChunkError = null;
         break;
       } catch (error) {
         lastChunkError = error;
         if (attempt < HOST_UPLOAD_MAX_ATTEMPTS) {
-          onProgress?.(Math.max(0, Math.min(100, (start / file.size) * 100)));
+          onProgress?.({
+            bytesUploaded: start,
+            totalBytes: file.size,
+            percent: Math.max(0, Math.min(100, (start / file.size) * 100)),
+            retrying: true,
+          });
           await wait(800 * attempt);
         }
       }
@@ -956,6 +990,29 @@ const uploadBrowserIsoToHost = async (file, onProgress) => {
   throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
+const resetHostStagingProgress = () => {
+  els.hostStagingProgress.hidden = true;
+  els.hostStagingProgressFill.style.width = "0%";
+  els.hostStagingProgress.querySelector(".host-staging-track").setAttribute("aria-valuenow", "0");
+  els.hostStagingProgressText.textContent = "0% - 0 B";
+  els.hostStagingSpeed.textContent = "0 KB/s";
+};
+
+const updateHostStagingProgress = ({ bytesUploaded = 0, totalBytes = 0, startedAt = performance.now(), complete = false } = {}) => {
+  const percent = totalBytes > 0 ? Math.max(0, Math.min(100, (bytesUploaded / totalBytes) * 100)) : 0;
+  const elapsedSeconds = Math.max(0.001, (performance.now() - startedAt) / 1000);
+  const speed = complete ? 0 : bytesUploaded / elapsedSeconds;
+  const percentText = complete ? "100%" : `${Math.floor(percent)}%`;
+  const uploaded = formatBytes(bytesUploaded);
+  const total = totalBytes ? ` / ${formatBytes(totalBytes)}` : "";
+
+  els.hostStagingProgress.hidden = false;
+  els.hostStagingProgressFill.style.width = `${percent}%`;
+  els.hostStagingProgress.querySelector(".host-staging-track").setAttribute("aria-valuenow", String(Math.round(percent)));
+  els.hostStagingProgressText.textContent = `${percentText} - ${uploaded}${total}`;
+  els.hostStagingSpeed.textContent = complete ? "Complete" : formatTransferSpeed(speed);
+};
+
 const cleanupStagedHostIso = async ({ keepalive = false, silent = false } = {}) => {
   const sessionId = state.hostStagedIsoSessionId || state.nativeSessionId;
   const shouldCleanup = Boolean(state.hostStagedIsoPath || state.hostStagedIsoSessionId);
@@ -971,6 +1028,7 @@ const cleanupStagedHostIso = async ({ keepalive = false, silent = false } = {}) 
     state.hostStagedIsoSessionId = "";
     state.hostStagedIsoUploadPromise = null;
     state.hostStagedIsoUploading = false;
+    resetHostStagingProgress();
   };
 
   if (keepalive) {
@@ -1025,9 +1083,13 @@ const stageSelectedIsoForEmustar = async (file = state.isoFile) => {
   state.hostStagedIsoSessionId = state.nativeSessionId;
   updateButtons();
   log(`Staging ${file.name} to the EMUSTAR host for this tab.`);
+  const stagingStartedAt = performance.now();
+  updateHostStagingProgress({ bytesUploaded: 0, totalBytes: file.size, startedAt: stagingStartedAt });
 
-  state.hostStagedIsoUploadPromise = uploadBrowserIsoToHost(file, (percent) => {
-    els.isoMeta.textContent = `Staging to host ${Math.floor(percent)}% - ${formatBytes(file.size)}`;
+  state.hostStagedIsoUploadPromise = uploadBrowserIsoToHost(file, ({ bytesUploaded = 0, totalBytes = file.size }) => {
+    const percent = totalBytes > 0 ? Math.max(0, Math.min(100, (bytesUploaded / totalBytes) * 100)) : 0;
+    els.isoMeta.textContent = `Staging to host ${Math.floor(percent)}%`;
+    updateHostStagingProgress({ bytesUploaded, totalBytes, startedAt: stagingStartedAt });
   })
     .then(({ data, base }) => {
       state.hostStagedIsoBase = base;
@@ -1038,11 +1100,18 @@ const stageSelectedIsoForEmustar = async (file = state.isoFile) => {
       }
       els.nativeIsoPath.value = state.hostStagedIsoPath;
       els.isoMeta.textContent = `${file.name} staged on host - ${formatBytes(file.size)}`;
+      updateHostStagingProgress({
+        bytesUploaded: file.size,
+        totalBytes: file.size,
+        startedAt: stagingStartedAt,
+        complete: true,
+      });
       log(`Staged browser ISO on the EMUSTAR host: ${state.hostStagedIsoPath}`);
       return state.hostStagedIsoPath;
     })
     .catch((error) => {
       els.isoMeta.textContent = `${file.name} - host staging failed`;
+      els.hostStagingSpeed.textContent = "Failed";
       log(`Host staging failed: ${error.message}`);
       throw error;
     })

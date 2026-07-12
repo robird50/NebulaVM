@@ -546,6 +546,56 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.host-staging-progress {
+  display: grid;
+  width: min(100%, 320px);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.host-staging-progress[hidden] {
+  display: none;
+}
+
+.host-staging-track {
+  overflow: hidden;
+  height: 10px;
+  border: 1px solid rgba(255, 228, 94, 0.28);
+  border-radius: 999px;
+  background: rgba(3, 6, 10, 0.68);
+}
+
+.host-staging-track span {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ffe45e, #38d3ff);
+  box-shadow: 0 0 14px rgba(255, 228, 94, 0.3);
+  transition: width 180ms ease;
+}
+
+.host-staging-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #d7f8ff;
+  font-size: 0.76rem;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.host-staging-stats span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.host-staging-stats span:last-child {
+  flex: 0 0 auto;
+  color: #ffe45e;
+}
+
 .media-warning {
   margin: -8px 0 0;
   padding: 11px 12px;
