@@ -2,10 +2,10 @@ import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import dgram from "node:dgram";
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { cpus, networkInterfaces } from "node:os";
-import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
@@ -122,7 +122,7 @@ const setNativeQemuCors = (req, res) => {
   const origin = req.headers.origin || "*";
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-NebulaVM-Filename");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-NebulaVM-Filename, X-NebulaVM-Session");
   res.setHeader("Access-Control-Allow-Private-Network", "true");
   res.setHeader("Vary", "Origin");
 };
@@ -155,6 +155,7 @@ const readJsonBody = (req) =>
   });
 
 const driveImportDirectory = resolve(workspaceDir, "vm-disks", "imports");
+const browserUploadDirectory = resolve(driveImportDirectory, "browser-sessions");
 let driveImportJob = null;
 
 const sanitizeFilename = (value) => {
@@ -165,6 +166,36 @@ const sanitizeFilename = (value) => {
     .replace(/^\.+|\.+$/g, "")
     .slice(0, 120);
   return cleaned || "google-drive.iso";
+};
+
+const sanitizeSessionId = (value) => {
+  const cleaned = String(value || "")
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 80);
+  return cleaned || randomBytes(8).toString("hex");
+};
+
+const browserUploadSessionDirectory = (sessionId) => {
+  const safeSessionId = sanitizeSessionId(sessionId);
+  const sessionDirectory = resolve(browserUploadDirectory, safeSessionId);
+  const root = browserUploadDirectory.endsWith(sep) ? browserUploadDirectory : `${browserUploadDirectory}${sep}`;
+  if (!sessionDirectory.startsWith(root)) {
+    throw new Error("Invalid browser upload session.");
+  }
+  return { safeSessionId, sessionDirectory };
+};
+
+const cleanupBrowserIsoUploadSession = (sessionId) => {
+  const { safeSessionId, sessionDirectory } = browserUploadSessionDirectory(sessionId);
+  if (existsSync(sessionDirectory)) {
+    rmSync(sessionDirectory, { recursive: true, force: true });
+  }
+  return {
+    ok: true,
+    message: "Browser-staged ISO removed from the NebulaVM host.",
+    sessionId: safeSessionId,
+  };
 };
 
 const parseContentDispositionFilename = (header) => {
@@ -448,16 +479,24 @@ const decodeHeaderFilename = (value) => {
 };
 
 const saveBrowserIsoUpload = async (req) => {
-  mkdirSync(driveImportDirectory, { recursive: true });
+  const { safeSessionId, sessionDirectory } = browserUploadSessionDirectory(req.headers["x-nebulavm-session"]);
+  cleanupBrowserIsoUploadSession(safeSessionId);
+  mkdirSync(sessionDirectory, { recursive: true });
   const headerName = decodeHeaderFilename(req.headers["x-nebulavm-filename"]);
   const baseName = sanitizeFilename(headerName || "browser-upload.iso");
   const mediaName = /\.(iso|img|bin|raw)$/i.test(baseName) ? baseName : `${baseName}.iso`;
-  const finalPath = resolve(driveImportDirectory, `${Date.now()}-${mediaName}`);
+  const finalPath = resolve(sessionDirectory, `${Date.now()}-${mediaName}`);
   const tempPath = `${finalPath}.part`;
 
-  await pipeline(req, createWriteStream(tempPath));
+  try {
+    await pipeline(req, createWriteStream(tempPath));
+  } catch (error) {
+    rmSync(tempPath, { force: true });
+    throw error;
+  }
   const bytesReceived = existsSync(tempPath) ? statSync(tempPath).size : 0;
   if (bytesReceived <= 0) {
+    rmSync(tempPath, { force: true });
     throw new Error("The browser upload was empty.");
   }
   renameSync(tempPath, finalPath);
@@ -467,6 +506,7 @@ const saveBrowserIsoUpload = async (req) => {
     message: "Browser ISO uploaded to the NebulaVM host.",
     isoPath: finalPath,
     bytesReceived,
+    sessionId: safeSessionId,
   };
 };
 
@@ -1379,6 +1419,16 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "POST" && url.pathname === "/api/emustar-host/upload-iso") {
           json(res, 200, await saveBrowserIsoUpload(req));
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-host/upload-session-cleanup") {
+          let sessionId = url.searchParams.get("sessionId") || req.headers["x-nebulavm-session"] || "";
+          if (!sessionId && String(req.headers["content-type"] || "").toLowerCase().includes("application/json")) {
+            const body = await readJsonBody(req);
+            sessionId = body.sessionId || "";
+          }
+          json(res, 200, cleanupBrowserIsoUploadSession(sessionId));
           return;
         }
 

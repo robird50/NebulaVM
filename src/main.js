@@ -132,6 +132,12 @@ const state = {
   activeDriveImportId: null,
   googlePickerAccessToken: "",
   googlePickerTokenExpiresAt: 0,
+  hostStagedIsoBase: "",
+  hostStagedIsoFileKey: "",
+  hostStagedIsoPath: "",
+  hostStagedIsoSessionId: "",
+  hostStagedIsoUploadPromise: null,
+  hostStagedIsoUploading: false,
 };
 if (googleDriveOAuthAccessTokenFromUrl) {
   state.googlePickerAccessToken = googleDriveOAuthAccessTokenFromUrl;
@@ -841,6 +847,160 @@ const fetchEmustarHostJson = async (path, options) => {
   }
 
   throw new Error(lastError.message || nativeQemuBridgeMessage);
+};
+
+const emustarHostBaseCandidates = () => {
+  const bridgeBases = [
+    state.nativeQemuApiBase,
+    window.location.origin,
+    "http://127.0.0.1:5174",
+    "http://localhost:5174",
+  ].filter(Boolean);
+  return [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
+};
+
+const browserIsoFileKey = (file) => (file ? `${file.name}:${file.size}:${file.lastModified || 0}` : "");
+
+const uploadBrowserIsoToBase = (base, file, onProgress) =>
+  new Promise((resolveUpload, rejectUpload) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${base}/api/emustar-host/upload-iso`, true);
+    xhr.responseType = "json";
+    if (state.nativeHostToken) {
+      xhr.setRequestHeader("Authorization", `Bearer ${state.nativeHostToken}`);
+    }
+    xhr.setRequestHeader("X-NebulaVM-Filename", encodeURIComponent(file.name));
+    xhr.setRequestHeader("X-NebulaVM-Session", state.nativeSessionId);
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      onProgress?.(Math.max(0, Math.min(100, (event.loaded / event.total) * 100)));
+    };
+    xhr.onload = () => {
+      const data = xhr.response || {};
+      if (xhr.status < 200 || xhr.status >= 300 || !data.ok) {
+        rejectUpload(new Error(data.error || data.message || `Host upload failed with HTTP ${xhr.status}.`));
+        return;
+      }
+      resolveUpload(data);
+    };
+    xhr.onerror = () => rejectUpload(new Error(nativeQemuBridgeMessage));
+    xhr.onabort = () => rejectUpload(new Error("Browser ISO upload was canceled."));
+    xhr.send(file);
+  });
+
+const uploadBrowserIsoToHost = async (file, onProgress) => {
+  let lastError = new Error(nativeQemuBridgeMessage);
+  for (const base of emustarHostBaseCandidates()) {
+    try {
+      state.hostStagedIsoBase = base;
+      const data = await uploadBrowserIsoToBase(base, file, onProgress);
+      state.nativeQemuApiBase = base;
+      return { data, base };
+    } catch (error) {
+      lastError = error instanceof TypeError ? new Error(nativeQemuBridgeMessage) : error;
+    }
+  }
+  throw new Error(lastError.message || nativeQemuBridgeMessage);
+};
+
+const cleanupStagedHostIso = async ({ keepalive = false, silent = false } = {}) => {
+  const sessionId = state.hostStagedIsoSessionId || state.nativeSessionId;
+  const shouldCleanup = Boolean(state.hostStagedIsoPath || state.hostStagedIsoSessionId);
+  if (!shouldCleanup || !sessionId) return;
+
+  const resetStagedState = () => {
+    if (els.nativeIsoPath.value.trim() === state.hostStagedIsoPath) {
+      els.nativeIsoPath.value = "";
+    }
+    state.hostStagedIsoBase = "";
+    state.hostStagedIsoFileKey = "";
+    state.hostStagedIsoPath = "";
+    state.hostStagedIsoSessionId = "";
+    state.hostStagedIsoUploadPromise = null;
+    state.hostStagedIsoUploading = false;
+  };
+
+  if (keepalive) {
+    const base = (state.hostStagedIsoBase || state.nativeQemuApiBase || window.location.origin).replace(/\/$/, "");
+    const params = new URLSearchParams({ sessionId });
+    if (state.nativeHostToken) params.set("token", state.nativeHostToken);
+    const url = `${base}/api/emustar-host/upload-session-cleanup?${params}`;
+    if (navigator.sendBeacon?.(url)) {
+      resetStagedState();
+      return;
+    }
+    fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+    resetStagedState();
+    return;
+  }
+
+  try {
+    await fetchEmustarHostJson("upload-session-cleanup", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-NebulaVM-Session": sessionId,
+      },
+      body: JSON.stringify({ sessionId }),
+    });
+    if (!silent) log("Removed browser-staged ISO from the EMUSTAR host.");
+  } catch (error) {
+    if (!silent) log(`Could not remove browser-staged ISO: ${error.message}`);
+  } finally {
+    resetStagedState();
+    updateButtons();
+  }
+};
+
+const stageSelectedIsoForEmustar = async (file = state.isoFile) => {
+  if (!isHyperVMode() || !file) return els.nativeIsoPath.value.trim();
+
+  const fileKey = browserIsoFileKey(file);
+  if (state.hostStagedIsoPath && state.hostStagedIsoFileKey === fileKey) {
+    els.nativeIsoPath.value = state.hostStagedIsoPath;
+    updateButtons();
+    return state.hostStagedIsoPath;
+  }
+  if (state.hostStagedIsoUploadPromise && state.hostStagedIsoFileKey === fileKey) {
+    await state.hostStagedIsoUploadPromise;
+    return state.hostStagedIsoPath;
+  }
+
+  await cleanupStagedHostIso({ silent: true });
+  state.hostStagedIsoUploading = true;
+  state.hostStagedIsoFileKey = fileKey;
+  state.hostStagedIsoSessionId = state.nativeSessionId;
+  updateButtons();
+  log(`Staging ${file.name} to the EMUSTAR host for this tab.`);
+
+  state.hostStagedIsoUploadPromise = uploadBrowserIsoToHost(file, (percent) => {
+    els.isoMeta.textContent = `Staging to host ${Math.floor(percent)}% - ${formatBytes(file.size)}`;
+  })
+    .then(({ data, base }) => {
+      state.hostStagedIsoBase = base;
+      state.hostStagedIsoPath = data.isoPath || "";
+      state.hostStagedIsoSessionId = data.sessionId || state.nativeSessionId;
+      if (!state.hostStagedIsoPath) {
+        throw new Error("The EMUSTAR host did not return an ISO path.");
+      }
+      els.nativeIsoPath.value = state.hostStagedIsoPath;
+      els.isoMeta.textContent = `${file.name} staged on host - ${formatBytes(file.size)}`;
+      log(`Staged browser ISO on the EMUSTAR host: ${state.hostStagedIsoPath}`);
+      return state.hostStagedIsoPath;
+    })
+    .catch((error) => {
+      els.isoMeta.textContent = `${file.name} - host staging failed`;
+      log(`Host staging failed: ${error.message}`);
+      throw error;
+    })
+    .finally(() => {
+      state.hostStagedIsoUploading = false;
+      state.hostStagedIsoUploadPromise = null;
+      updateButtons();
+    });
+
+  return state.hostStagedIsoUploadPromise;
 };
 
 const googlePickerConfigMessage =
@@ -1590,7 +1750,7 @@ const updateButtons = (busy = false) => {
   const externalMode = isExternalMode();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   const hasBootMedia = emustarMode
-    ? Boolean(els.nativeIsoPath.value.trim())
+    ? Boolean(els.nativeIsoPath.value.trim() || state.isoFile)
     : isNativeMode()
     ? Boolean(els.nativeIsoPath.value.trim())
     : isRemoteMode()
@@ -1598,7 +1758,12 @@ const updateButtons = (busy = false) => {
       : Boolean(state.isoFile);
   const nativeUnavailable =
     isNativeMode() && (state.nativeQemuApiAvailable === false || state.nativeQemuReady === false);
-  els.bootButton.disabled = !hasBootMedia || Boolean(state.emulator) || isSelectedMediaTooLarge() || nativeUnavailable;
+  els.bootButton.disabled =
+    !hasBootMedia ||
+    Boolean(state.emulator) ||
+    isSelectedMediaTooLarge() ||
+    nativeUnavailable ||
+    state.hostStagedIsoUploading;
   els.pauseButton.disabled = busy || !state.emulator || externalMode;
   els.stopButton.disabled = busy || !state.emulator;
   els.resetButton.disabled = busy || !state.emulator || externalMode;
@@ -1912,6 +2077,12 @@ const setSelectedFile = (file) => {
   log(`Selected ${file.name} (${formatBytes(file.size)}).`);
   updateMediaWarning();
   updateButtons();
+  void (async () => {
+    await cleanupStagedHostIso({ silent: true });
+    if (isHyperVMode() && state.isoFile === file) {
+      await stageSelectedIsoForEmustar(file);
+    }
+  })().catch(() => {});
 };
 
 const createDemoBootImage = () => {
@@ -2263,8 +2434,16 @@ const bootEmulator = async () => {
     log(`Boot blocked: enter a local ISO path for ${nativeModeLabel()}.`);
     return;
   }
+  if (isHyperVMode() && !els.nativeIsoPath.value.trim() && state.isoFile) {
+    try {
+      await stageSelectedIsoForEmustar();
+    } catch (error) {
+      log(`Boot blocked: ${error.message}`);
+      return;
+    }
+  }
   if (isHyperVMode() && !els.nativeIsoPath.value.trim()) {
-    log("Boot blocked: choose an ISO path or import one from Google Drive before launching EMUSTAR.");
+    log("Boot blocked: drop an ISO, choose an ISO path, or import one from Google Drive before launching EMUSTAR.");
     return;
   }
   if (isHyperVMode() && looksLikeArm64Iso(els.nativeIsoPath.value.trim())) {
@@ -2728,6 +2907,9 @@ const updateBackendUi = () => {
   if (nativeMode) {
     void refreshDriveImportStatus();
   }
+  if (emustarMode && state.isoFile && !els.nativeIsoPath.value.trim() && !state.hostStagedIsoUploading) {
+    void stageSelectedIsoForEmustar().catch(() => {});
+  }
   void updateBrowserQemuCapabilities();
 };
 
@@ -2825,7 +3007,13 @@ els.clearLogButton.addEventListener("click", () => {
   els.logOutput.textContent = "";
 });
 
-window.addEventListener("beforeunload", stopEmulator);
+window.addEventListener("pagehide", () => {
+  void cleanupStagedHostIso({ keepalive: true, silent: true });
+});
+window.addEventListener("beforeunload", () => {
+  void cleanupStagedHostIso({ keepalive: true, silent: true });
+  void stopEmulator();
+});
 
 log("NebulaVM ready.");
 updateBackendUi();
