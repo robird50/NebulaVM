@@ -10,6 +10,33 @@ function Ensure-BridgeAssemblies {
   Add-Type -AssemblyName System.Drawing
   Add-Type -AssemblyName UIAutomationClient
   Add-Type -AssemblyName UIAutomationTypes
+
+  if (-not ("NebulaVM.NativeConsoleFrame" -as [type])) {
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+namespace NebulaVM {
+  public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+
+  public static class NativeConsoleFrame {
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  }
+}
+"@
+  }
 }
 
 function Get-ConsoleProcess {
@@ -38,23 +65,86 @@ function Get-ConsoleProcess {
 function Get-ConsoleBounds {
   param([object]$Process)
 
-  $element = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
-  if (-not $element) {
+  $rect = New-Object NebulaVM.RECT
+  if (-not [NebulaVM.NativeConsoleFrame]::GetWindowRect($Process.MainWindowHandle, [ref]$rect)) {
     throw "The Hyper-V setup console window could not be measured."
   }
 
-  $rect = $element.Current.BoundingRectangle
-  $width = [math]::Max(0, [int][math]::Round($rect.Width))
-  $height = [math]::Max(0, [int][math]::Round($rect.Height))
+  $width = [math]::Max(0, [int]($rect.Right - $rect.Left))
+  $height = [math]::Max(0, [int]($rect.Bottom - $rect.Top))
+  if ($width -lt 64 -or $height -lt 64) {
+    [NebulaVM.NativeConsoleFrame]::ShowWindow($Process.MainWindowHandle, 4) | Out-Null
+    Start-Sleep -Milliseconds 160
+    if (-not [NebulaVM.NativeConsoleFrame]::GetWindowRect($Process.MainWindowHandle, [ref]$rect)) {
+      throw "The Hyper-V setup console window could not be measured."
+    }
+    $width = [math]::Max(0, [int]($rect.Right - $rect.Left))
+    $height = [math]::Max(0, [int]($rect.Bottom - $rect.Top))
+  }
   if ($width -lt 64 -or $height -lt 64) {
     throw "The Hyper-V setup console window is too small to mirror."
   }
 
   return [ordered]@{
-    left = [int][math]::Round($rect.Left)
-    top = [int][math]::Round($rect.Top)
+    left = [int]$rect.Left
+    top = [int]$rect.Top
     width = $width
     height = $height
+  }
+}
+
+function Hide-ConsoleFromHost {
+  param([object]$Process)
+
+  try {
+    # Keep VMConnect off the host desktop while the requester uses the browser viewport.
+    [NebulaVM.NativeConsoleFrame]::ShowWindow($Process.MainWindowHandle, 0) | Out-Null
+  } catch {
+    # Best effort only.
+  }
+}
+
+function Test-BitmapHasContent {
+  param([System.Drawing.Bitmap]$Bitmap)
+
+  $colors = New-Object 'System.Collections.Generic.HashSet[string]'
+  $stepX = [math]::Max(1, [int]($Bitmap.Width / 24))
+  $stepY = [math]::Max(1, [int]($Bitmap.Height / 24))
+  for ($y = 0; $y -lt $Bitmap.Height; $y += $stepY) {
+    for ($x = 0; $x -lt $Bitmap.Width; $x += $stepX) {
+      $pixel = $Bitmap.GetPixel($x, $y)
+      [void]$colors.Add("$($pixel.R),$($pixel.G),$($pixel.B)")
+      if ($colors.Count -gt 8) {
+        return $true
+      }
+    }
+  }
+  return $false
+}
+
+function Capture-ConsoleBitmap {
+  param(
+    [object]$Process,
+    [object]$Bounds,
+    [System.Drawing.Bitmap]$Bitmap
+  )
+
+  $graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
+  try {
+    $hdc = $graphics.GetHdc()
+    try {
+      $printed = [NebulaVM.NativeConsoleFrame]::PrintWindow($Process.MainWindowHandle, $hdc, 2)
+    } finally {
+      $graphics.ReleaseHdc($hdc)
+    }
+
+    if (-not $printed -or -not (Test-BitmapHasContent -Bitmap $Bitmap)) {
+      [NebulaVM.NativeConsoleFrame]::ShowWindow($Process.MainWindowHandle, 4) | Out-Null
+      Start-Sleep -Milliseconds 160
+      $graphics.CopyFromScreen($Bounds.left, $Bounds.top, 0, 0, $Bitmap.Size)
+    }
+  } finally {
+    $graphics.Dispose()
   }
 }
 
@@ -67,9 +157,8 @@ try {
 
   $bounds = Get-ConsoleBounds -Process $process
   $bitmap = New-Object System.Drawing.Bitmap $bounds.width, $bounds.height
-  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   try {
-    $graphics.CopyFromScreen($bounds.left, $bounds.top, 0, 0, $bitmap.Size)
+    Capture-ConsoleBitmap -Process $process -Bounds $bounds -Bitmap $bitmap
     $stream = New-Object System.IO.MemoryStream
     try {
       $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
@@ -83,7 +172,7 @@ try {
       $stream.Dispose()
     }
   } finally {
-    $graphics.Dispose()
+    Hide-ConsoleFromHost -Process $process
     $bitmap.Dispose()
   }
 

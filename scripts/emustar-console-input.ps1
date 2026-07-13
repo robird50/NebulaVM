@@ -20,6 +20,39 @@ function Ensure-BridgeAssemblies {
   Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName UIAutomationClient
   Add-Type -AssemblyName UIAutomationTypes
+
+  if (-not ("NebulaVM.NativeConsoleInput" -as [type])) {
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+namespace NebulaVM {
+  public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+
+  public static class NativeConsoleInput {
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
+
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+  }
+}
+"@
+  }
 }
 
 function Get-ConsoleProcess {
@@ -46,6 +79,8 @@ function Get-ConsoleProcess {
 function Focus-Console {
   param([object]$Process)
 
+  [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, 4) | Out-Null
+  [NebulaVM.NativeConsoleInput]::SetForegroundWindow($Process.MainWindowHandle) | Out-Null
   $element = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
   if ($element) {
     try {
@@ -55,6 +90,70 @@ function Focus-Console {
       # The VMConnect surface may already be active enough for keyboard input.
     }
   }
+}
+
+function Hide-ConsoleFromHost {
+  param([object]$Process)
+
+  try {
+    # Keep the host console out of the user's way after remote input.
+    [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, 0) | Out-Null
+  } catch {
+    # Hiding is best-effort; the browser control path still works without it.
+  }
+}
+
+function Get-ConsoleBounds {
+  param([object]$Process)
+
+  $rect = New-Object NebulaVM.RECT
+  if (-not [NebulaVM.NativeConsoleInput]::GetWindowRect($Process.MainWindowHandle, [ref]$rect)) {
+    throw "The Hyper-V setup console window could not be measured."
+  }
+
+  $width = [math]::Max(0, $rect.Right - $rect.Left)
+  $height = [math]::Max(0, $rect.Bottom - $rect.Top)
+  if ($width -lt 64 -or $height -lt 64) {
+    [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, 4) | Out-Null
+    Start-Sleep -Milliseconds 160
+    if (-not [NebulaVM.NativeConsoleInput]::GetWindowRect($Process.MainWindowHandle, [ref]$rect)) {
+      throw "The Hyper-V setup console window could not be measured."
+    }
+    $width = [math]::Max(0, $rect.Right - $rect.Left)
+    $height = [math]::Max(0, $rect.Bottom - $rect.Top)
+  }
+  if ($width -lt 64 -or $height -lt 64) {
+    throw "The Hyper-V setup console window is too small for pointer control."
+  }
+
+  return [ordered]@{
+    left = [int]$rect.Left
+    top = [int]$rect.Top
+    width = [int]$width
+    height = [int]$height
+  }
+}
+
+function Send-ConsoleClick {
+  param(
+    [object]$Process,
+    [object]$Config
+  )
+
+  $bounds = Get-ConsoleBounds -Process $Process
+  $sourceWidth = [math]::Max(1.0, [double]$Config.width)
+  $sourceHeight = [math]::Max(1.0, [double]$Config.height)
+  $relativeX = [math]::Min([math]::Max(0.0, [double]$Config.x), $sourceWidth)
+  $relativeY = [math]::Min([math]::Max(0.0, [double]$Config.y), $sourceHeight)
+  $screenX = [int][math]::Round($bounds.left + (($relativeX / $sourceWidth) * $bounds.width))
+  $screenY = [int][math]::Round($bounds.top + (($relativeY / $sourceHeight) * $bounds.height))
+
+  Focus-Console -Process $Process
+  [NebulaVM.NativeConsoleInput]::SetCursorPos($screenX, $screenY) | Out-Null
+  Start-Sleep -Milliseconds 35
+  [NebulaVM.NativeConsoleInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 45
+  [NebulaVM.NativeConsoleInput]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
 }
 
 function ConvertTo-SendKeysLiteral {
@@ -131,10 +230,11 @@ try {
       $sequence = "+$sequence"
     }
   } elseif ($type -eq "click") {
+    Send-ConsoleClick -Process $process -Config $config
+    Hide-ConsoleFromHost -Process $process
     [ordered]@{
       ok = $true
-      input = "focus"
-      warning = "Click focused the Hyper-V setup console. Use keyboard controls in the browser viewport."
+      input = "click"
     } | ConvertTo-Json -Depth 4 -Compress
     exit 0
   } else {
@@ -144,6 +244,8 @@ try {
   if (-not [string]::IsNullOrEmpty($sequence)) {
     [System.Windows.Forms.SendKeys]::SendWait($sequence)
   }
+
+  Hide-ConsoleFromHost -Process $process
 
   [ordered]@{
     ok = $true

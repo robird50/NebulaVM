@@ -1213,7 +1213,7 @@ const runHyperVConsoleFrame = () =>
       "-OutputPath",
       hyperVConsoleFramePath,
     ],
-    15000,
+    45000,
   );
 
 const runHyperVConsoleInput = (body) =>
@@ -1230,7 +1230,7 @@ const runHyperVConsoleInput = (body) =>
       "-ConfigBase64",
       Buffer.from(JSON.stringify(body || {}), "utf8").toString("base64"),
     ],
-    10000,
+    45000,
   );
 
 const isPortAvailable = (port) =>
