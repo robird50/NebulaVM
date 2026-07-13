@@ -1796,7 +1796,6 @@ const connectNetlifyHostRegistry = async () => {
   els.nativeStatus.textContent = host.stale
     ? "Found a registered host, but it may be stale. Choose an ISO before launching EMUSTAR."
     : "Found the current NebulaVM host. Choose an ISO before launching EMUSTAR.";
-  await autoAdoptSharedHyperV();
 };
 
 const updateEmustarHostInfo = async () => {
@@ -3242,28 +3241,6 @@ const updateNativeStatus = async () => {
   updateButtons();
 };
 
-const autoAdoptSharedHyperV = async () => {
-  if (!state.nativeHostToken) return;
-
-  try {
-    const { data: status, base } = await fetchHyperVJson("status");
-    if (status.vm?.state !== "Running" || !status.vncReady) {
-      return;
-    }
-
-    if (!isHyperVMode()) {
-      els.emulatorMode.value = "emustar-hyperv";
-      syncEmulatorDropdown();
-      updateBackendUi();
-    }
-
-    await adoptRunningHyperVViewport(status, base);
-    void updateEmustarHostInfo();
-  } catch {
-    // The shared host may still be warming up; normal status checks will keep trying.
-  }
-};
-
 const driveImportStatusText = (job) => {
   if (!job) return "No Drive import running.";
   if (job.state === "complete") return `Imported to ${job.isoPath}`;
@@ -3645,7 +3622,6 @@ if (shouldResumeGoogleDrivePicker) {
     void openGoogleDrivePicker();
   }, 500);
 }
-void autoAdoptSharedHyperV();
 void connectNetlifyHostRegistry();
 updateButtons();
 updateViewportSummary();
