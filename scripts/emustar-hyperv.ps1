@@ -248,6 +248,30 @@ function Start-Emustar {
     throw "The EMUSTAR VM directory was not supplied."
   }
 
+  if ($vm -and $vm.State -eq "Running") {
+    $mountedIso = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue |
+      Select-Object -First 1 |
+      ForEach-Object { [string]$_.Path }
+    if ($mountedIso -and ([IO.Path]::GetFullPath($mountedIso) -eq [IO.Path]::GetFullPath($isoPath))) {
+      if ([string]$config.displayMode -eq "external") {
+        Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
+      } else {
+        Close-EmustarConsole | Out-Null
+      }
+      $warnings.Add("EMUSTAR attached to the VM that was already running with this ISO.")
+      return [ordered]@{
+        ok = $true
+        engine = "Microsoft Hyper-V"
+        created = $false
+        attachedExisting = $true
+        bootOrder = $(if ($diskFirst) { "disk-first" } else { "cdrom-first" })
+        displayMode = [string]$config.displayMode
+        vm = Get-VmSnapshot -Vm $vm
+        warnings = $warnings
+      }
+    }
+  }
+
   New-Item -ItemType Directory -Path $vmDirectory -Force | Out-Null
   $vhdPath = Join-Path $vmDirectory "nebulavm-emustar.vhdx"
   if (-not $vm) {
