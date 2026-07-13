@@ -1743,6 +1743,46 @@ const adoptRunningHyperVViewport = async (status, base) => {
   return true;
 };
 
+const waitForHyperVStartRecovery = async (shouldStop = () => false) => {
+  await wait(18000);
+  let notedSlowStart = false;
+
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (shouldStop()) return null;
+
+    try {
+      if (!notedSlowStart) {
+        notedSlowStart = true;
+        showNativeDisplayStatus("EMUSTAR started slowly. Looking for the live display...");
+        log("EMUSTAR start request is taking a while, so NebulaVM is checking the host status directly.");
+      }
+
+      const { data: status, base } = await fetchHyperVJson("status");
+      if (status.vm?.state === "Running") {
+        return {
+          response: { ok: true },
+          data: {
+            ok: true,
+            recoveredFromSlowStart: true,
+            vm: status.vm,
+            vncReady: Boolean(status.vncReady),
+            vncPath: status.vncPath || "",
+            vncPassword: status.vncPassword || "",
+            warnings: ["Recovered from a slow EMUSTAR start response."],
+          },
+          base,
+        };
+      }
+    } catch {
+      // The tunnel may still be waking up; keep polling until the regular start request wins.
+    }
+
+    await wait(3000);
+  }
+
+  return null;
+};
+
 const setPowerState = (label, mode = "off") => {
   els.powerState.dataset.mode = mode;
   els.powerState.querySelector("span:last-child").textContent = label;
@@ -2459,7 +2499,8 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
       : "Starting EMUSTAR setup inside the browser viewport...",
   );
 
-  const { response, data: result, base } = await fetchHyperVJson("start", {
+  let startFinished = false;
+  const startRequest = fetchHyperVJson("start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -2470,7 +2511,16 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
       createDisk: els.nativeCreateDisk.checked,
       diskSizeGb: Number(els.nativeDiskSize.value),
     }),
+  }).finally(() => {
+    startFinished = true;
   });
+  const recoveryRequest = waitForHyperVStartRecovery(() => startFinished);
+  const startResult = await Promise.race([startRequest, recoveryRequest]);
+  if (!startResult) {
+    throw new Error("EMUSTAR is still waiting for the host. Refresh the page to attach to any VM that already started.");
+  }
+
+  const { response, data: result, base } = startResult;
   if (!response.ok || !result.ok) {
     throw new Error(result.error || "EMUSTAR Hyper-V failed to start.");
   }
@@ -2498,6 +2548,9 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
 
   const vm = result.vm || {};
   log(`EMUSTAR started ${vm.name || "the Windows VM"} with Microsoft Hyper-V.`);
+  if (result.recoveredFromSlowStart) {
+    log("Recovered the EMUSTAR browser display from host status after the start request stalled.");
+  }
   if (base !== window.location.origin) log(`Using local bridge: ${base}`);
   if (vm.diskPath) log(`Using VHDX install disk: ${vm.diskPath}`);
   if (vm.isoPath) log(`Mounted installation media: ${vm.isoPath}`);
@@ -2770,7 +2823,7 @@ const updateNativeStatus = async () => {
 };
 
 const autoAdoptSharedHyperV = async () => {
-  if (!state.nativeHostToken || !state.emulator) return;
+  if (!state.nativeHostToken) return;
 
   try {
     const { data: status, base } = await fetchHyperVJson("status");
