@@ -43,13 +43,6 @@ function Get-ConsoleBounds {
     throw "The Hyper-V setup console window could not be measured."
   }
 
-  try {
-    $element.SetFocus()
-    Start-Sleep -Milliseconds 120
-  } catch {
-    # Screen capture can still work if Windows refuses focus.
-  }
-
   $rect = $element.Current.BoundingRectangle
   $width = [math]::Max(0, [int][math]::Round($rect.Width))
   $height = [math]::Max(0, [int][math]::Round($rect.Height))

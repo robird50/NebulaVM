@@ -711,7 +711,10 @@ const els = {
 };
 
 const savedNativeDisplayMode = window.localStorage.getItem("nebulavm.emustar.display");
-if (savedNativeDisplayMode === "viewport" || savedNativeDisplayMode === "external") {
+if (isNetlifyLauncher) {
+  els.nativeDisplayMode.value = "viewport";
+  window.localStorage.setItem("nebulavm.emustar.display", "viewport");
+} else if (savedNativeDisplayMode === "viewport" || savedNativeDisplayMode === "external") {
   els.nativeDisplayMode.value = savedNativeDisplayMode;
 }
 
@@ -1948,7 +1951,7 @@ const startHyperVSetupConsole = (base) => {
 
   const status = document.createElement("span");
   status.className = "native-display-status";
-  status.textContent = "Opening Hyper-V setup inside the browser viewport...";
+  status.textContent = "Opening EMUSTAR setup in this browser viewport...";
 
   shell.append(image, overlay, status);
   els.nativeDisplay.replaceChildren(shell);
@@ -2037,8 +2040,8 @@ const startHyperVSetupConsole = (base) => {
       image.src = nextFrameUrl;
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
-      status.textContent = "Use Tab, arrows, Enter, and paste text here to finish setup.";
-      setViewportSummary("Hyper-V setup is mirrored in browser");
+      status.textContent = "Use Tab, arrows, Enter, and paste text here to control setup.";
+      setViewportSummary("EMUSTAR setup is live in this browser");
       state.hyperVConsoleTimer = window.setTimeout(pollFrame, 1100);
     } catch (error) {
       status.textContent = `Hyper-V setup mirror waiting: ${error.message}`;
@@ -2047,7 +2050,7 @@ const startHyperVSetupConsole = (base) => {
   };
 
   void pollFrame();
-  log("Mirroring the Hyper-V setup console inside the browser viewport.");
+  log("Mirroring EMUSTAR setup into the requesting browser viewport.");
 };
 
 const adoptRunningHyperVViewport = async (status, base) => {
@@ -2164,6 +2167,8 @@ const isRemoteMode = () => els.emulatorMode.value === "remote-vm";
 const isNativeQemuMode = () => isStandaloneQemuMode();
 const isQemuMode = () => isBrowserQemuMode() || isNativeQemuMode();
 const isExternalMode = () => isQemuMode() || isHyperVMode() || isRemoteMode();
+const shouldForceEmustarViewport = () => isNetlifyLauncher && isHyperVMode();
+const selectedNativeDisplayMode = () => (shouldForceEmustarViewport() ? "viewport" : els.nativeDisplayMode.value);
 const nativeArchitecture = () => (isNativeArm64Mode() ? "aarch64" : "x86_64");
 const nativeProfile = () =>
   isNativeUbuntuArm64Mode() ? "ubuntu-arm64" : isNativeWindowsArm64Mode() ? "windows-arm64" : "generic-x64";
@@ -2593,7 +2598,7 @@ const monitorNativeVm = () => {
         if (
           hyperVRuntime &&
           !state.nativeRfb &&
-          els.nativeDisplayMode.value === "viewport" &&
+          selectedNativeDisplayMode() === "viewport" &&
           status.vncReady
         ) {
           stopHyperVSetupConsole();
@@ -2608,7 +2613,7 @@ const monitorNativeVm = () => {
         } else if (
           hyperVRuntime &&
           !state.nativeRfb &&
-          els.nativeDisplayMode.value === "viewport" &&
+          selectedNativeDisplayMode() === "viewport" &&
           !status.vncReady &&
           !state.hyperVConsoleActive
         ) {
@@ -2900,6 +2905,11 @@ const bootNativeQemu = async (displayMode = "viewport") => {
 };
 
 const bootEmustarHyperV = async (displayMode = "viewport") => {
+  if (isNetlifyLauncher) {
+    displayMode = "viewport";
+    els.nativeDisplayMode.value = "viewport";
+  }
+
   const runtimeName = "EMUSTAR";
   els.screenContainer.querySelector(".vga-text").hidden = true;
   els.screenContainer.querySelector(".vga-canvas").hidden = true;
@@ -2908,7 +2918,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   showNativeDisplayStatus(
     displayMode === "external"
       ? "Starting the EMUSTAR Hyper-V host console..."
-      : "Starting EMUSTAR setup inside the browser viewport...",
+      : "Starting EMUSTAR setup inside this browser viewport...",
   );
 
   await saveWindowsGuestCredentialsIfNeeded();
@@ -2979,7 +2989,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
     log("The Hyper-V setup console opened on the host computer.");
   } else if (!result.vncReady) {
     startHyperVSetupConsole(base);
-    log("Using the browser viewport for Hyper-V setup until the Windows desktop display is ready.");
+    log("Using this browser viewport for EMUSTAR setup until the Windows desktop display is ready.");
   }
 };
 
@@ -3049,7 +3059,7 @@ const bootEmulator = async () => {
     return;
   }
 
-  const qemuDisplayMode = isNativeMode() ? els.nativeDisplayMode.value : "viewport";
+  const qemuDisplayMode = isNativeMode() ? selectedNativeDisplayMode() : "viewport";
 
   await stopEmulator();
 
@@ -3426,28 +3436,40 @@ const updateBackendUi = () => {
   els.nativePanel.hidden = !nativeMode;
   els.remotePanel.hidden = !remoteMode;
   if (nativeMode) {
+    const hostedEmustarMode = emustarMode && isNetlifyLauncher;
     els.nativeRuntimeIcon.src = isStandaloneQemuMode() ? "/assets/qemu-icon.png" : "/assets/emustar-icon.png";
     els.nativeRuntimeName.textContent = runtimeBrand;
     els.nativeRuntimeAttribution.textContent = isStandaloneQemuMode()
       ? "Native virtualization engine"
-      : "Generation 2 virtualization powered by Microsoft Hyper-V";
+      : hostedEmustarMode
+        ? "Streams from the Windows host into this browser"
+        : "Generation 2 virtualization powered by Microsoft Hyper-V";
     els.nativeResetFirmwareButton.hidden = emustarMode;
-    els.nativeConsoleButton.hidden = !emustarMode;
+    els.nativeConsoleButton.hidden = !emustarMode || hostedEmustarMode;
     els.nativeDiskHelp.textContent = emustarMode
       ? "Uses a dynamic VHDX disk in the NebulaVM folder."
       : "Uses a qcow2 disk in the NebulaVM folder.";
     els.nativeCreateDisk.checked = true;
     els.nativeCreateDisk.disabled = emustarMode;
     const [viewportOption, externalOption] = els.nativeDisplayMode.options;
-    viewportOption.textContent = emustarMode ? "Browser setup + desktop" : "ISO viewport";
-    externalOption.textContent = emustarMode ? "Hyper-V host console" : "External window";
+    viewportOption.textContent = hostedEmustarMode
+      ? "This device's browser viewport"
+      : emustarMode
+        ? "Browser setup + desktop"
+        : "ISO viewport";
+    externalOption.textContent = emustarMode ? "Host console (this PC only)" : "External window";
+    externalOption.hidden = hostedEmustarMode;
+    externalOption.disabled = hostedEmustarMode;
+    if (hostedEmustarMode) {
+      els.nativeDisplayMode.value = "viewport";
+    }
     state.nativeQemuReady = false;
     els.nativeStatus.dataset.mode = "";
     els.nativeStatus.textContent = `Checking ${nativeModeLabel()}...`;
   }
   els.vgaSize.disabled = externalMode;
   els.bootOrder.disabled = remoteMode || state.emulator;
-  els.nativeDisplayMode.disabled = Boolean(state.emulator);
+  els.nativeDisplayMode.disabled = (emustarMode && isNetlifyLauncher) || Boolean(state.emulator);
   els.demoButton.disabled = externalMode;
   els.autostart.disabled = externalMode;
   els.networkingHelp.textContent = nativeMode
@@ -3568,6 +3590,9 @@ if (googlePickerConfigured()) {
 }
 els.nativeCreateDisk.addEventListener("change", () => updateButtons());
 els.nativeDisplayMode.addEventListener("change", () => {
+  if (shouldForceEmustarViewport()) {
+    els.nativeDisplayMode.value = "viewport";
+  }
   window.localStorage.setItem("nebulavm.emustar.display", els.nativeDisplayMode.value);
 });
 els.nativeResetFirmwareButton.addEventListener("click", resetNativeFirmware);
