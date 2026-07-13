@@ -1809,7 +1809,7 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") {
-          json(res, 200, await withHyperVDisplayStatus(await runHyperVAction("Status", {}, 10000)));
+          json(res, 200, await withHyperVDisplayStatus(await runHyperVAction("Status", {}, 45000)));
           return;
         }
 
