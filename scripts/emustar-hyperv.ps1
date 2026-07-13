@@ -181,6 +181,41 @@ function Set-InstalledWindowsBoot {
   }
 }
 
+function Stop-EmustarForConfiguration {
+  param([object]$Vm)
+
+  $deadline = (Get-Date).AddSeconds(75)
+  $stopRequested = $false
+  $lastState = if ($Vm) { $Vm.State.ToString() } else { "Unknown" }
+
+  while ((Get-Date) -lt $deadline) {
+    $current = Get-VM -Name $Vm.Name -ErrorAction Stop
+    $lastState = $current.State.ToString()
+    if ($lastState -eq "Off") {
+      return $current
+    }
+
+    if ($lastState -eq "Saved") {
+      Remove-VMSavedState -VM $current -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 1
+      continue
+    }
+
+    if (-not $stopRequested -and $lastState -in @("Running", "Paused", "Suspended")) {
+      try {
+        Stop-VM -VM $current -Force -TurnOff -ErrorAction Stop
+        $stopRequested = $true
+      } catch {
+        $warnings.Add("EMUSTAR is waiting for Hyper-V to leave state '$lastState' before reconfiguring: $($_.Exception.Message)")
+      }
+    }
+
+    Start-Sleep -Seconds 1
+  }
+
+  throw "EMUSTAR is still in Hyper-V state '$lastState'. Wait a few seconds or end the session, then launch again."
+}
+
 function Start-Emustar {
   $config = Read-Config
   Assert-HyperVReady
@@ -240,8 +275,7 @@ function Start-Emustar {
 
     $vm = New-VM @newVmParams
   } elseif ($vm.State -ne "Off") {
-    Stop-VM -VM $vm -Force -TurnOff
-    $vm = Get-VM -Name $vmName
+    $vm = Stop-EmustarForConfiguration -Vm $vm
   }
 
   Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown -CheckpointType Disabled
