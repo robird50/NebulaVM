@@ -734,17 +734,23 @@ const log = (message) => {
 };
 
 const nativeQemuBridgeMessage = isNetlifyLauncher
-  ? "NebulaVM is looking for a live host session. Keep the Windows host PC online, then refresh this page."
+  ? "NebulaVM is waiting for a live Windows EMUSTAR host. Keep the Windows host PC online, then refresh this page."
   : "Native runtimes need the local NebulaVM bridge. Run NebulaVM locally with npm run host, then keep this page open.";
 
-const fetchNativeQemuJson = async (path, options) => {
-  const bridgeBases = [
+const nativeBridgeBases = () => {
+  const localBases = [
     state.nativeQemuApiBase,
     window.location.origin,
     "http://127.0.0.1:5174",
     "http://localhost:5174",
   ].filter(Boolean);
-  const uniqueBridgeBases = [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
+  const hostedBases = [state.nativeQemuApiBase].filter(Boolean);
+  const bridgeBases = isNetlifyLauncher ? hostedBases : localBases;
+  return [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
+};
+
+const fetchNativeQemuJson = async (path, options) => {
+  const uniqueBridgeBases = nativeBridgeBases();
   let lastError = new Error(nativeQemuBridgeMessage);
 
   for (const base of uniqueBridgeBases) {
@@ -776,13 +782,7 @@ const fetchNativeQemuJson = async (path, options) => {
 };
 
 const fetchHyperVJson = async (path, options) => {
-  const bridgeBases = [
-    state.nativeQemuApiBase,
-    window.location.origin,
-    "http://127.0.0.1:5174",
-    "http://localhost:5174",
-  ].filter(Boolean);
-  const uniqueBridgeBases = [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
+  const uniqueBridgeBases = nativeBridgeBases();
   let lastError = new Error(nativeQemuBridgeMessage);
 
   for (const base of uniqueBridgeBases) {
@@ -813,13 +813,7 @@ const fetchHyperVJson = async (path, options) => {
 };
 
 const fetchHyperVFrame = async () => {
-  const bridgeBases = [
-    state.nativeQemuApiBase,
-    window.location.origin,
-    "http://127.0.0.1:5174",
-    "http://localhost:5174",
-  ].filter(Boolean);
-  const uniqueBridgeBases = [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
+  const uniqueBridgeBases = nativeBridgeBases();
   let lastError = new Error(nativeQemuBridgeMessage);
 
   for (const base of uniqueBridgeBases) {
@@ -921,13 +915,7 @@ const requestGuestDesktopResize = (reason = "viewport") => {
 };
 
 const fetchEmustarHostJson = async (path, options) => {
-  const bridgeBases = [
-    state.nativeQemuApiBase,
-    window.location.origin,
-    "http://127.0.0.1:5174",
-    "http://localhost:5174",
-  ].filter(Boolean);
-  const uniqueBridgeBases = [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
+  const uniqueBridgeBases = nativeBridgeBases();
   let lastError = new Error(nativeQemuBridgeMessage);
 
   for (const base of uniqueBridgeBases) {
@@ -957,15 +945,7 @@ const fetchEmustarHostJson = async (path, options) => {
   throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
-const emustarHostBaseCandidates = () => {
-  const bridgeBases = [
-    state.nativeQemuApiBase,
-    window.location.origin,
-    "http://127.0.0.1:5174",
-    "http://localhost:5174",
-  ].filter(Boolean);
-  return [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
-};
+const emustarHostBaseCandidates = () => nativeBridgeBases();
 
 const browserIsoFileKey = (file) => (file ? `${file.name}:${file.size}` : "");
 
@@ -1782,9 +1762,23 @@ const fetchNetlifyHostRegistry = async () => {
   }
 };
 
+const setHostedHostWaitingStatus = () => {
+  state.nativeQemuApiAvailable = false;
+  state.nativeQemuReady = false;
+  els.nativeStatus.dataset.mode = "missing";
+  els.nativeStatus.textContent =
+    "Waiting for the Windows EMUSTAR host. Keep the Windows PC running NebulaVM Host, then refresh this page.";
+};
+
 const connectNetlifyHostRegistry = async () => {
   const host = await fetchNetlifyHostRegistry();
-  if (!host) return;
+  if (!host) {
+    if (isHyperVMode()) {
+      setHostedHostWaitingStatus();
+      updateButtons();
+    }
+    return null;
+  }
 
   if (!isHyperVMode()) {
     els.emulatorMode.value = "emustar-hyperv";
@@ -1792,10 +1786,14 @@ const connectNetlifyHostRegistry = async () => {
     updateBackendUi();
   }
 
+  state.nativeQemuApiAvailable = true;
+  state.nativeQemuReady = true;
   els.nativeStatus.dataset.mode = "ready";
   els.nativeStatus.textContent = host.stale
-    ? "Found a registered host, but it may be stale. Choose an ISO before launching EMUSTAR."
-    : "Found the current NebulaVM host. Choose an ISO before launching EMUSTAR.";
+    ? "Found a registered Windows host, but it may be stale. Choose an ISO before launching EMUSTAR."
+    : "Found the current Windows EMUSTAR host. Choose an ISO before launching EMUSTAR.";
+  updateButtons();
+  return host;
 };
 
 const updateEmustarHostInfo = async () => {
@@ -1805,32 +1803,29 @@ const updateEmustarHostInfo = async () => {
 
   els.emustarCopyShareButton.disabled = true;
   els.emustarShareStatus.textContent = "Checking host access...";
+
+  if (isNetlifyLauncher) {
+    const host = state.nativeQemuApiBase && state.nativeHostToken ? { publicUrl: state.nativeQemuApiBase } : await fetchNetlifyHostRegistry();
+    els.emustarShareUrl.value = window.location.origin;
+    els.emustarCopyShareButton.disabled = false;
+    els.emustarShareStatus.textContent = host
+      ? "Stable launcher ready. This browser will use the registered Windows EMUSTAR host."
+      : "Waiting for the Windows EMUSTAR host to register.";
+    return;
+  }
+
   try {
-    const headers = new Headers();
-    if (state.nativeHostToken) {
-      headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
-    }
-    const response = await fetch("/api/emustar-host/info", {
-      cache: "no-store",
-      headers,
-    });
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.toLowerCase().includes("application/json")) {
-      throw new Error("Host sharing is available when NebulaVM is running locally.");
-    }
-    const info = await response.json();
+    const { response, data: info } = await fetchEmustarHostJson("info");
     if (!response.ok || !info.ok) {
       throw new Error(info.error || "EMUSTAR Host Mode is unavailable.");
     }
 
     const [hostShareUrl] = info.shareUrls || [];
-    const shareUrl = isNetlifyLauncher ? window.location.origin : hostShareUrl;
+    const shareUrl = hostShareUrl;
     els.emustarShareUrl.value = shareUrl || "";
     els.emustarCopyShareButton.disabled = !shareUrl;
     els.emustarShareStatus.textContent = shareUrl
-      ? isNetlifyLauncher
-        ? "Stable launcher ready. This tab creates a private host session automatically."
-        : info.publicUrl
+      ? info.publicUrl
         ? "Ready from any network while this host stays online."
         : "Ready for another computer on the same network."
       : "Run npm run host to create a browser access link.";
@@ -3186,9 +3181,14 @@ const updateNativeStatus = async () => {
   if (!isNativeMode()) return;
 
   if (isHyperVMode()) {
+    if (isNetlifyLauncher && (!state.nativeQemuApiBase || !state.nativeHostToken)) {
+      const host = await connectNetlifyHostRegistry();
+      if (!host) return;
+    }
+
     try {
       const { data: status, base } = await fetchHyperVJson("status");
-      const bridgeLabel = base === window.location.origin ? "" : ` via local bridge ${base}`;
+      const bridgeLabel = base === window.location.origin ? "" : ` via Windows host ${base}`;
       state.nativeQemuApiAvailable = true;
       state.nativeQemuReady = Boolean(status.available);
       if (status.available) {
@@ -3201,10 +3201,12 @@ const updateNativeStatus = async () => {
       } else if (status.restartRequired) {
         els.nativeStatus.dataset.mode = "missing";
         els.nativeStatus.textContent =
-          "Hyper-V is enabled. Restart Windows once to finish preparing EMUSTAR.";
+          "Hyper-V is enabled on the Windows host. Restart that Windows PC once to finish preparing EMUSTAR.";
       } else {
         els.nativeStatus.dataset.mode = "missing";
-        els.nativeStatus.textContent = "Microsoft Hyper-V is not available on this host.";
+        els.nativeStatus.textContent = isNetlifyLauncher
+          ? "The Windows host is reachable, but Microsoft Hyper-V is not available there."
+          : "Microsoft Hyper-V is not available on this host.";
       }
     } catch (error) {
       state.nativeQemuApiAvailable = false;
