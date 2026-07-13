@@ -12,6 +12,8 @@ const app = document.querySelector("#app");
 const COMMIT_ID = typeof __NEBULAVM_COMMIT__ === "string" ? __NEBULAVM_COMMIT__ : "local";
 const HOST_TOKEN_STORAGE_KEY = "nebulavm.emustar.hostToken";
 const HOST_SESSION_STORAGE_KEY = "nebulavm.emustar.sessionId";
+const STORED_ISO_PROMPT_KEY = "nebulavm.emustar.storedIsoPrompt";
+const STORED_ISO_LIMIT = 2;
 const GOOGLE_PICKER_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || "";
 const GOOGLE_PICKER_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const GOOGLE_PICKER_APP_ID =
@@ -140,6 +142,10 @@ const state = {
   hostStagedIsoSessionId: "",
   hostStagedIsoUploadPromise: null,
   hostStagedIsoUploading: false,
+  storedIsos: [],
+  storedIsoLimit: STORED_ISO_LIMIT,
+  storedImagesMenuOpen: false,
+  storedIsoUploading: false,
 };
 if (googleDriveOAuthAccessTokenFromUrl) {
   state.googlePickerAccessToken = googleDriveOAuthAccessTokenFromUrl;
@@ -173,9 +179,24 @@ app.innerHTML = `
       <p>
         NebulaVM is an open-source, browser-based virtual machine platform that makes running operating systems simple. Launch lightweight virtual machines directly in your browser, or use the optional EMUSTAR host for more flexible virtualization and support for modern 64-bit operating systems like Windows 11. With drag-and-drop ISO support, configurable hardware, fullscreen mode, and a clean interface, NebulaVM brings virtualization to the web while remaining <strong>free forever</strong>.
       </p>
-      <div class="status-pill" id="powerState">
-        <span class="status-dot"></span>
-        <span>Powered off</span>
+      <div class="status-actions">
+        <div class="status-pill" id="powerState">
+          <span class="status-dot"></span>
+          <span>Powered off</span>
+        </div>
+        <div class="stored-images-control">
+          <button class="stored-images-button" id="storedImagesButton" type="button" aria-haspopup="menu" aria-expanded="false">
+            <span class="stored-images-arrow" aria-hidden="true">v</span>
+            <span>Stored images</span>
+          </button>
+          <div class="stored-images-menu" id="storedImagesMenu" role="menu" hidden>
+            <div class="stored-images-menu-head">
+              <strong>Stored images</strong>
+              <small id="storedImagesCount">0 / 2 used</small>
+            </div>
+            <div class="stored-iso-slots" id="storedIsoSlots"></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -196,6 +217,7 @@ app.innerHTML = `
 
         <label class="drop-zone" id="dropZone" for="isoInput">
           <input id="isoInput" type="file" accept=".iso,.img,.bin,.raw" hidden />
+          <input id="storedIsoInput" type="file" accept=".iso,.img,.bin,.raw" hidden />
           <span class="drop-icon" aria-hidden="true">+</span>
           <span class="drop-title">Drop ISO or disk image</span>
           <span class="drop-meta" id="isoMeta">No boot media selected</span>
@@ -538,11 +560,40 @@ app.innerHTML = `
       </div>
     </section>
   </div>
+
+  <div class="display-choice-overlay" id="keepIsoDialog" role="dialog" aria-modal="true" aria-labelledby="keepIsoTitle" hidden>
+    <section class="display-choice-panel keep-iso-panel">
+      <img class="keep-iso-art" src="/assets/stored-iso-host.png" alt="" />
+      <h2 id="keepIsoTitle">Keep this ISO on the host computer?</h2>
+      <div class="keep-iso-copy">
+        <p>
+          Would you like to keep this ISO stored on the host computer? If you do, you won't have to wait for it to stage again the next time you use it.
+        </p>
+        <p>Please note:</p>
+        <ul>
+          <li>You can store up to 2 ISOs at a time.</li>
+          <li>Stored ISOs are automatically deleted after 3 days to conserve host computer storage space, since ISO files can be very large.</li>
+        </ul>
+      </div>
+      <label class="toggle-row keep-iso-remember">
+        <input type="checkbox" id="keepIsoDontAsk" />
+        <span>
+          <strong>Don't ask again</strong>
+          <small>Remember this choice for future ISO uploads.</small>
+        </span>
+      </label>
+      <div class="keep-iso-actions">
+        <button class="secondary" id="keepIsoNoButton" type="button">No</button>
+        <button class="primary" id="keepIsoYesButton" type="button">Yes</button>
+      </div>
+    </section>
+  </div>
 `;
 
 const els = {
   dropZone: document.querySelector("#dropZone"),
   isoInput: document.querySelector("#isoInput"),
+  storedIsoInput: document.querySelector("#storedIsoInput"),
   isoMeta: document.querySelector("#isoMeta"),
   hostStagingProgress: document.querySelector("#hostStagingProgress"),
   hostStagingProgressFill: document.querySelector("#hostStagingProgressFill"),
@@ -617,6 +668,14 @@ const els = {
   activityLabel: document.querySelector("#activityLabel"),
   machineTitle: document.querySelector("#machineTitle"),
   powerState: document.querySelector("#powerState"),
+  storedImagesButton: document.querySelector("#storedImagesButton"),
+  storedImagesMenu: document.querySelector("#storedImagesMenu"),
+  storedImagesCount: document.querySelector("#storedImagesCount"),
+  storedIsoSlots: document.querySelector("#storedIsoSlots"),
+  keepIsoDialog: document.querySelector("#keepIsoDialog"),
+  keepIsoDontAsk: document.querySelector("#keepIsoDontAsk"),
+  keepIsoNoButton: document.querySelector("#keepIsoNoButton"),
+  keepIsoYesButton: document.querySelector("#keepIsoYesButton"),
   uptimeMetric: document.querySelector("#uptimeMetric"),
   viewportSummaryMetric: document.querySelector("#viewportSummaryMetric"),
   ramMetric: document.querySelector("#ramMetric"),
@@ -881,7 +940,274 @@ const emustarHostBaseCandidates = () => {
   return [...new Set(bridgeBases.map((base) => base.replace(/\/$/, "")))];
 };
 
-const browserIsoFileKey = (file) => (file ? `${file.name}:${file.size}:${file.lastModified || 0}` : "");
+const browserIsoFileKey = (file) => (file ? `${file.name}:${file.size}` : "");
+
+const storedIsoPromptPreference = () => {
+  const value = window.localStorage.getItem(STORED_ISO_PROMPT_KEY);
+  return value === "always" || value === "never" ? value : "ask";
+};
+
+const setStoredImagesMenuOpen = (open) => {
+  state.storedImagesMenuOpen = open;
+  els.storedImagesMenu.hidden = !open;
+  els.storedImagesButton.setAttribute("aria-expanded", String(open));
+  els.storedImagesButton.classList.toggle("is-open", open);
+  if (open) {
+    void refreshStoredIsos();
+  }
+};
+
+const formatStoredIsoExpiry = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Expires soon";
+  return `Expires ${new Intl.DateTimeFormat([], {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date)}`;
+};
+
+const renderStoredIsoSlots = () => {
+  els.storedImagesCount.textContent = `${state.storedIsos.length} / ${state.storedIsoLimit} used`;
+  els.storedIsoSlots.replaceChildren();
+
+  for (let index = 0; index < state.storedIsoLimit; index += 1) {
+    const item = state.storedIsos[index];
+    const slot = document.createElement("div");
+    slot.className = `stored-iso-slot${item ? " has-image" : " is-empty"}`;
+
+    if (item) {
+      const useButton = document.createElement("button");
+      useButton.className = "stored-iso-use";
+      useButton.type = "button";
+      useButton.setAttribute("role", "menuitem");
+
+      const name = document.createElement("strong");
+      name.textContent = item.name || "Stored ISO";
+      const meta = document.createElement("small");
+      meta.textContent = formatStoredIsoExpiry(item.expiresAt);
+      useButton.append(name, meta);
+      useButton.addEventListener("click", () => {
+        void selectStoredIso(item);
+      });
+
+      const removeButton = document.createElement("button");
+      removeButton.className = "stored-iso-remove";
+      removeButton.type = "button";
+      removeButton.setAttribute("aria-label", `Remove ${item.name || "stored ISO"}`);
+      removeButton.textContent = "X";
+      removeButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void removeStoredIso(item.id);
+      });
+
+      slot.append(useButton, removeButton);
+    } else {
+      const addButton = document.createElement("button");
+      addButton.className = "stored-iso-add";
+      addButton.type = "button";
+      addButton.setAttribute("role", "menuitem");
+      addButton.disabled = state.storedIsoUploading;
+      addButton.innerHTML = `<span aria-hidden="true">+</span><strong>Store ISO</strong><small>Slot ${index + 1}</small>`;
+      addButton.addEventListener("click", () => {
+        els.storedIsoInput.value = "";
+        els.storedIsoInput.click();
+      });
+      slot.append(addButton);
+    }
+
+    els.storedIsoSlots.append(slot);
+  }
+};
+
+const refreshStoredIsos = async ({ silent = false } = {}) => {
+  try {
+    const { response, data } = await fetchEmustarHostJson("stored-isos");
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Stored ISO list is unavailable.");
+    }
+    state.storedIsos = data.items || [];
+    state.storedIsoLimit = Number(data.limit) || STORED_ISO_LIMIT;
+    renderStoredIsoSlots();
+    return state.storedIsos;
+  } catch (error) {
+    state.storedIsos = [];
+    renderStoredIsoSlots();
+    if (!silent) log(`Stored images unavailable: ${error.message}`);
+    return [];
+  }
+};
+
+const findStoredIsoForFile = async (file) => {
+  if (!file) return null;
+  const items = await refreshStoredIsos({ silent: true });
+  const fileKey = browserIsoFileKey(file);
+  return items.find((item) => item.fileKey === fileKey || (item.name === file.name && Number(item.size) === file.size)) || null;
+};
+
+const resetHostStagedIsoStateOnly = () => {
+  state.hostStagedIsoBase = "";
+  state.hostStagedIsoFileKey = "";
+  state.hostStagedIsoPath = "";
+  state.hostStagedIsoSessionId = "";
+  state.hostStagedIsoUploadPromise = null;
+  state.hostStagedIsoUploading = false;
+};
+
+const selectStoredIso = async (item, { silent = false } = {}) => {
+  if (!item?.isoPath) return "";
+  await cleanupStagedHostIso({ silent: true });
+  resetHostStagedIsoStateOnly();
+  state.isoFile = null;
+  els.nativeIsoPath.value = item.isoPath;
+  els.isoMeta.textContent = `${item.name || "Stored ISO"} stored on host - ${formatBytes(item.size || 0)}`;
+  els.machineTitle.textContent = item.name || "Stored ISO";
+  els.dropZone.classList.add("has-file");
+  updateButtons();
+  if (!silent) log(`Using stored ISO: ${item.name || item.isoPath}`);
+  setStoredImagesMenuOpen(false);
+  return item.isoPath;
+};
+
+const removeStoredIso = async (id) => {
+  if (!id) return;
+  try {
+    const { response, data } = await fetchEmustarHostJson("stored-isos/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Stored ISO could not be removed.");
+    }
+    state.storedIsos = data.items || [];
+    renderStoredIsoSlots();
+    log(data.removed ? "Removed stored ISO from the host." : "Stored ISO slot was already empty.");
+  } catch (error) {
+    log(`Stored ISO removal failed: ${error.message}`);
+  }
+};
+
+const askKeepStagedIso = () =>
+  new Promise((resolvePrompt) => {
+    els.keepIsoDontAsk.checked = false;
+    els.keepIsoDialog.hidden = false;
+
+    const finish = (keep) => {
+      if (els.keepIsoDontAsk.checked) {
+        window.localStorage.setItem(STORED_ISO_PROMPT_KEY, keep ? "always" : "never");
+      }
+      els.keepIsoDialog.hidden = true;
+      els.keepIsoYesButton.onclick = null;
+      els.keepIsoNoButton.onclick = null;
+      resolvePrompt(keep);
+    };
+
+    els.keepIsoYesButton.onclick = () => finish(true);
+    els.keepIsoNoButton.onclick = () => finish(false);
+    els.keepIsoYesButton.focus();
+  });
+
+const saveStagedIsoAsStored = async (file, stagedData) => {
+  const { response, data } = await fetchEmustarHostJson("stored-isos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      isoPath: stagedData.isoPath,
+      sessionId: stagedData.sessionId || state.nativeSessionId,
+      name: file.name,
+      size: file.size,
+      fileKey: browserIsoFileKey(file),
+    }),
+  });
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || "The host could not store this ISO.");
+  }
+
+  state.storedIsos = data.items || [];
+  renderStoredIsoSlots();
+  resetHostStagedIsoStateOnly();
+  const item = data.item;
+  if (item?.isoPath) {
+    els.nativeIsoPath.value = item.isoPath;
+    els.isoMeta.textContent = `${item.name || file.name} stored on host - ${formatBytes(item.size || file.size)}`;
+    els.machineTitle.textContent = item.name || file.name;
+    els.dropZone.classList.add("has-file");
+    log(data.duplicate ? "That ISO was already stored, so NebulaVM reused the existing host copy." : "Stored ISO on the host computer.");
+  }
+  return item;
+};
+
+const maybeKeepStagedIsoOnHost = async (file, stagedData) => {
+  const items = await refreshStoredIsos({ silent: true });
+  const duplicate = items.find(
+    (item) => item.fileKey === browserIsoFileKey(file) || (item.name === file.name && Number(item.size) === file.size),
+  );
+  if (duplicate) {
+    await cleanupStagedHostIso({ silent: true });
+    await selectStoredIso(duplicate, { silent: true });
+    return duplicate;
+  }
+  if (items.length >= state.storedIsoLimit) return null;
+
+  const preference = storedIsoPromptPreference();
+  if (preference === "never") return null;
+
+  const shouldKeep = preference === "always" ? true : await askKeepStagedIso();
+  if (!shouldKeep) return null;
+
+  return saveStagedIsoAsStored(file, stagedData);
+};
+
+const addStoredIsoFromFile = async (file) => {
+  if (!file) return;
+
+  const duplicate = await findStoredIsoForFile(file);
+  if (duplicate?.isoPath) {
+    await selectStoredIso(duplicate);
+    return;
+  }
+  if (state.storedIsos.length >= state.storedIsoLimit) {
+    log("Stored ISO slots are full. Remove one before adding another.");
+    renderStoredIsoSlots();
+    return;
+  }
+
+  state.storedIsoUploading = true;
+  renderStoredIsoSlots();
+  log(`Uploading ${file.name} into a stored ISO slot.`);
+  const startedAt = performance.now();
+  updateHostStagingProgress({ bytesUploaded: 0, totalBytes: file.size, startedAt });
+
+  try {
+    const { data, base } = await uploadBrowserIsoToHost(file, ({ bytesUploaded = 0, totalBytes = file.size }) => {
+      updateHostStagingProgress({ bytesUploaded, totalBytes, startedAt });
+    });
+    state.hostStagedIsoBase = base;
+    state.hostStagedIsoPath = data.isoPath || "";
+    state.hostStagedIsoSessionId = data.sessionId || state.nativeSessionId;
+    const item = await saveStagedIsoAsStored(file, data);
+    if (item?.isoPath) {
+      updateHostStagingProgress({
+        bytesUploaded: file.size,
+        totalBytes: file.size,
+        startedAt,
+        complete: true,
+      });
+      log(`Stored ${item.name || file.name} in a host ISO slot.`);
+    }
+  } catch (error) {
+    els.hostStagingSpeed.textContent = "Failed";
+    log(`Stored ISO upload failed: ${error.message}`);
+  } finally {
+    state.storedIsoUploading = false;
+    renderStoredIsoSlots();
+    updateButtons();
+  }
+};
 
 const HOST_UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 const HOST_UPLOAD_MAX_ATTEMPTS = 5;
@@ -1067,6 +1393,12 @@ const stageSelectedIsoForEmustar = async (file = state.isoFile) => {
   if (!isHyperVMode() || !file) return els.nativeIsoPath.value.trim();
 
   const fileKey = browserIsoFileKey(file);
+  const storedIso = await findStoredIsoForFile(file);
+  if (storedIso?.isoPath) {
+    await selectStoredIso(storedIso);
+    return storedIso.isoPath;
+  }
+
   if (state.hostStagedIsoPath && state.hostStagedIsoFileKey === fileKey) {
     els.nativeIsoPath.value = state.hostStagedIsoPath;
     updateButtons();
@@ -1091,7 +1423,7 @@ const stageSelectedIsoForEmustar = async (file = state.isoFile) => {
     els.isoMeta.textContent = `Staging to host ${Math.floor(percent)}%`;
     updateHostStagingProgress({ bytesUploaded, totalBytes, startedAt: stagingStartedAt });
   })
-    .then(({ data, base }) => {
+    .then(async ({ data, base }) => {
       state.hostStagedIsoBase = base;
       state.hostStagedIsoPath = data.isoPath || "";
       state.hostStagedIsoSessionId = data.sessionId || state.nativeSessionId;
@@ -1107,6 +1439,11 @@ const stageSelectedIsoForEmustar = async (file = state.isoFile) => {
         complete: true,
       });
       log(`Staged browser ISO on the EMUSTAR host: ${state.hostStagedIsoPath}`);
+      const storedItem = await maybeKeepStagedIsoOnHost(file, data).catch((error) => {
+        log(`Stored ISO prompt failed: ${error.message}`);
+        return null;
+      });
+      if (storedItem?.isoPath) return storedItem.isoPath;
       return state.hostStagedIsoPath;
     })
     .catch((error) => {
@@ -3081,6 +3418,9 @@ const updateBackendUi = () => {
   if (nativeMode) {
     void refreshDriveImportStatus();
   }
+  if (emustarMode) {
+    void refreshStoredIsos({ silent: true });
+  }
   if (emustarMode && state.isoFile && !els.nativeIsoPath.value.trim() && !state.hostStagedIsoUploading) {
     void stageSelectedIsoForEmustar().catch(() => {});
   }
@@ -3119,14 +3459,30 @@ els.emulatorMenuOptions.forEach((option) => {
     els.emulatorSelectButton.focus();
   });
 });
+els.storedImagesButton.addEventListener("click", () => {
+  setStoredImagesMenuOpen(!state.storedImagesMenuOpen);
+});
+els.storedIsoInput.addEventListener("change", () => {
+  const [file] = els.storedIsoInput.files || [];
+  if (file) {
+    void addStoredIsoFromFile(file);
+  }
+});
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".emulator-dropdown")) {
     setEmulatorMenuOpen(false);
+  }
+  if (!event.target.closest(".stored-images-control")) {
+    setStoredImagesMenuOpen(false);
   }
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     setEmulatorMenuOpen(false);
+    setStoredImagesMenuOpen(false);
+    if (!els.keepIsoDialog.hidden) {
+      els.keepIsoNoButton.click();
+    }
   }
 });
 els.processorMode.addEventListener("change", () => {
@@ -3190,6 +3546,7 @@ window.addEventListener("beforeunload", () => {
 });
 
 log("NebulaVM ready.");
+renderStoredIsoSlots();
 updateBackendUi();
 if (googleDriveOAuthErrorFromUrl) {
   els.driveImportStatus.textContent = `Google Drive sign-in failed: ${googleDriveOAuthErrorFromUrl}`;
