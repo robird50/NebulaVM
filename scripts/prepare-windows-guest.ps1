@@ -35,6 +35,7 @@ if (Test-Path -LiteralPath $credentialsPath) {
   $credentials = [pscustomobject]@{
     username = "Nebula"
     adminPassword = "Nebula-" + ([guid]::NewGuid().ToString("N").Substring(0, 14)) + "!"
+    passwordDisabled = $false
     vncPassword = [guid]::NewGuid().ToString("N").Substring(0, 8)
     createdAt = (Get-Date).ToString("o")
   }
@@ -237,7 +238,20 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\NebulaVM\setup-guest.
 exit /b 0
 '@ | Set-Content -LiteralPath (Join-Path $setupScripts "SetupComplete.cmd") -Encoding ASCII
 
-  $escapedPassword = [Security.SecurityElement]::Escape([string]$credentials.adminPassword)
+  $guestUsername = [string]$credentials.username
+  if ([string]::IsNullOrWhiteSpace($guestUsername)) {
+    $guestUsername = "Nebula"
+  }
+  if ($guestUsername.Length -gt 20 -or $guestUsername -match '[\\/:;"|=,+*?<>@\[\]]') {
+    throw "The Windows username in .nebulavm-guest-credentials.json is invalid."
+  }
+  $passwordDisabled = $false
+  if ($credentials.PSObject.Properties.Name -contains "passwordDisabled") {
+    $passwordDisabled = [bool]$credentials.passwordDisabled
+  }
+  $guestPassword = if ($passwordDisabled) { "" } else { [string]$credentials.adminPassword }
+  $escapedUsername = [Security.SecurityElement]::Escape($guestUsername)
+  $escapedPassword = [Security.SecurityElement]::Escape($guestPassword)
   $unattend = @"
 <?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
@@ -269,9 +283,9 @@ exit /b 0
       <UserAccounts>
         <LocalAccounts>
           <LocalAccount wcm:action="add">
-            <Name>Nebula</Name>
+            <Name>$escapedUsername</Name>
             <Group>Administrators</Group>
-            <DisplayName>Nebula</DisplayName>
+            <DisplayName>$escapedUsername</DisplayName>
             <Password><Value>$escapedPassword</Value><PlainText>true</PlainText></Password>
           </LocalAccount>
         </LocalAccounts>
@@ -279,7 +293,7 @@ exit /b 0
       <AutoLogon>
         <Enabled>true</Enabled>
         <LogonCount>10</LogonCount>
-        <Username>Nebula</Username>
+        <Username>$escapedUsername</Username>
         <Password><Value>$escapedPassword</Value><PlainText>true</PlainText></Password>
       </AutoLogon>
     </component>

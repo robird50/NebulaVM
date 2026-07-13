@@ -395,6 +395,28 @@ app.innerHTML = `
                 <input id="nativeIsoPath" type="text" placeholder="C:\\Path\\To\\Your.iso" />
               </label>
 
+              <div class="windows-credentials-panel" id="windowsCredentialsPanel">
+                <div class="windows-credentials-heading">
+                  <strong>Windows account</strong>
+                  <small id="windowsCredentialsHelp">Enabled when the selected ISO looks like Windows.</small>
+                </div>
+                <label class="field">
+                  <span>Username</span>
+                  <input id="windowsUsername" type="text" value="Nebula" maxlength="20" autocomplete="username" />
+                </label>
+                <label class="field">
+                  <span>Password</span>
+                  <input id="windowsPassword" type="password" autocomplete="new-password" />
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" id="windowsPasswordOff" />
+                  <span>
+                    <strong>Password off</strong>
+                    <small>Creates the Windows account without a password.</small>
+                  </span>
+                </label>
+              </div>
+
               <div class="drive-import-panel">
                 <div class="drive-import-heading">
                   <img src="/assets/google-drive-icon.webp" alt="" />
@@ -624,6 +646,11 @@ const els = {
   emustarShareStatus: document.querySelector("#emustarShareStatus"),
   nativeDisplayMode: document.querySelector("#nativeDisplayMode"),
   nativeIsoPath: document.querySelector("#nativeIsoPath"),
+  windowsCredentialsPanel: document.querySelector("#windowsCredentialsPanel"),
+  windowsCredentialsHelp: document.querySelector("#windowsCredentialsHelp"),
+  windowsUsername: document.querySelector("#windowsUsername"),
+  windowsPassword: document.querySelector("#windowsPassword"),
+  windowsPasswordOff: document.querySelector("#windowsPasswordOff"),
   drivePickerButton: document.querySelector("#drivePickerButton"),
   driveImportStatus: document.querySelector("#driveImportStatus"),
   driveImportProgress: document.querySelector("#driveImportProgress"),
@@ -2168,6 +2195,54 @@ const looksLikeArm64Iso = (path) => /(^|[^a-z0-9])(arm64|aarch64)(?=[^a-z0-9]|$)
 const looksLikeX64Iso = (path) => /(^|[^a-z0-9])(x64|amd64|x86_64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeUbuntuIso = (path) => /(^|[^a-z0-9])ubuntu(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeWindowsIso = (path) => /(^|[^a-z0-9])(windows|win\d*)(?=[^a-z0-9]|$)/i.test(path);
+const selectedIsoDescriptor = () =>
+  [els.nativeIsoPath.value.trim(), state.isoFile?.name || "", els.isoMeta.textContent || ""].join(" ");
+const selectedIsoLooksLikeWindows = () => looksLikeWindowsIso(selectedIsoDescriptor());
+const windowsUsernameIsValid = () => {
+  const username = els.windowsUsername.value.trim();
+  return Boolean(username) && username.length <= 20 && !/[\\/:;"|=,+*?<>@\[\]]/.test(username);
+};
+
+const updateWindowsCredentialUi = () => {
+  const windowsIso = selectedIsoLooksLikeWindows();
+  const enabled = isNativeMode() && windowsIso && !state.emulator;
+  const passwordOff = els.windowsPasswordOff.checked;
+
+  els.windowsCredentialsPanel.classList.toggle("is-disabled", !enabled);
+  els.windowsUsername.disabled = !enabled;
+  els.windowsPasswordOff.disabled = !enabled;
+  els.windowsPassword.disabled = !enabled || passwordOff;
+  els.windowsCredentialsHelp.textContent = windowsIso
+    ? "These settings will be used for the Windows account EMUSTAR prepares."
+    : "Disabled because this media does not look like a Windows ISO.";
+  if (passwordOff) {
+    els.windowsPassword.value = "";
+  }
+};
+
+const saveWindowsGuestCredentialsIfNeeded = async () => {
+  if (!isHyperVMode() || !selectedIsoLooksLikeWindows()) return;
+
+  const username = els.windowsUsername.value.trim();
+  const passwordDisabled = els.windowsPasswordOff.checked;
+  const adminPassword = passwordDisabled ? "" : els.windowsPassword.value;
+  if (!windowsUsernameIsValid()) {
+    throw new Error("Windows username must be 1-20 characters and cannot contain Windows account symbols.");
+  }
+  if (!passwordDisabled && !adminPassword) {
+    throw new Error("Enter a Windows password or turn password off.");
+  }
+
+  const { response, data } = await fetchEmustarHostJson("guest-credentials", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, adminPassword, passwordDisabled }),
+  });
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || "The EMUSTAR host could not save Windows credentials.");
+  }
+  log(`Saved Windows guest account settings for ${data.username}.`);
+};
 
 const getEmulatorLabel = (value) =>
   [...els.emulatorMode.options].find((option) => option.value === value)?.textContent || value;
@@ -2245,6 +2320,7 @@ const updateMediaWarning = () => {
 };
 
 const updateButtons = (busy = false) => {
+  updateWindowsCredentialUi();
   const externalMode = isExternalMode();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   const hasBootMedia = emustarMode
@@ -2254,6 +2330,10 @@ const updateButtons = (busy = false) => {
     : isRemoteMode()
       ? Boolean(els.remoteVmUrl.value.trim())
       : Boolean(state.isoFile);
+  const windowsCredentialsNeeded = emustarMode && selectedIsoLooksLikeWindows();
+  const windowsCredentialsBlocked =
+    windowsCredentialsNeeded &&
+    (!windowsUsernameIsValid() || (!els.windowsPasswordOff.checked && !els.windowsPassword.value));
   const nativeUnavailable =
     isNativeMode() && (state.nativeQemuApiAvailable === false || state.nativeQemuReady === false);
   els.bootButton.disabled =
@@ -2261,6 +2341,7 @@ const updateButtons = (busy = false) => {
     Boolean(state.emulator) ||
     isSelectedMediaTooLarge() ||
     nativeUnavailable ||
+    windowsCredentialsBlocked ||
     state.hostStagedIsoUploading;
   els.pauseButton.disabled = busy || !state.emulator || externalMode;
   els.stopButton.disabled = busy || !state.emulator;
@@ -2835,6 +2916,8 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
       ? "Starting the EMUSTAR Hyper-V host console..."
       : "Starting EMUSTAR setup inside the browser viewport...",
   );
+
+  await saveWindowsGuestCredentialsIfNeeded();
 
   let startFinished = false;
   const startRequest = fetchHyperVJson("start", {
@@ -3495,6 +3578,9 @@ els.processorMode.addEventListener("change", () => {
   updateBackendUi();
 });
 els.nativeIsoPath.addEventListener("input", () => updateButtons());
+els.windowsUsername.addEventListener("input", () => updateButtons());
+els.windowsPassword.addEventListener("input", () => updateButtons());
+els.windowsPasswordOff.addEventListener("change", () => updateButtons());
 els.drivePickerButton.addEventListener("click", openGoogleDrivePicker);
 if (googlePickerConfigured()) {
   window.setTimeout(warmGoogleDrivePicker, 500);

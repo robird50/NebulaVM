@@ -31,6 +31,70 @@ const resolveHostAccessToken = () => {
 
 const hostAccessToken = resolveHostAccessToken();
 
+const sanitizeGuestUsername = (value) => {
+  const username = String(value || "Nebula").trim();
+  if (!username || username.length > 20 || /[\\/:;"|=,+*?<>@\[\]]/.test(username)) {
+    throw new Error("Windows username must be 1-20 characters and cannot contain Windows account symbols.");
+  }
+  return username;
+};
+
+const loadGuestCredentials = () => {
+  const fallback = {
+    username: "Nebula",
+    adminPassword: "",
+    passwordDisabled: false,
+    vncPassword: randomBytes(4).toString("hex"),
+    createdAt: new Date().toISOString(),
+  };
+
+  if (!existsSync(guestCredentialsPath)) {
+    return fallback;
+  }
+
+  try {
+    const saved = JSON.parse(readFileSync(guestCredentialsPath, "utf8").replace(/^\uFEFF/, ""));
+    return {
+      ...fallback,
+      ...saved,
+      username: saved.username || fallback.username,
+      vncPassword: saved.vncPassword || fallback.vncPassword,
+      passwordDisabled: Boolean(saved.passwordDisabled),
+    };
+  } catch {
+    return fallback;
+  }
+};
+
+const saveGuestCredentials = (body = {}) => {
+  const current = loadGuestCredentials();
+  const username = sanitizeGuestUsername(body.username);
+  const passwordDisabled = Boolean(body.passwordDisabled);
+  const adminPassword = passwordDisabled ? "" : String(body.adminPassword || "");
+  if (!passwordDisabled && !adminPassword) {
+    throw new Error("Enter a Windows password or turn password off.");
+  }
+
+  const credentials = {
+    username,
+    adminPassword,
+    passwordDisabled,
+    vncPassword: current.vncPassword || randomBytes(4).toString("hex"),
+    createdAt: current.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  writeFileSync(guestCredentialsPath, JSON.stringify(credentials, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+
+  return {
+    ok: true,
+    username,
+    passwordDisabled,
+  };
+};
+
 const requestHostname = (req) => {
   try {
     return new URL(`http://${req.headers.host || "localhost"}`).hostname.toLowerCase();
@@ -1697,6 +1761,12 @@ const nativeQemuPlugin = () => ({
         if (req.method === "POST" && url.pathname === "/api/emustar-host/drive-picker-import") {
           const body = await readJsonBody(req);
           json(res, 200, driveJobSnapshot(startGoogleDrivePickerImport(body)));
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-host/guest-credentials") {
+          const body = await readJsonBody(req);
+          json(res, 200, saveGuestCredentials(body));
           return;
         }
 

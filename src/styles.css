@@ -1121,6 +1121,47 @@ input[type="text"] {
   line-height: 1.4;
 }
 
+.windows-credentials-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(96, 220, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(96, 220, 255, 0.055);
+}
+
+.windows-credentials-panel.is-disabled {
+  border-color: rgba(174, 185, 200, 0.16);
+  background: rgba(255, 255, 255, 0.035);
+  opacity: 0.72;
+}
+
+.windows-credentials-heading {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+}
+
+.windows-credentials-heading strong {
+  color: #dff7ff;
+  font-size: 0.84rem;
+  font-weight: 950;
+}
+
+.windows-credentials-heading small {
+  color: #aeb9c8;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.windows-credentials-panel .toggle-row {
+  grid-column: 1 / -1;
+  padding: 11px;
+}
+
 .drive-import-panel {
   grid-column: 1 / -1;
   display: grid;
