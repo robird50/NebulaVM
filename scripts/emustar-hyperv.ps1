@@ -234,7 +234,7 @@ function Start-Emustar {
     }
   }
   if (-not $isoProvided) {
-    throw "Choose an ISO path or import one from Google Drive before launching EMUSTAR."
+    throw "Choose an ISO path before launching EMUSTAR."
   }
 
   $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue

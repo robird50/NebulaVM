@@ -14,12 +14,6 @@ const HOST_TOKEN_STORAGE_KEY = "nebulavm.emustar.hostToken";
 const HOST_SESSION_STORAGE_KEY = "nebulavm.emustar.sessionId";
 const STORED_ISO_PROMPT_KEY = "nebulavm.emustar.storedIsoPrompt";
 const STORED_ISO_LIMIT = 2;
-const GOOGLE_PICKER_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || "";
-const GOOGLE_PICKER_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
-const GOOGLE_PICKER_APP_ID =
-  import.meta.env.VITE_GOOGLE_APP_ID || (GOOGLE_PICKER_CLIENT_ID.match(/^\d+/)?.[0] || "");
-const GOOGLE_DRIVE_PICKER_SCOPE = "https://www.googleapis.com/auth/drive.file";
-const GOOGLE_DRIVE_OAUTH_STATE_KEY = "nebulavm.googleDrive.oauthState";
 const hostedLauncherHostnames = new Set(["nebulavm.online", "www.nebulavm.online"]);
 const isNetlifyLauncher =
   /\.netlify\.app$/i.test(window.location.hostname) || hostedLauncherHostnames.has(window.location.hostname);
@@ -72,44 +66,6 @@ const savedSessionId =
   (crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 window.sessionStorage.setItem(HOST_SESSION_STORAGE_KEY, savedSessionId);
 
-const googleDriveOAuthParams = new URLSearchParams(window.location.hash.slice(1));
-const expectedGoogleDriveOAuthState = window.sessionStorage.getItem(GOOGLE_DRIVE_OAUTH_STATE_KEY) || "";
-const googleDriveOAuthStateMatches =
-  expectedGoogleDriveOAuthState && googleDriveOAuthParams.get("state") === expectedGoogleDriveOAuthState;
-const googleDriveOAuthAccessTokenFromUrl = googleDriveOAuthStateMatches
-  ? googleDriveOAuthParams.get("access_token") || ""
-  : "";
-const googleDriveOAuthExpiresInFromUrl = googleDriveOAuthStateMatches
-  ? Number(googleDriveOAuthParams.get("expires_in") || 3600) || 3600
-  : 0;
-const googleDriveOAuthErrorFromUrl = googleDriveOAuthStateMatches
-  ? googleDriveOAuthParams.get("error_description") || googleDriveOAuthParams.get("error") || ""
-  : "";
-const shouldResumeGoogleDrivePicker = Boolean(googleDriveOAuthAccessTokenFromUrl);
-if (googleDriveOAuthStateMatches) {
-  window.sessionStorage.removeItem(GOOGLE_DRIVE_OAUTH_STATE_KEY);
-  for (const key of [
-    "access_token",
-    "authuser",
-    "error",
-    "error_description",
-    "expires_in",
-    "hd",
-    "prompt",
-    "scope",
-    "state",
-    "token_type",
-  ]) {
-    googleDriveOAuthParams.delete(key);
-  }
-  const cleanHash = googleDriveOAuthParams.toString();
-  window.history.replaceState(
-    null,
-    "",
-    `${window.location.pathname}${window.location.search}${cleanHash ? `#${cleanHash}` : ""}`,
-  );
-}
-
 const state = {
   isoFile: null,
   emulator: null,
@@ -132,10 +88,6 @@ const state = {
   guestResizeTimer: null,
   lastGuestResize: "",
   viewportSummaryTimer: null,
-  driveImportPolling: false,
-  activeDriveImportId: null,
-  googlePickerAccessToken: "",
-  googlePickerTokenExpiresAt: 0,
   hostStagedIsoBase: "",
   hostStagedIsoFileKey: "",
   hostStagedIsoPath: "",
@@ -147,10 +99,6 @@ const state = {
   storedImagesMenuOpen: false,
   storedIsoUploading: false,
 };
-if (googleDriveOAuthAccessTokenFromUrl) {
-  state.googlePickerAccessToken = googleDriveOAuthAccessTokenFromUrl;
-  state.googlePickerTokenExpiresAt = Date.now() + googleDriveOAuthExpiresInFromUrl * 1000;
-}
 
 app.innerHTML = `
   <main class="mobile-unsupported" aria-labelledby="mobileUnsupportedTitle">
@@ -417,33 +365,6 @@ app.innerHTML = `
                 </label>
               </div>
 
-              <div class="drive-import-panel">
-                <div class="drive-import-heading">
-                  <img src="/assets/google-drive-icon.webp" alt="" />
-                  <span>Google Drive import</span>
-                </div>
-                <div class="drive-import-actions">
-                  <button class="secondary" id="drivePickerButton" type="button">Choose from Drive</button>
-                </div>
-                <small id="driveImportStatus">No Drive import running.</small>
-                <div class="drive-import-progress" id="driveImportProgress" hidden>
-                  <div
-                    class="drive-import-track"
-                    role="progressbar"
-                    aria-label="Google Drive ISO import progress"
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    aria-valuenow="0"
-                  >
-                    <span id="driveImportProgressFill"></span>
-                  </div>
-                  <div class="drive-import-stats">
-                    <span id="driveImportProgressText">0% - 0 B</span>
-                    <span id="driveImportSpeed">0 KB/s</span>
-                  </div>
-                </div>
-              </div>
-
               <label class="toggle-row">
                 <input type="checkbox" id="nativeCreateDisk" checked />
                 <span>
@@ -651,12 +572,6 @@ const els = {
   windowsUsername: document.querySelector("#windowsUsername"),
   windowsPassword: document.querySelector("#windowsPassword"),
   windowsPasswordOff: document.querySelector("#windowsPasswordOff"),
-  drivePickerButton: document.querySelector("#drivePickerButton"),
-  driveImportStatus: document.querySelector("#driveImportStatus"),
-  driveImportProgress: document.querySelector("#driveImportProgress"),
-  driveImportProgressFill: document.querySelector("#driveImportProgressFill"),
-  driveImportProgressText: document.querySelector("#driveImportProgressText"),
-  driveImportSpeed: document.querySelector("#driveImportSpeed"),
   nativeCreateDisk: document.querySelector("#nativeCreateDisk"),
   nativeDiskHelp: document.querySelector("#nativeDiskHelp"),
   nativeDiskSize: document.querySelector("#nativeDiskSize"),
@@ -1469,281 +1384,6 @@ const stageSelectedIsoForEmustar = async (file = state.isoFile) => {
     });
 
   return state.hostStagedIsoUploadPromise;
-};
-
-const googlePickerConfigMessage =
-  "Google Picker needs VITE_GOOGLE_API_KEY, VITE_GOOGLE_CLIENT_ID, and VITE_GOOGLE_APP_ID.";
-
-const googlePickerConfigured = () =>
-  Boolean(GOOGLE_PICKER_API_KEY && GOOGLE_PICKER_CLIENT_ID && GOOGLE_PICKER_APP_ID);
-
-const scriptLoaders = new Map();
-
-const loadExternalScript = (src, id) => {
-  if (scriptLoaders.has(src)) return scriptLoaders.get(src);
-
-  const loader = new Promise((resolve, reject) => {
-    const existingScript = document.getElementById(id) || document.querySelector(`script[src="${src}"]`);
-    if (existingScript?.dataset.loaded === "true") {
-      resolve();
-      return;
-    }
-
-    const script = existingScript || document.createElement("script");
-    const cleanup = () => {
-      script.removeEventListener("load", handleLoad);
-      script.removeEventListener("error", handleError);
-    };
-    const handleLoad = () => {
-      script.dataset.loaded = "true";
-      cleanup();
-      resolve();
-    };
-    const handleError = () => {
-      cleanup();
-      reject(new Error(`Could not load ${src}`));
-    };
-
-    script.addEventListener("load", handleLoad, { once: true });
-    script.addEventListener("error", handleError, { once: true });
-    if (!existingScript) {
-      script.id = id;
-      script.src = src;
-      script.async = true;
-      script.defer = true;
-      document.head.append(script);
-    }
-  });
-
-  scriptLoaders.set(src, loader);
-  loader.catch(() => scriptLoaders.delete(src));
-  return loader;
-};
-
-const loadGooglePickerApi = async () => {
-  if (window.google?.picker) return window.google.picker;
-
-  await loadExternalScript("https://apis.google.com/js/api.js", "google-api-js");
-
-  await new Promise((resolve, reject) => {
-    if (!window.gapi?.load) {
-      reject(new Error("Google Picker loader was not available."));
-      return;
-    }
-
-    window.gapi.load("picker", {
-      callback: resolve,
-      onerror: () => reject(new Error("Google Picker failed to load.")),
-      ontimeout: () => reject(new Error("Google Picker timed out while loading.")),
-      timeout: 10000,
-    });
-  });
-
-  if (!window.google?.picker) {
-    throw new Error("Google Picker loaded, but the picker API was not available.");
-  }
-  return window.google.picker;
-};
-
-const warmGoogleDrivePicker = () => {
-  void loadGooglePickerApi().catch(() => {});
-};
-
-const createNonce = () =>
-  crypto.getRandomValues
-    ? Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("")
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-const googleDriveRedirectUri = () => `${window.location.origin}${window.location.pathname}`;
-
-const startGoogleDriveRedirectSignIn = () => {
-  const oauthState = `nebulavm-drive-${createNonce()}`;
-  window.sessionStorage.setItem(GOOGLE_DRIVE_OAUTH_STATE_KEY, oauthState);
-
-  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  authUrl.searchParams.set("client_id", GOOGLE_PICKER_CLIENT_ID);
-  authUrl.searchParams.set("redirect_uri", googleDriveRedirectUri());
-  authUrl.searchParams.set("response_type", "token");
-  authUrl.searchParams.set("scope", GOOGLE_DRIVE_PICKER_SCOPE);
-  authUrl.searchParams.set("include_granted_scopes", "true");
-  authUrl.searchParams.set("prompt", "consent select_account");
-  authUrl.searchParams.set("state", oauthState);
-
-  window.location.assign(authUrl.toString());
-};
-
-const openGoogleDrivePickerDialog = ({ accessToken, onPicked, onCanceled, onError }) => {
-  const pickerApi = window.google?.picker;
-  if (!pickerApi) {
-    onError(new Error("Google signed in, but the Drive Picker library was not ready."));
-    return null;
-  }
-
-  try {
-    const docsView = new pickerApi.DocsView(pickerApi.ViewId.DOCS)
-      .setIncludeFolders(false)
-      .setMode(pickerApi.DocsViewMode.LIST);
-    if (typeof docsView.setEnableDrives === "function") {
-      docsView.setEnableDrives(true);
-    }
-
-    let pickerBuilder = new pickerApi.PickerBuilder()
-      .addView(docsView)
-      .setAppId(GOOGLE_PICKER_APP_ID)
-      .setOAuthToken(accessToken)
-      .setDeveloperKey(GOOGLE_PICKER_API_KEY)
-      .setTitle("Choose an ISO or disk image")
-      .setCallback((data) => {
-        const action = data[pickerApi.Response.ACTION] || data.action;
-        if (action === pickerApi.Action.CANCEL || action === "cancel") {
-          onCanceled();
-          return;
-        }
-        if (action === pickerApi.Action.ERROR || action === "error") {
-          onError(new Error("Google Drive Picker returned an error."));
-          return;
-        }
-        if (action !== pickerApi.Action.PICKED && action !== "picked") return;
-
-        const [document] = data[pickerApi.Response.DOCUMENTS] || [];
-        onPicked({
-          fileId: document?.[pickerApi.Document.ID] || document?.id || "",
-          fileName: document?.[pickerApi.Document.NAME] || document?.name || "google-drive.iso",
-        });
-      });
-
-    if (typeof pickerBuilder.setOrigin === "function") {
-      pickerBuilder = pickerBuilder.setOrigin(window.location.origin);
-    }
-    if (pickerApi.Feature?.SUPPORT_DRIVES && typeof pickerBuilder.enableFeature === "function") {
-      pickerBuilder = pickerBuilder.enableFeature(pickerApi.Feature.SUPPORT_DRIVES);
-    }
-
-    const picker = pickerBuilder.build();
-    picker.setVisible(true);
-    return picker;
-  } catch (error) {
-    onError(error);
-    return null;
-  }
-};
-
-const startPickerDriveImport = async (fileId, fileName, accessToken) => {
-  els.drivePickerButton.disabled = true;
-  els.driveImportStatus.textContent = `Starting authenticated Google Drive import for ${fileName || "selected file"}...`;
-  updateDriveImportProgress({
-    state: "running",
-    message: "Starting authenticated Google Drive import...",
-    bytesReceived: 0,
-    totalBytes: 0,
-    speedBytesPerSecond: 0,
-  });
-
-  try {
-    const { response, data } = await fetchEmustarHostJson("drive-picker-import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId, fileName, accessToken }),
-    });
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || "Google Picker import failed to start.");
-    }
-
-    state.activeDriveImportId = data.job?.id || null;
-    applyDriveImportJob(data.job);
-    const job = await pollDriveImport();
-    if (job?.state === "complete") {
-      log(`Google Picker ISO imported to ${job.isoPath}.`);
-    } else if (job?.state === "error") {
-      log(`Google Picker import failed: ${job.error}`);
-    }
-  } catch (error) {
-    els.driveImportStatus.textContent = error.message;
-    updateDriveImportProgress(null);
-    log(`Google Picker import failed: ${error.message}`);
-  } finally {
-    els.drivePickerButton.disabled = false;
-    updateButtons();
-  }
-};
-
-const openGoogleDrivePicker = async () => {
-  if (!googlePickerConfigured()) {
-    els.driveImportStatus.textContent = googlePickerConfigMessage;
-    log(googlePickerConfigMessage);
-    return;
-  }
-
-  const tokenStillValid =
-    state.googlePickerAccessToken && state.googlePickerTokenExpiresAt > Date.now() + 60 * 1000;
-  if (!tokenStillValid) {
-    els.drivePickerButton.disabled = true;
-    els.driveImportStatus.textContent = "Opening Google Drive sign-in...";
-    startGoogleDriveRedirectSignIn();
-    return;
-  }
-
-  let pickerFinished = false;
-  let pickerDialog = null;
-  let pickerWatchdog = 0;
-  const finishPicker = () => {
-    pickerFinished = true;
-    window.clearTimeout(pickerWatchdog);
-    pickerDialog?.setVisible?.(false);
-    pickerDialog = null;
-  };
-  const handlePickedFile = (fileId, fileName, accessToken) => {
-    finishPicker();
-    if (!fileId) {
-      els.driveImportStatus.textContent = "Google Drive did not return a file ID.";
-      els.drivePickerButton.disabled = false;
-      return;
-    }
-    if (!accessToken) {
-      els.driveImportStatus.textContent = "Google Drive did not return an access token.";
-      els.drivePickerButton.disabled = false;
-      return;
-    }
-    els.driveImportStatus.textContent = `Selected ${fileName}. Starting import...`;
-    void startPickerDriveImport(fileId, fileName, accessToken);
-  };
-  const cancelPicker = () => {
-    finishPicker();
-    els.driveImportStatus.textContent = "Google Drive picker canceled.";
-    els.drivePickerButton.disabled = false;
-  };
-  const failPicker = (message) => {
-    finishPicker();
-    els.driveImportStatus.textContent = message;
-    els.drivePickerButton.disabled = false;
-    log(`Google Drive Picker failed: ${message}`);
-  };
-
-  els.drivePickerButton.disabled = true;
-  els.driveImportStatus.textContent = "Connecting to Google Drive...";
-
-  try {
-    const accessToken = state.googlePickerAccessToken;
-    await loadGooglePickerApi();
-
-    els.driveImportStatus.textContent = "Google Drive connected. Opening file list...";
-    log("Google Drive account connected.");
-    pickerDialog = openGoogleDrivePickerDialog({
-      accessToken,
-      onPicked: ({ fileId, fileName }) => handlePickedFile(fileId, fileName, accessToken),
-      onCanceled: cancelPicker,
-      onError: (error) => failPicker(error.message || "Google Drive Picker failed."),
-    });
-
-    if (!pickerDialog) return;
-
-    pickerWatchdog = window.setTimeout(() => {
-      if (pickerFinished || pickerDialog?.isVisible?.()) return;
-      failPicker("Google Drive did not stay open. Allow pop-ups for this page and try again.");
-    }, 10000);
-  } catch (error) {
-    failPicker(error.message || "Google Drive Picker failed.");
-  }
 };
 
 const fetchNetlifyHostRegistry = async () => {
@@ -3041,7 +2681,7 @@ const bootEmulator = async () => {
     }
   }
   if (isHyperVMode() && !els.nativeIsoPath.value.trim()) {
-    log("Boot blocked: drop an ISO, choose an ISO path, or import one from Google Drive before launching EMUSTAR.");
+    log("Boot blocked: drop an ISO or choose an ISO path before launching EMUSTAR.");
     return;
   }
   if (isHyperVMode() && looksLikeArm64Iso(els.nativeIsoPath.value.trim())) {
@@ -3253,100 +2893,12 @@ const updateNativeStatus = async () => {
   updateButtons();
 };
 
-const driveImportStatusText = (job) => {
-  if (!job) return "No Drive import running.";
-  if (job.state === "complete") return `Imported to ${job.isoPath}`;
-  if (job.state === "error") {
-    return job.error || "Google Drive ISO import failed.";
-  }
-  const received = formatBytes(job.bytesReceived || 0);
-  const total = job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : "";
-  return `${job.message || "Importing Google Drive ISO..."} ${received}${total}`;
-};
-
 const formatTransferSpeed = (bytesPerSecond) => {
   const speed = Math.max(0, Number(bytesPerSecond) || 0);
   if (speed >= 1024 * 1024) {
     return `${(speed / 1024 / 1024).toFixed(1)} MB/s`;
   }
   return `${Math.round(speed / 1024)} KB/s`;
-};
-
-const driveImportPercent = (job) => {
-  const received = Number(job?.bytesReceived) || 0;
-  const total = Number(job?.totalBytes) || 0;
-  if (job?.state === "complete") return 100;
-  if (total <= 0) return 0;
-  return Math.max(0, Math.min(100, (received / total) * 100));
-};
-
-const updateDriveImportProgress = (job) => {
-  const hasProgress = Boolean(job) && (job.state === "running" || job.state === "complete");
-  els.driveImportProgress.hidden = !hasProgress;
-  if (!hasProgress) {
-    els.driveImportProgressFill.style.width = "0%";
-    els.driveImportProgress.querySelector(".drive-import-track").setAttribute("aria-valuenow", "0");
-    els.driveImportProgressText.textContent = "0% - 0 B";
-    els.driveImportSpeed.textContent = "0 KB/s";
-    return;
-  }
-
-  const percent = driveImportPercent(job);
-  const received = formatBytes(job.bytesReceived || 0);
-  const total = job.totalBytes ? ` / ${formatBytes(job.totalBytes)}` : "";
-  const percentText = job.state === "complete" ? "100%" : job.totalBytes ? `${Math.floor(percent)}%` : "Preparing";
-  const speedText = job.state === "complete" ? "Complete" : formatTransferSpeed(job.speedBytesPerSecond);
-
-  els.driveImportProgressFill.style.width = `${percent}%`;
-  els.driveImportProgress.querySelector(".drive-import-track").setAttribute("aria-valuenow", String(Math.round(percent)));
-  els.driveImportProgressText.textContent = `${percentText} - ${received}${total}`;
-  els.driveImportSpeed.textContent = speedText;
-};
-
-const applyDriveImportJob = (job) => {
-  els.driveImportStatus.textContent = driveImportStatusText(job);
-  updateDriveImportProgress(job);
-  const running = job?.state === "running";
-  els.drivePickerButton.disabled = running;
-
-  if (job?.state === "complete" && job.isoPath && job.id === state.activeDriveImportId) {
-    els.nativeIsoPath.value = job.isoPath;
-    state.activeDriveImportId = null;
-    updateButtons();
-  }
-};
-
-const pollDriveImport = async () => {
-  if (state.driveImportPolling) return null;
-  state.driveImportPolling = true;
-  try {
-    while (true) {
-      const { data } = await fetchEmustarHostJson("drive-import");
-      const job = data.job;
-      applyDriveImportJob(job);
-
-      if (!job || job.state === "complete" || job.state === "error") {
-        return job;
-      }
-      await new Promise((resolvePoll) => window.setTimeout(resolvePoll, 1000));
-    }
-  } finally {
-    state.driveImportPolling = false;
-  }
-};
-
-const refreshDriveImportStatus = async () => {
-  if (!isHyperVMode()) return;
-  try {
-    const { data } = await fetchEmustarHostJson("drive-import");
-    applyDriveImportJob(data.job);
-    if (data.job?.state === "running") {
-      void pollDriveImport();
-    }
-  } catch {
-    els.driveImportStatus.textContent = "Drive import is unavailable from this page.";
-    updateDriveImportProgress(null);
-  }
 };
 
 const resetNativeFirmware = async () => {
@@ -3499,9 +3051,6 @@ const updateBackendUi = () => {
   updateButtons();
   void updateEmustarHostInfo();
   void updateNativeStatus();
-  if (nativeMode) {
-    void refreshDriveImportStatus();
-  }
   if (emustarMode) {
     void refreshStoredIsos({ silent: true });
   }
@@ -3582,12 +3131,6 @@ els.nativeIsoPath.addEventListener("input", () => updateButtons());
 els.windowsUsername.addEventListener("input", () => updateButtons());
 els.windowsPassword.addEventListener("input", () => updateButtons());
 els.windowsPasswordOff.addEventListener("change", () => updateButtons());
-els.drivePickerButton.addEventListener("click", openGoogleDrivePicker);
-if (googlePickerConfigured()) {
-  window.setTimeout(warmGoogleDrivePicker, 500);
-  els.drivePickerButton.addEventListener("pointerenter", warmGoogleDrivePicker, { once: true });
-  els.drivePickerButton.addEventListener("focus", warmGoogleDrivePicker, { once: true });
-}
 els.nativeCreateDisk.addEventListener("change", () => updateButtons());
 els.nativeDisplayMode.addEventListener("change", () => {
   if (shouldForceEmustarViewport()) {
@@ -3638,17 +3181,6 @@ window.addEventListener("beforeunload", () => {
 log("NebulaVM ready.");
 renderStoredIsoSlots();
 updateBackendUi();
-if (googleDriveOAuthErrorFromUrl) {
-  els.driveImportStatus.textContent = `Google Drive sign-in failed: ${googleDriveOAuthErrorFromUrl}`;
-  log(`Google Drive sign-in failed: ${googleDriveOAuthErrorFromUrl}`);
-}
-if (shouldResumeGoogleDrivePicker) {
-  els.driveImportStatus.textContent = "Google Drive connected. Opening file list...";
-  log("Google Drive redirect completed.");
-  window.setTimeout(() => {
-    void openGoogleDrivePicker();
-  }, 500);
-}
 void connectNetlifyHostRegistry();
 updateButtons();
 updateViewportSummary();
