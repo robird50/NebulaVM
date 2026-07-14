@@ -108,7 +108,7 @@ app.innerHTML = `
       <p>NebulaVM is currently available only on desktop and laptop browsers. Mobile and tablet support is still in development.</p>
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
     </section>
-    <small class="commit-id">Commit ${COMMIT_ID} <a href="https://github.com/robird50/NebulaVM">Source Code</a></small>
+    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a></small>
   </main>
 
   <main class="shell">
@@ -483,7 +483,7 @@ app.innerHTML = `
         </div>
       </section>
     </section>
-    <footer class="commit-id">Commit ${COMMIT_ID} <a href="https://github.com/robird50/NebulaVM">Source Code</a></footer>
+    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a></footer>
   </main>
 
   <div class="display-choice-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>

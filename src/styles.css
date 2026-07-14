@@ -74,6 +74,10 @@ button:disabled {
   text-underline-offset: 3px;
 }
 
+.commit-id span {
+  margin-left: 10px;
+}
+
 .commit-id a:hover {
   color: #fff176;
 }
