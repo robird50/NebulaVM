@@ -14,6 +14,12 @@ const HOST_TOKEN_STORAGE_KEY = "nebulavm.emustar.hostToken";
 const HOST_SESSION_STORAGE_KEY = "nebulavm.emustar.sessionId";
 const STORED_ISO_PROMPT_KEY = "nebulavm.emustar.storedIsoPrompt";
 const STORED_ISO_LIMIT = 2;
+const MOBILE_DEV_UNLOCK_KEY = "nebulavm.mobile.devUnlock";
+const MOBILE_DEV_ATTEMPTS_KEY = "nebulavm.mobile.devAttempts";
+const MOBILE_DEV_LOCK_KEY = "nebulavm.mobile.devLockUntil";
+const MOBILE_DEV_CODE_HASH = "0a6a787e2e1b6c614d5b75115e55d3546cdcf312cd632093ddaaabcb4d7aec75";
+const MOBILE_DEV_MAX_ATTEMPTS = 5;
+const MOBILE_DEV_LOCK_MS = 5 * 60 * 1000;
 const hostedLauncherHostnames = new Set(["nebulavm.online", "www.nebulavm.online"]);
 const isNetlifyLauncher =
   /\.netlify\.app$/i.test(window.location.hostname) || hostedLauncherHostnames.has(window.location.hostname);
@@ -41,6 +47,10 @@ const isMobileOrTabletDevice = () => {
 
 if (isMobileOrTabletDevice()) {
   document.documentElement.classList.add("is-mobile-device");
+}
+
+if (window.sessionStorage.getItem(MOBILE_DEV_UNLOCK_KEY) === "1") {
+  document.documentElement.classList.add("mobile-dev-bypass");
 }
 
 const sharedHostTokenFromUrl = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
@@ -107,9 +117,23 @@ app.innerHTML = `
       <h1 id="mobileUnsupportedTitle">Mobile and Tablet Not Supported</h1>
       <p>NebulaVM is currently available only on desktop and laptop browsers. Mobile and tablet support is still in development.</p>
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
+      <button class="mobile-bypass-link" id="mobileBypassButton" type="button">Bypass (devs only)</button>
     </section>
     <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a></small>
   </main>
+
+  <div class="mobile-bypass-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
+    <section class="mobile-bypass-panel">
+      <button class="mobile-bypass-close" id="mobileBypassCloseButton" type="button" aria-label="Close developer bypass">x</button>
+      <img class="mobile-bypass-lock" src="/assets/mobile-dev-lock.jpg" alt="" />
+      <p id="mobileBypassText">Enter the confidential 6-digit developer code to unlock the mobile testing build.</p>
+      <div class="mobile-pin-dots" id="mobilePinDots" aria-label="6-digit code progress">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="mobile-keypad" id="mobileKeypad" aria-label="Developer number keypad"></div>
+      <p class="mobile-bypass-feedback" id="mobileBypassFeedback" aria-live="polite"></p>
+    </section>
+  </div>
 
   <main class="shell">
     <section class="hero">
@@ -534,6 +558,12 @@ app.innerHTML = `
 `;
 
 const els = {
+  mobileBypassButton: document.querySelector("#mobileBypassButton"),
+  mobileBypassDialog: document.querySelector("#mobileBypassDialog"),
+  mobileBypassCloseButton: document.querySelector("#mobileBypassCloseButton"),
+  mobilePinDots: document.querySelector("#mobilePinDots"),
+  mobileKeypad: document.querySelector("#mobileKeypad"),
+  mobileBypassFeedback: document.querySelector("#mobileBypassFeedback"),
   dropZone: document.querySelector("#dropZone"),
   isoInput: document.querySelector("#isoInput"),
   storedIsoInput: document.querySelector("#storedIsoInput"),
@@ -632,6 +662,192 @@ if (isNetlifyLauncher) {
 } else if (savedNativeDisplayMode === "viewport" || savedNativeDisplayMode === "external") {
   els.nativeDisplayMode.value = savedNativeDisplayMode;
 }
+
+const mobilePinState = {
+  digits: "",
+};
+
+const hexFromBuffer = (buffer) =>
+  [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+
+const getMobileBypassLockRemaining = () => {
+  const lockUntil = Number(window.sessionStorage.getItem(MOBILE_DEV_LOCK_KEY) || 0);
+  return Math.max(0, lockUntil - Date.now());
+};
+
+const renderMobilePinDots = () => {
+  const dots = [...els.mobilePinDots.querySelectorAll("span")];
+  dots.forEach((dot, index) => {
+    dot.classList.toggle("is-filled", index < mobilePinState.digits.length);
+  });
+};
+
+const resetMobilePin = () => {
+  mobilePinState.digits = "";
+  renderMobilePinDots();
+};
+
+const setMobileBypassFeedback = (message = "") => {
+  els.mobileBypassFeedback.textContent = message;
+};
+
+const refreshMobileBypassLockMessage = () => {
+  const remaining = getMobileBypassLockRemaining();
+  if (!remaining) {
+    setMobileBypassFeedback("");
+    return false;
+  }
+
+  const seconds = Math.ceil(remaining / 1000);
+  setMobileBypassFeedback(`Too many misses. Try again in ${seconds}s.`);
+  return true;
+};
+
+const closeMobileBypassDialog = () => {
+  els.mobileBypassDialog.hidden = true;
+  resetMobilePin();
+  setMobileBypassFeedback("");
+};
+
+const openMobileBypassDialog = () => {
+  els.mobileBypassDialog.hidden = false;
+  resetMobilePin();
+  refreshMobileBypassLockMessage();
+};
+
+const applyMobileDevMode = () => {
+  document.documentElement.classList.add("mobile-dev-bypass");
+  if (isMobileOrTabletDevice() && !state.running) {
+    els.emulatorMode.value = "v86";
+    els.memorySize.value = "134217728";
+    els.networking.checked = false;
+    els.autostart.checked = false;
+    document.querySelectorAll("details.advanced-options").forEach((details) => {
+      details.open = false;
+    });
+  }
+  syncEmulatorDropdown();
+  updateBackendUi();
+  updateButtons();
+};
+
+const unlockMobileDevMode = () => {
+  window.sessionStorage.setItem(MOBILE_DEV_UNLOCK_KEY, "1");
+  window.sessionStorage.removeItem(MOBILE_DEV_ATTEMPTS_KEY);
+  window.sessionStorage.removeItem(MOBILE_DEV_LOCK_KEY);
+  closeMobileBypassDialog();
+  applyMobileDevMode();
+  log("Mobile developer testing build unlocked for this tab.");
+};
+
+const shakeMobilePin = () => {
+  els.mobilePinDots.classList.remove("is-shaking");
+  void els.mobilePinDots.offsetWidth;
+  els.mobilePinDots.classList.add("is-shaking");
+};
+
+const failMobilePin = () => {
+  const attempts = Number(window.sessionStorage.getItem(MOBILE_DEV_ATTEMPTS_KEY) || 0) + 1;
+  if (attempts >= MOBILE_DEV_MAX_ATTEMPTS) {
+    window.sessionStorage.setItem(MOBILE_DEV_ATTEMPTS_KEY, "0");
+    window.sessionStorage.setItem(MOBILE_DEV_LOCK_KEY, String(Date.now() + MOBILE_DEV_LOCK_MS));
+    setMobileBypassFeedback("Locked for 5 minutes.");
+  } else {
+    window.sessionStorage.setItem(MOBILE_DEV_ATTEMPTS_KEY, String(attempts));
+    setMobileBypassFeedback(`${MOBILE_DEV_MAX_ATTEMPTS - attempts} tries left.`);
+  }
+  shakeMobilePin();
+  resetMobilePin();
+};
+
+const verifyMobilePin = async () => {
+  if (refreshMobileBypassLockMessage()) {
+    resetMobilePin();
+    return;
+  }
+
+  if (!crypto.subtle) {
+    setMobileBypassFeedback("This browser cannot unlock the mobile test build.");
+    resetMobilePin();
+    return;
+  }
+
+  const encoded = new TextEncoder().encode(mobilePinState.digits);
+  const digest = hexFromBuffer(await crypto.subtle.digest("SHA-256", encoded));
+  if (digest === MOBILE_DEV_CODE_HASH) {
+    unlockMobileDevMode();
+    return;
+  }
+  failMobilePin();
+};
+
+const handleMobileKeypadPress = (value) => {
+  if (refreshMobileBypassLockMessage()) return;
+
+  if (value === "clear") {
+    resetMobilePin();
+    setMobileBypassFeedback("");
+    return;
+  }
+
+  if (value === "backspace") {
+    mobilePinState.digits = mobilePinState.digits.slice(0, -1);
+    renderMobilePinDots();
+    setMobileBypassFeedback("");
+    return;
+  }
+
+  if (!/^\d$/.test(value) || mobilePinState.digits.length >= 6) return;
+  mobilePinState.digits += value;
+  renderMobilePinDots();
+  setMobileBypassFeedback("");
+  if (mobilePinState.digits.length === 6) {
+    void verifyMobilePin();
+  }
+};
+
+const initMobileDevBypass = () => {
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "backspace"];
+  els.mobileKeypad.replaceChildren(
+    ...keys.map((key) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "mobile-key";
+      button.dataset.mobileKey = key;
+      button.textContent = key === "clear" ? "C" : key === "backspace" ? "Del" : key;
+      button.setAttribute(
+        "aria-label",
+        key === "clear" ? "Clear code" : key === "backspace" ? "Delete last digit" : `Number ${key}`,
+      );
+      return button;
+    }),
+  );
+
+  els.mobileBypassButton.addEventListener("click", openMobileBypassDialog);
+  els.mobileBypassCloseButton.addEventListener("click", closeMobileBypassDialog);
+  els.mobileBypassDialog.addEventListener("click", (event) => {
+    if (event.target === els.mobileBypassDialog) {
+      closeMobileBypassDialog();
+    }
+  });
+  els.mobileKeypad.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-mobile-key]");
+    if (!button) return;
+    handleMobileKeypadPress(button.dataset.mobileKey);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (els.mobileBypassDialog.hidden) return;
+    if (/^\d$/.test(event.key)) {
+      event.preventDefault();
+      handleMobileKeypadPress(event.key);
+    } else if (event.key === "Backspace") {
+      event.preventDefault();
+      handleMobileKeypadPress("backspace");
+    } else if (event.key === "Escape") {
+      closeMobileBypassDialog();
+    }
+  });
+};
 
 const formatBytes = (bytes) => {
   if (!Number.isFinite(bytes)) return "0 B";
@@ -3138,6 +3354,11 @@ window.addEventListener("beforeunload", () => {
   void cleanupStagedHostIso({ keepalive: true, silent: true });
   void stopEmulator();
 });
+
+initMobileDevBypass();
+if (window.sessionStorage.getItem(MOBILE_DEV_UNLOCK_KEY) === "1") {
+  applyMobileDevMode();
+}
 
 log("NebulaVM ready.");
 renderStoredIsoSlots();
