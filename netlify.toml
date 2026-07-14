@@ -2,10 +2,6 @@
   command = "npm run build"
   publish = "dist"
 
-[functions]
-  directory = "netlify/functions"
-  node_bundler = "esbuild"
-
 [build.environment]
   NODE_VERSION = "22"
 
@@ -14,3 +10,9 @@
   [headers.values]
     Cross-Origin-Opener-Policy = "same-origin"
     Cross-Origin-Embedder-Policy = "require-corp"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self'; font-src 'self'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:* https://*.trycloudflare.com; connect-src 'self' http://127.0.0.1:* http://localhost:* https://*.trycloudflare.com ws://127.0.0.1:* ws://localhost:* wss://*.trycloudflare.com wss://relay.widgetry.org; frame-src 'self' http://127.0.0.1:* http://localhost:* https:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=()"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
