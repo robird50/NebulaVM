@@ -8,6 +8,12 @@ $cloudflaredPath = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
 $publicUrlPath = Join-Path $projectRoot ".nebulavm-public-url"
 $hostTokenPath = Join-Path $projectRoot ".nebulavm-host-token"
 $cloudflaredLogPath = Join-Path $projectRoot ".nebulavm-cloudflared.log"
+$netlifyRegistryUrl = if ($env:NEBULAVM_REGISTRY_URL) {
+  $env:NEBULAVM_REGISTRY_URL
+} else {
+  "https://nebulavm.netlify.app/.netlify/functions/host-registry"
+}
+$lastRegistryPublish = Get-Date 0
 $hyperVModule = Get-ChildItem `
   "$env:SystemRoot\System32\WindowsPowerShell\v1.0\Modules\Hyper-V" `
   -Recurse `
@@ -126,6 +132,41 @@ function Sync-PublicUrlFromLog {
   }
 }
 
+function Publish-NetlifyRegistry {
+  if (-not (Test-Path -LiteralPath $publicUrlPath) -or -not (Test-Path -LiteralPath $hostTokenPath)) {
+    return
+  }
+
+  if (((Get-Date) - $script:lastRegistryPublish).TotalSeconds -lt 30) {
+    return
+  }
+
+  $publicUrl = (Get-Content -LiteralPath $publicUrlPath -Raw).Trim()
+  $hostToken = (Get-Content -LiteralPath $hostTokenPath -Raw).Trim()
+  if (-not $publicUrl -or -not $hostToken) {
+    return
+  }
+
+  try {
+    $body = @{
+      publicUrl = $publicUrl
+      accessToken = $hostToken
+    } | ConvertTo-Json -Compress
+    Invoke-WebRequest `
+      -UseBasicParsing `
+      -Method Post `
+      -Uri $netlifyRegistryUrl `
+      -ContentType "application/json" `
+      -Body $body `
+      -TimeoutSec 15 | Out-Null
+    $script:lastRegistryPublish = Get-Date
+  } catch {
+    Add-Content `
+      -LiteralPath $cloudflaredLogPath `
+      -Value "[$(Get-Date -Format o)] Netlify registry publish failed: $($_.Exception.Message)"
+  }
+}
+
 Set-Location $projectRoot
 while ($true) {
   try {
@@ -135,6 +176,7 @@ while ($true) {
     while (-not $tunnel.HasExited) {
       Start-Sleep -Seconds 5
       Sync-PublicUrlFromLog
+      Publish-NetlifyRegistry
       Start-NebulaHost
       Start-NebulaGuest
     }
@@ -147,6 +189,7 @@ while ($true) {
     Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
   } else {
     Sync-PublicUrlFromLog
+    Publish-NetlifyRegistry
   }
   Start-Sleep -Seconds 5
 }
