@@ -17,7 +17,6 @@ const STORED_ISO_LIMIT = 2;
 const MOBILE_DEV_UNLOCK_KEY = "nebulavm.mobile.devUnlock";
 const MOBILE_DEV_ATTEMPTS_KEY = "nebulavm.mobile.devAttempts";
 const MOBILE_DEV_LOCK_KEY = "nebulavm.mobile.devLockUntil";
-const MOBILE_DEV_CODE_HASH = "0a6a787e2e1b6c614d5b75115e55d3546cdcf312cd632093ddaaabcb4d7aec75";
 const MOBILE_DEV_MAX_ATTEMPTS = 5;
 const MOBILE_DEV_LOCK_MS = 5 * 60 * 1000;
 const hostedLauncherHostnames = new Set(["nebulavm.online", "www.nebulavm.online"]);
@@ -667,9 +666,6 @@ const mobilePinState = {
   digits: "",
 };
 
-const hexFromBuffer = (buffer) =>
-  [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-
 const getMobileBypassLockRemaining = () => {
   const lockUntil = Number(window.sessionStorage.getItem(MOBILE_DEV_LOCK_KEY) || 0);
   return Math.max(0, lockUntil - Date.now());
@@ -746,15 +742,28 @@ const shakeMobilePin = () => {
   els.mobilePinDots.classList.add("is-shaking");
 };
 
-const failMobilePin = () => {
-  const attempts = Number(window.sessionStorage.getItem(MOBILE_DEV_ATTEMPTS_KEY) || 0) + 1;
-  if (attempts >= MOBILE_DEV_MAX_ATTEMPTS) {
+const failMobilePin = ({ message = "", remainingAttempts = null, lockRemainingMs = 0 } = {}) => {
+  if (lockRemainingMs > 0) {
     window.sessionStorage.setItem(MOBILE_DEV_ATTEMPTS_KEY, "0");
-    window.sessionStorage.setItem(MOBILE_DEV_LOCK_KEY, String(Date.now() + MOBILE_DEV_LOCK_MS));
-    setMobileBypassFeedback("Locked for 5 minutes.");
+    window.sessionStorage.setItem(MOBILE_DEV_LOCK_KEY, String(Date.now() + lockRemainingMs));
+    setMobileBypassFeedback(message || "Locked for 5 minutes.");
+    shakeMobilePin();
+    resetMobilePin();
+    return;
+  }
+
+  if (Number.isFinite(remainingAttempts)) {
+    setMobileBypassFeedback(message || `${Math.max(0, remainingAttempts)} tries left.`);
   } else {
-    window.sessionStorage.setItem(MOBILE_DEV_ATTEMPTS_KEY, String(attempts));
-    setMobileBypassFeedback(`${MOBILE_DEV_MAX_ATTEMPTS - attempts} tries left.`);
+    const attempts = Number(window.sessionStorage.getItem(MOBILE_DEV_ATTEMPTS_KEY) || 0) + 1;
+    if (attempts >= MOBILE_DEV_MAX_ATTEMPTS) {
+      window.sessionStorage.setItem(MOBILE_DEV_ATTEMPTS_KEY, "0");
+      window.sessionStorage.setItem(MOBILE_DEV_LOCK_KEY, String(Date.now() + MOBILE_DEV_LOCK_MS));
+      setMobileBypassFeedback("Locked for 5 minutes.");
+    } else {
+      window.sessionStorage.setItem(MOBILE_DEV_ATTEMPTS_KEY, String(attempts));
+      setMobileBypassFeedback(`${MOBILE_DEV_MAX_ATTEMPTS - attempts} tries left.`);
+    }
   }
   shakeMobilePin();
   resetMobilePin();
@@ -766,19 +775,35 @@ const verifyMobilePin = async () => {
     return;
   }
 
-  if (!crypto.subtle) {
-    setMobileBypassFeedback("This browser cannot unlock the mobile test build.");
-    resetMobilePin();
-    return;
-  }
+  setMobileBypassFeedback("Checking...");
+  try {
+    const response = await fetch(isNetlifyLauncher ? "/.netlify/functions/mobile-dev-unlock" : "/api/mobile-dev-unlock", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: mobilePinState.digits }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.ok) {
+      unlockMobileDevMode();
+      return;
+    }
 
-  const encoded = new TextEncoder().encode(mobilePinState.digits);
-  const digest = hexFromBuffer(await crypto.subtle.digest("SHA-256", encoded));
-  if (digest === MOBILE_DEV_CODE_HASH) {
-    unlockMobileDevMode();
-    return;
+    if (response.status === 401 || response.status === 429) {
+      failMobilePin({
+        message: data.error || "Incorrect developer code.",
+        remainingAttempts: Number(data.remainingAttempts),
+        lockRemainingMs: Number(data.lockRemainingMs) || 0,
+      });
+      return;
+    }
+
+    setMobileBypassFeedback(data.error || "Mobile unlock service rejected the request.");
+    resetMobilePin();
+  } catch {
+    setMobileBypassFeedback("Unlock service unavailable.");
+    resetMobilePin();
   }
-  failMobilePin();
 };
 
 const handleMobileKeypadPress = (value) => {

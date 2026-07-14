@@ -25,6 +25,16 @@ npm.cmd run dev -- --port 5174 --strictPort
 
 Open `http://127.0.0.1:5174/`.
 
+## Mobile Developer Unlock
+
+The mobile testing bypass is validated by the backend, not by browser JavaScript.
+Set `NEBULAVM_MOBILE_DEV_CODE_HASH` to the SHA-256 hash of the private 6-digit
+developer code in Netlify and in local `.env` files when testing locally.
+
+```powershell
+node -e "console.log(require('crypto').createHash('sha256').update('your-6-digit-code').digest('hex'))"
+```
+
 ## Public EMUSTAR Host
 
 The Windows host needs Windows 10/11 Pro or Enterprise, Hyper-V, Node.js, and

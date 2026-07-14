@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import dgram from "node:dgram";
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import net from "node:net";
@@ -14,6 +14,27 @@ const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
 const publicUrlPath = resolve(workspaceDir, ".nebulavm-public-url");
 const guestCredentialsPath = resolve(workspaceDir, ".nebulavm-guest-credentials.json");
+
+const localEnvValue = (name) => {
+  if (process.env[name]) return process.env[name];
+
+  for (const filename of [".env.local", ".env"]) {
+    const envPath = resolve(workspaceDir, filename);
+    if (!existsSync(envPath)) continue;
+
+    const line = readFileSync(envPath, "utf8")
+      .split(/\r?\n/)
+      .find((entry) => entry.trim().startsWith(`${name}=`));
+    if (!line) continue;
+
+    return line
+      .slice(line.indexOf("=") + 1)
+      .trim()
+      .replace(/^['"]|['"]$/g, "");
+  }
+
+  return "";
+};
 
 const resolveHostAccessToken = () => {
   const environmentToken = String(process.env.NEBULAVM_HOST_TOKEN || "").trim();
@@ -228,6 +249,87 @@ const readJsonBody = (req) =>
     });
     req.on("error", rejectBody);
   });
+
+const mobileDevAttempts = new Map();
+const mobileDevMaxAttempts = 5;
+const mobileDevLockMs = 5 * 60 * 1000;
+
+const sha256Hex = (value) => createHash("sha256").update(String(value)).digest("hex");
+
+const configuredMobileDevCodeHash = () => {
+  const directHash = String(localEnvValue("NEBULAVM_MOBILE_DEV_CODE_HASH") || "").trim().toLowerCase();
+  if (/^[a-f0-9]{64}$/.test(directHash)) return directHash;
+
+  const rawCode = String(localEnvValue("NEBULAVM_MOBILE_DEV_CODE") || "").trim();
+  if (/^\d{6}$/.test(rawCode)) return sha256Hex(rawCode);
+
+  return "";
+};
+
+const safeEqualHex = (left, right) => {
+  if (!/^[a-f0-9]{64}$/i.test(left) || !/^[a-f0-9]{64}$/i.test(right)) return false;
+  const leftBuffer = Buffer.from(left, "hex");
+  const rightBuffer = Buffer.from(right, "hex");
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+};
+
+const mobileDevClientKey = (req) => {
+  const forwardedFor = String(req.headers["x-forwarded-for"] || "")
+    .split(",")[0]
+    .trim();
+  const remoteAddress = String(req.socket?.remoteAddress || "");
+  const userAgent = String(req.headers["user-agent"] || "").slice(0, 180);
+  return sha256Hex(`${forwardedFor || remoteAddress}|${userAgent}`);
+};
+
+const verifyMobileDevUnlock = (req, body = {}) => {
+  const expectedHash = configuredMobileDevCodeHash();
+  if (!expectedHash) {
+    return { status: 503, body: { ok: false, error: "Mobile developer unlock is not configured." } };
+  }
+
+  const code = String(body.code || "").trim();
+  if (!/^\d{6}$/.test(code)) {
+    return { status: 400, body: { ok: false, error: "Enter the 6-digit developer code." } };
+  }
+
+  const key = mobileDevClientKey(req);
+  const saved = mobileDevAttempts.get(key) || { attempts: 0, lockUntil: 0 };
+  const lockRemainingMs = Math.max(0, Number(saved.lockUntil || 0) - Date.now());
+  if (lockRemainingMs > 0) {
+    return {
+      status: 429,
+      body: {
+        ok: false,
+        error: "Too many misses. Try again later.",
+        lockRemainingMs,
+        remainingAttempts: 0,
+      },
+    };
+  }
+
+  if (safeEqualHex(sha256Hex(code), expectedHash)) {
+    mobileDevAttempts.set(key, { attempts: 0, lockUntil: 0 });
+    return { status: 200, body: { ok: true } };
+  }
+
+  const attempts = Number(saved.attempts || 0) + 1;
+  const shouldLock = attempts >= mobileDevMaxAttempts;
+  mobileDevAttempts.set(key, {
+    attempts: shouldLock ? 0 : attempts,
+    lockUntil: shouldLock ? Date.now() + mobileDevLockMs : 0,
+  });
+
+  return {
+    status: 401,
+    body: {
+      ok: false,
+      error: shouldLock ? "Locked for 5 minutes." : "Incorrect developer code.",
+      remainingAttempts: shouldLock ? 0 : mobileDevMaxAttempts - attempts,
+      lockRemainingMs: shouldLock ? mobileDevLockMs : 0,
+    },
+  };
+};
 
 const isoImportDirectory = resolve(workspaceDir, "vm-disks", "imports");
 const browserUploadDirectory = resolve(isoImportDirectory, "browser-sessions");
@@ -1263,7 +1365,9 @@ const nativeQemuPlugin = () => ({
       const isNativeQemuApi = url.pathname.startsWith("/api/native-qemu");
       const isHyperVApi = url.pathname.startsWith("/api/emustar-hyperv");
       const isHostApi = url.pathname.startsWith("/api/emustar-host/");
-      if (!isNativeQemuApi && !isHyperVApi && !isHostApi) {
+      const isMobileDevUnlockApi =
+        url.pathname === "/api/mobile-dev-unlock" || url.pathname === "/.netlify/functions/mobile-dev-unlock";
+      if (!isNativeQemuApi && !isHyperVApi && !isHostApi && !isMobileDevUnlockApi) {
         next();
         return;
       }
@@ -1273,6 +1377,17 @@ const nativeQemuPlugin = () => ({
       if (req.method === "OPTIONS") {
         res.statusCode = 204;
         res.end();
+        return;
+      }
+
+      if (isMobileDevUnlockApi) {
+        try {
+          const body = await readJsonBody(req);
+          const result = verifyMobileDevUnlock(req, body);
+          json(res, result.status, result.body);
+        } catch (error) {
+          json(res, 400, { ok: false, error: error.message });
+        }
         return;
       }
 
