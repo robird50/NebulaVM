@@ -284,6 +284,25 @@ app.innerHTML = `
             </select>
           </label>
 
+          <div class="field range-field full-span">
+            <div class="range-heading">
+              <label for="processorSpeed">Processor speed</label>
+              <output id="processorSpeedValue" for="processorSpeed">2 GHz</output>
+            </div>
+            <input
+              class="hardware-slider"
+              id="processorSpeed"
+              type="range"
+              min="1"
+              max="5"
+              step="1"
+              value="2"
+              aria-label="Processor speed"
+              aria-valuetext="2 GHz"
+            />
+            <span class="range-endpoints" aria-hidden="true"><span>1 GHz</span><span>5 GHz</span></span>
+          </div>
+
           <label class="field">
             <span>Boot as</span>
             <select id="mediaType">
@@ -293,9 +312,24 @@ app.innerHTML = `
             </select>
           </label>
 
-          <label class="field">
-            <span>Memory</span>
-            <select id="memorySize">
+          <div class="field range-field">
+            <div class="range-heading">
+              <label for="memorySlider">Memory</label>
+              <output id="memorySliderValue" for="memorySlider">128 MB</output>
+            </div>
+            <input
+              class="hardware-slider"
+              id="memorySlider"
+              type="range"
+              min="0"
+              max="7"
+              step="1"
+              value="1"
+              aria-label="Memory"
+              aria-valuetext="128 MB"
+            />
+            <span class="range-endpoints" aria-hidden="true"><span>64 MB</span><span>6144 MB</span></span>
+            <select id="memorySize" hidden aria-hidden="true" tabindex="-1">
               <option value="67108864">64 MB</option>
               <option value="134217728" selected>128 MB</option>
               <option value="268435456">256 MB</option>
@@ -305,7 +339,7 @@ app.innerHTML = `
               <option value="4294967296">4096 MB</option>
               <option value="6442450944">6144 MB</option>
             </select>
-          </label>
+          </div>
 
           <label class="field">
             <span>Video memory</span>
@@ -614,6 +648,8 @@ const els = {
   nebulaConflictPanel: document.querySelector("#nebulaConflictPanel"),
   nebulaConflictOkButton: document.querySelector("#nebulaConflictOkButton"),
   processorMode: document.querySelector("#processorMode"),
+  processorSpeed: document.querySelector("#processorSpeed"),
+  processorSpeedValue: document.querySelector("#processorSpeedValue"),
   nativePanel: document.querySelector("#nativePanel"),
   nativeRuntimeIcon: document.querySelector("#nativeRuntimeIcon"),
   nativeRuntimeName: document.querySelector("#nativeRuntimeName"),
@@ -640,6 +676,8 @@ const els = {
   remoteStatus: document.querySelector("#remoteStatus"),
   mediaType: document.querySelector("#mediaType"),
   memorySize: document.querySelector("#memorySize"),
+  memorySlider: document.querySelector("#memorySlider"),
+  memorySliderValue: document.querySelector("#memorySliderValue"),
   vgaSize: document.querySelector("#vgaSize"),
   bootOrder: document.querySelector("#bootOrder"),
   networking: document.querySelector("#networking"),
@@ -680,6 +718,45 @@ const els = {
   ramMetric: document.querySelector("#ramMetric"),
   logOutput: document.querySelector("#logOutput"),
   clearLogButton: document.querySelector("#clearLogButton"),
+};
+
+const MEMORY_STEPS = [64, 128, 256, 512, 1024, 2048, 4096, 6144];
+const BYTES_PER_MEGABYTE = 1024 * 1024;
+
+const updateSliderTrack = (slider) => {
+  const minimum = Number(slider.min) || 0;
+  const maximum = Number(slider.max) || 1;
+  const progress = ((Number(slider.value) - minimum) / Math.max(1, maximum - minimum)) * 100;
+  slider.style.setProperty("--slider-progress", `${progress}%`);
+};
+
+const selectedProcessorSpeedGhz = () => Number(els.processorSpeed.value) || 2;
+const selectedMemoryMb = () => Number(els.memorySize.value) / BYTES_PER_MEGABYTE;
+
+const syncProcessorSpeedSlider = () => {
+  const ghz = selectedProcessorSpeedGhz();
+  const label = `${ghz} GHz`;
+  els.processorSpeedValue.textContent = label;
+  els.processorSpeed.setAttribute("aria-valuetext", label);
+  updateSliderTrack(els.processorSpeed);
+};
+
+const syncMemorySliderFromSelect = () => {
+  const selectedMb = selectedMemoryMb();
+  const index = Math.max(0, MEMORY_STEPS.indexOf(selectedMb));
+  els.memorySlider.value = String(index);
+  els.memorySliderValue.textContent = `${MEMORY_STEPS[index]} MB`;
+  els.memorySlider.setAttribute("aria-valuetext", `${MEMORY_STEPS[index]} MB`);
+  updateSliderTrack(els.memorySlider);
+};
+
+const syncMemorySelectFromSlider = () => {
+  const index = Math.max(0, Math.min(MEMORY_STEPS.length - 1, Number(els.memorySlider.value) || 0));
+  const memoryMb = MEMORY_STEPS[index];
+  els.memorySize.value = String(memoryMb * BYTES_PER_MEGABYTE);
+  els.memorySliderValue.textContent = `${memoryMb} MB`;
+  els.memorySlider.setAttribute("aria-valuetext", `${memoryMb} MB`);
+  updateSliderTrack(els.memorySlider);
 };
 
 const POPUP_MOTION_MS = 720;
@@ -2857,7 +2934,8 @@ const bootNativeQemu = async (displayMode = "viewport") => {
       runtime: runtimeName,
       displayMode,
       isoPath: els.nativeIsoPath.value.trim(),
-      memoryMb: Number(els.memorySize.value) / 1024 / 1024,
+      cpuGhz: selectedProcessorSpeedGhz(),
+      memoryMb: selectedMemoryMb(),
       bootOrder: els.bootOrder.value,
       createDisk: els.nativeCreateDisk.checked,
       diskSizeGb: Number(els.nativeDiskSize.value),
@@ -2945,7 +3023,8 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
     body: JSON.stringify({
       displayMode,
       isoPath: els.nativeIsoPath.value.trim(),
-      memoryMb: Number(els.memorySize.value) / 1024 / 1024,
+      cpuGhz: selectedProcessorSpeedGhz(),
+      memoryMb: selectedMemoryMb(),
       bootOrder: els.bootOrder.value,
       createDisk: els.nativeCreateDisk.checked,
       diskSizeGb: Number(els.nativeDiskSize.value),
@@ -3080,6 +3159,9 @@ const bootEmulator = async () => {
 
   prepareBootUi();
   log("Creating virtual machine.");
+  if (!isRemoteMode()) {
+    log(`Hardware request: ${selectedProcessorSpeedGhz()} GHz CPU target, ${selectedMemoryMb()} MB RAM.`);
+  }
 
   try {
     if (isRemoteMode()) {
@@ -3198,8 +3280,15 @@ els.stateInput.addEventListener("change", (event) => {
   if (file) loadState(file);
 });
 
+els.processorSpeed.addEventListener("input", syncProcessorSpeedSlider);
+els.memorySlider.addEventListener("input", () => {
+  syncMemorySelectFromSlider();
+  els.ramMetric.textContent = `${selectedMemoryMb()} MB RAM`;
+  updateButtons();
+});
 els.memorySize.addEventListener("change", () => {
-  els.ramMetric.textContent = `${Number(els.memorySize.value) / 1024 / 1024} MB RAM`;
+  syncMemorySliderFromSelect();
+  els.ramMetric.textContent = `${selectedMemoryMb()} MB RAM`;
 });
 
 const updateNativeStatus = async () => {
@@ -3354,12 +3443,14 @@ const updateBackendUi = () => {
   }
   els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode || emustarMode ? "x64" : "x86";
   els.processorMode.disabled = emustarMode;
-  const selectedMemoryMb = Number(els.memorySize.value) / 1024 / 1024;
-  if (isNativeWindowsArm64Mode() && selectedMemoryMb < 4096) {
+  const currentMemoryMb = selectedMemoryMb();
+  if (isNativeWindowsArm64Mode() && currentMemoryMb < 4096) {
     els.memorySize.value = "4294967296";
-  } else if (nativeMode && selectedMemoryMb < 2048) {
+  } else if (nativeMode && currentMemoryMb < 2048) {
     els.memorySize.value = "2147483648";
   }
+  syncProcessorSpeedSlider();
+  syncMemorySliderFromSelect();
   els.nativePanel.hidden = !nativeMode;
   els.remotePanel.hidden = !remoteMode;
   if (nativeMode) {
@@ -3421,7 +3512,7 @@ const updateBackendUi = () => {
     : isBrowserQemuMode()
       ? "x86_64 support uses QEMU Wasm and local artifacts from public/qemu."
     : "Legacy x86, 32-bit Linux, DOS, hobby OS, and vintage Windows images work best.";
-  els.ramMetric.textContent = `${Number(els.memorySize.value) / 1024 / 1024} MB RAM`;
+  els.ramMetric.textContent = `${selectedMemoryMb()} MB RAM`;
   updateMediaWarning();
   updateButtons();
   void updateEmustarHostInfo();
