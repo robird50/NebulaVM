@@ -682,7 +682,7 @@ const els = {
   clearLogButton: document.querySelector("#clearLogButton"),
 };
 
-const POPUP_MOTION_MS = 640;
+const POPUP_MOTION_MS = 720;
 const popupMotionOrigins = new WeakMap();
 const popupMotionPending = new WeakMap();
 const prefersReducedPopupMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -726,9 +726,10 @@ const setPopupMotionGeometry = (dialog, trigger) => {
   };
 
   setStep("start", 0);
-  setStep("one", 0.27);
-  setStep("two", 0.56);
-  setStep("three", 0.82);
+  setStep("triangle", 0.2);
+  setStep("one", 0.48);
+  setStep("two", 0.72);
+  setStep("three", 0.9);
 };
 
 const focusPopupElement = (element) => {

@@ -167,16 +167,16 @@ button:disabled {
 }
 
 .popup-motion-overlay.is-popup-opening > .popup-motion-panel {
-  animation: popup-panel-unfold 640ms cubic-bezier(0.16, 0.82, 0.2, 1) both;
+  animation: popup-panel-unfold 720ms linear both;
 }
 
 .popup-motion-overlay.is-popup-closing {
   pointer-events: none;
-  animation: popup-overlay-arrive 560ms linear reverse both;
+  animation: popup-overlay-arrive 640ms linear reverse both;
 }
 
 .popup-motion-overlay.is-popup-closing > .popup-motion-panel {
-  animation: popup-panel-unfold 560ms linear reverse both;
+  animation: popup-panel-unfold 640ms linear reverse both;
 }
 
 @keyframes popup-overlay-arrive {
@@ -192,8 +192,8 @@ button:disabled {
 @keyframes popup-panel-unfold {
   0% {
     opacity: 0;
-    border-radius: 999px;
-    clip-path: polygon(42% 47%, 58% 38%, 64% 61%, 36% 68%);
+    border-radius: 2px;
+    clip-path: polygon(50% 44%, 50% 44%, 57% 60%, 43% 60%);
     filter: blur(7px) brightness(1.25);
     transform:
       translate3d(var(--popup-dx-start, 0), var(--popup-dy-start, 0), 0)
@@ -202,10 +202,22 @@ button:disabled {
       skew(var(--popup-skew-x-start, 0deg), var(--popup-skew-y-start, 0deg));
   }
 
-  24% {
+  28% {
+    opacity: 0.52;
+    border-radius: 2px;
+    clip-path: polygon(50% 0, 50% 0, 100% 100%, 0 100%);
+    filter: blur(3px) brightness(1.18);
+    transform:
+      translate3d(var(--popup-dx-triangle, 0), var(--popup-dy-triangle, 0), 0)
+      scale(var(--popup-sx-triangle, 0.18), var(--popup-sy-triangle, 0.18))
+      rotate(var(--popup-rotate-triangle, 0deg))
+      skew(var(--popup-skew-x-triangle, 0deg), var(--popup-skew-y-triangle, 0deg));
+  }
+
+  52% {
     opacity: 0.72;
-    border-radius: 42px 8px 54px 12px;
-    clip-path: polygon(8% 38%, 86% 5%, 100% 62%, 16% 98%);
+    border-radius: 18px 4px 24px 6px;
+    clip-path: polygon(12% 34%, 84% 4%, 100% 64%, 18% 98%);
     filter: blur(2px) brightness(1.12);
     transform:
       translate3d(var(--popup-dx-one, 0), var(--popup-dy-one, 0), 0)
@@ -214,10 +226,10 @@ button:disabled {
       skew(var(--popup-skew-x-one, 0deg), var(--popup-skew-y-one, 0deg));
   }
 
-  52% {
+  74% {
     opacity: 0.92;
-    border-radius: 28px 8px 36px 10px;
-    clip-path: polygon(2% 16%, 94% 0, 100% 76%, 8% 100%);
+    border-radius: 14px 5px 18px 6px;
+    clip-path: polygon(3% 14%, 94% 0, 100% 78%, 7% 100%);
     filter: blur(0.7px) brightness(1.06);
     transform:
       translate3d(var(--popup-dx-two, 0), var(--popup-dy-two, 0), 0)
@@ -226,10 +238,10 @@ button:disabled {
       skew(var(--popup-skew-x-two, 0deg), var(--popup-skew-y-two, 0deg));
   }
 
-  78% {
+  90% {
     opacity: 1;
-    border-radius: 16px 8px 20px 8px;
-    clip-path: polygon(0 4%, 97% 0, 100% 90%, 4% 100%);
+    border-radius: 10px 7px 12px 7px;
+    clip-path: polygon(0 3%, 98% 0, 100% 92%, 3% 100%);
     filter: none;
     transform:
       translate3d(var(--popup-dx-three, 0), var(--popup-dy-three, 0), 0)
