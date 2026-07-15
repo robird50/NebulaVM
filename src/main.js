@@ -3530,6 +3530,15 @@ els.processorMode.addEventListener("change", () => {
   updateBackendUi();
 });
 els.nativeIsoPath.addEventListener("input", () => updateButtons());
+els.nativeIsoPath.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || els.nativeIsoPath.value.trim().toLowerCase() !== "meow") return;
+
+  event.preventDefault();
+  document.documentElement.classList.add("meow-theme");
+  els.nativeIsoPath.value = "";
+  updateButtons();
+  log("Meow mode activated.");
+});
 els.windowsUsername.addEventListener("input", () => updateButtons());
 els.windowsPassword.addEventListener("input", () => updateButtons());
 els.windowsPasswordOff.addEventListener("change", () => updateButtons());
