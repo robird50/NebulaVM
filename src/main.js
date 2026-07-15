@@ -124,7 +124,7 @@ app.innerHTML = `
   <div class="mobile-bypass-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
     <section class="mobile-bypass-panel">
       <button class="mobile-bypass-close" id="mobileBypassCloseButton" type="button" aria-label="Close developer bypass">x</button>
-      <img class="mobile-bypass-lock" src="/assets/mobile-dev-lock.jpg" alt="" />
+      <img class="mobile-bypass-lock" src="/assets/mobile-dev-lock.png" alt="" />
       <p id="mobileBypassText">Enter the confidential 6-digit developer code to unlock the mobile testing build.</p>
       <div class="mobile-pin-dots" id="mobilePinDots" aria-label="6-digit code progress">
         <span></span><span></span><span></span><span></span><span></span><span></span>
