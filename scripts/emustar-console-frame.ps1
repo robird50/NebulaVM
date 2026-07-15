@@ -39,10 +39,22 @@ namespace NebulaVM {
   }
 }
 
+function Get-TargetConsoleProcesses {
+  $processIds = Get-CimInstance Win32_Process -Filter "Name = 'vmconnect.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine -like "*$VmName*" } |
+    Select-Object -ExpandProperty ProcessId
+
+  if (-not $processIds) {
+    return @()
+  }
+
+  return @(Get-Process -Id $processIds -ErrorAction SilentlyContinue)
+}
+
 function Get-ConsoleProcess {
   param([bool]$OpenIfMissing = $true)
 
-  $process = Get-Process vmconnect -ErrorAction SilentlyContinue |
+  $process = Get-TargetConsoleProcesses |
     Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle -like "*$VmName*" } |
     Select-Object -First 1
 
@@ -50,11 +62,13 @@ function Get-ConsoleProcess {
     return $process
   }
 
+  Get-TargetConsoleProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+
   Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $VmName | Out-Null
   $deadline = (Get-Date).AddSeconds(8)
   do {
     Start-Sleep -Milliseconds 350
-    $process = Get-Process vmconnect -ErrorAction SilentlyContinue |
+    $process = Get-TargetConsoleProcesses |
       Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle -like "*$VmName*" } |
       Select-Object -First 1
   } while (-not $process -and (Get-Date) -lt $deadline)
@@ -97,35 +111,16 @@ function Hide-ConsoleFromHost {
   param([object]$Process)
 
   try {
-    # Keep VMConnect off the host desktop while the requester uses the browser viewport.
-    [NebulaVM.NativeConsoleFrame]::ShowWindow($Process.MainWindowHandle, 0) | Out-Null
+    # Keep one reusable capture console minimized while the requester uses the browser viewport.
+    [NebulaVM.NativeConsoleFrame]::ShowWindow($Process.MainWindowHandle, 2) | Out-Null
   } catch {
     # Best effort only.
   }
 }
 
-function Test-BitmapHasContent {
-  param([System.Drawing.Bitmap]$Bitmap)
-
-  $colors = New-Object 'System.Collections.Generic.HashSet[string]'
-  $stepX = [math]::Max(1, [int]($Bitmap.Width / 24))
-  $stepY = [math]::Max(1, [int]($Bitmap.Height / 24))
-  for ($y = 0; $y -lt $Bitmap.Height; $y += $stepY) {
-    for ($x = 0; $x -lt $Bitmap.Width; $x += $stepX) {
-      $pixel = $Bitmap.GetPixel($x, $y)
-      [void]$colors.Add("$($pixel.R),$($pixel.G),$($pixel.B)")
-      if ($colors.Count -gt 8) {
-        return $true
-      }
-    }
-  }
-  return $false
-}
-
 function Capture-ConsoleBitmap {
   param(
     [object]$Process,
-    [object]$Bounds,
     [System.Drawing.Bitmap]$Bitmap
   )
 
@@ -138,10 +133,8 @@ function Capture-ConsoleBitmap {
       $graphics.ReleaseHdc($hdc)
     }
 
-    if (-not $printed -or -not (Test-BitmapHasContent -Bitmap $Bitmap)) {
-      [NebulaVM.NativeConsoleFrame]::ShowWindow($Process.MainWindowHandle, 4) | Out-Null
-      Start-Sleep -Milliseconds 160
-      $graphics.CopyFromScreen($Bounds.left, $Bounds.top, 0, 0, $Bitmap.Size)
+    if (-not $printed) {
+      $graphics.Clear([System.Drawing.Color]::FromArgb(18, 24, 31))
     }
   } finally {
     $graphics.Dispose()
@@ -158,7 +151,7 @@ try {
   $bounds = Get-ConsoleBounds -Process $process
   $bitmap = New-Object System.Drawing.Bitmap $bounds.width, $bounds.height
   try {
-    Capture-ConsoleBitmap -Process $process -Bounds $bounds -Bitmap $bitmap
+    Capture-ConsoleBitmap -Process $process -Bitmap $bitmap
     $stream = New-Object System.IO.MemoryStream
     try {
       $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |

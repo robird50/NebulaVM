@@ -55,8 +55,20 @@ namespace NebulaVM {
   }
 }
 
+function Get-TargetConsoleProcesses {
+  $processIds = Get-CimInstance Win32_Process -Filter "Name = 'vmconnect.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine -like "*$VmName*" } |
+    Select-Object -ExpandProperty ProcessId
+
+  if (-not $processIds) {
+    return @()
+  }
+
+  return @(Get-Process -Id $processIds -ErrorAction SilentlyContinue)
+}
+
 function Get-ConsoleProcess {
-  $process = Get-Process vmconnect -ErrorAction SilentlyContinue |
+  $process = Get-TargetConsoleProcesses |
     Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle -like "*$VmName*" } |
     Select-Object -First 1
 
@@ -64,11 +76,13 @@ function Get-ConsoleProcess {
     return $process
   }
 
+  Get-TargetConsoleProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+
   Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $VmName | Out-Null
   $deadline = (Get-Date).AddSeconds(8)
   do {
     Start-Sleep -Milliseconds 350
-    $process = Get-Process vmconnect -ErrorAction SilentlyContinue |
+    $process = Get-TargetConsoleProcesses |
       Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle -like "*$VmName*" } |
       Select-Object -First 1
   } while (-not $process -and (Get-Date) -lt $deadline)
@@ -96,8 +110,8 @@ function Hide-ConsoleFromHost {
   param([object]$Process)
 
   try {
-    # Keep the host console out of the user's way after remote input.
-    [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, 0) | Out-Null
+    # Keep one reusable input console minimized after browser interaction.
+    [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, 2) | Out-Null
   } catch {
     # Hiding is best-effort; the browser control path still works without it.
   }
@@ -140,6 +154,7 @@ function Send-ConsoleClick {
     [object]$Config
   )
 
+  Focus-Console -Process $Process
   $bounds = Get-ConsoleBounds -Process $Process
   $sourceWidth = [math]::Max(1.0, [double]$Config.width)
   $sourceHeight = [math]::Max(1.0, [double]$Config.height)
@@ -148,7 +163,6 @@ function Send-ConsoleClick {
   $screenX = [int][math]::Round($bounds.left + (($relativeX / $sourceWidth) * $bounds.width))
   $screenY = [int][math]::Round($bounds.top + (($relativeY / $sourceHeight) * $bounds.height))
 
-  Focus-Console -Process $Process
   [NebulaVM.NativeConsoleInput]::SetCursorPos($screenX, $screenY) | Out-Null
   Start-Sleep -Milliseconds 35
   [NebulaVM.NativeConsoleInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)

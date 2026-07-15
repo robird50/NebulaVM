@@ -3023,6 +3023,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
     body: JSON.stringify({
       displayMode,
       isoPath: els.nativeIsoPath.value.trim(),
+      guestType: selectedIsoLooksLikeWindows() ? "windows" : "other",
       cpuGhz: selectedProcessorSpeedGhz(),
       memoryMb: selectedMemoryMb(),
       bootOrder: els.bootOrder.value,

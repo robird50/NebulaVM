@@ -135,9 +135,10 @@ function Set-LowHostMemoryProfile {
 
   $hostMemoryBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
   if ($hostMemoryBytes -le 10GB) {
+    $startupMb = [math]::Min($MemoryMb, 1024)
     Set-VMMemory -VM $Vm `
       -DynamicMemoryEnabled $true `
-      -StartupBytes 768MB `
+      -StartupBytes ($startupMb * 1MB) `
       -MinimumBytes 512MB `
       -MaximumBytes ($MemoryMb * 1MB) `
       -Buffer 10
@@ -243,6 +244,11 @@ function Start-Emustar {
   $diskSizeGb = [math]::Min(256, [math]::Max(64, [int]$config.diskSizeGb))
   $processorCount = [math]::Min(2, [math]::Max(1, [Environment]::ProcessorCount - 1))
   $diskFirst = [string]$config.bootOrder -eq "123"
+  $guestType = [string]$config.guestType
+  $isWindowsGuest = $guestType -eq "windows"
+  if ([string]::IsNullOrWhiteSpace($guestType)) {
+    $isWindowsGuest = [IO.Path]::GetFileName($isoPath) -match '(?i)(^|[^a-z0-9])(windows|win[0-9]+)'
+  }
   $vmDirectory = [string]$config.vmDirectory
   if ([string]::IsNullOrWhiteSpace($vmDirectory)) {
     throw "The EMUSTAR VM directory was not supplied."
@@ -316,12 +322,16 @@ function Start-Emustar {
   try {
     $security = Get-VMSecurity -VM $vm
     $firmware = Get-VMFirmware -VMName $vm.Name
-    if (-not $security.TpmEnabled) {
-      Set-VMFirmware -VM $vm -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows
-      Set-VMKeyProtector -VM $vm -NewLocalKeyProtector
-      Enable-VMTPM -VM $vm
-    } elseif ($firmware.SecureBoot.ToString() -ne "On") {
-      $warnings.Add("Secure Boot remains off so this installation ISO can boot on the host firmware.")
+    if ($isWindowsGuest) {
+      if (-not $security.TpmEnabled) {
+        Set-VMFirmware -VM $vm -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows
+        Set-VMKeyProtector -VM $vm -NewLocalKeyProtector
+        Enable-VMTPM -VM $vm
+      } elseif ($firmware.SecureBoot.ToString() -ne "On") {
+        Set-VMFirmware -VM $vm -EnableSecureBoot On
+      }
+    } elseif ($firmware.SecureBoot.ToString() -eq "On") {
+      Set-VMFirmware -VM $vm -EnableSecureBoot Off
     }
   } catch {
     $warnings.Add("Secure Boot or virtual TPM could not be configured automatically: $($_.Exception.Message)")
@@ -332,7 +342,20 @@ function Start-Emustar {
     Set-VMFirmware -VM $vm -FirstBootDevice $firstBootDevice
   }
 
-  Start-VM -VM $vm | Out-Null
+  $vm = Get-VM -Name $vmName -ErrorAction Stop
+  if ($vm.State -eq "Off") {
+    try {
+      Start-VM -VM $vm -ErrorAction Stop | Out-Null
+    } catch {
+      $vm = Get-VM -Name $vmName -ErrorAction Stop
+      if ($vm.State -ne "Running") {
+        throw
+      }
+      $warnings.Add("EMUSTAR detected that Hyper-V had already started the VM and attached to it.")
+    }
+  } elseif ($vm.State -ne "Running") {
+    throw "EMUSTAR cannot start while Hyper-V is in state '$($vm.State)'."
+  }
 
   if ([string]$config.displayMode -eq "external") {
     Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
@@ -381,10 +404,10 @@ function Open-EmustarConsole {
 
 function Close-EmustarConsole {
   $closed = 0
-  Get-Process vmconnect -ErrorAction SilentlyContinue |
-    Where-Object { $_.MainWindowTitle -like "*$vmName*" } |
+  Get-CimInstance Win32_Process -Filter "Name = 'vmconnect.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -and $_.CommandLine -like "*$vmName*" } |
     ForEach-Object {
-      Stop-Process -Id $_.Id -Force
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
       $closed += 1
     }
 
