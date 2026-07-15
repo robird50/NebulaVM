@@ -118,7 +118,7 @@ app.innerHTML = `
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
       <button class="mobile-bypass-link" id="mobileBypassButton" type="button">Bypass (devs only)</button>
     </section>
-    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a></small>
+    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a></small>
   </main>
 
   <div class="mobile-bypass-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
@@ -506,7 +506,7 @@ app.innerHTML = `
         </div>
       </section>
     </section>
-    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a></footer>
+    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a></footer>
   </main>
 
   <div class="display-choice-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>
@@ -523,6 +523,30 @@ app.innerHTML = `
       </div>
       <div class="emustar-info-actions">
         <button class="primary" id="emustarInfoOkButton" type="button">OK</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="display-choice-overlay" id="nebulaConflictDialog" role="dialog" aria-modal="true" aria-labelledby="nebulaConflictTitle" hidden>
+    <section class="display-choice-panel nebula-conflict-panel" id="nebulaConflictPanel" tabindex="-1">
+      <img class="nebula-conflict-art" src="/assets/nebula-conflict.png" alt="NebulaVM is not connected with the unrelated Nebula astrology app" />
+      <h2 id="nebulaConflictTitle">The Nebula Conflict</h2>
+      <div class="nebula-conflict-copy">
+        <p>
+          NebulaVM and RoBird Studios are <strong>not affiliated, associated, endorsed by, or connected with</strong> the "Nebula" astrology and psychic services app in any way.
+        </p>
+        <p>
+          This notice is provided to prevent confusion due to the similarity in names. Any reports or controversies involving the unrelated Nebula app have <strong>no connection whatsoever</strong> to NebulaVM or RoBird Studios.
+        </p>
+        <p>
+          At NebulaVM, we believe software should be transparent and accessible. <strong>NebulaVM is completely free to use</strong>—there are no subscriptions, hidden fees, paywalls, or surprise charges.
+        </p>
+        <p>
+          RoBird Studios has zero tolerance for deceptive or misleading business practices. We would <strong>never</strong> create, promote, endorse, or participate in scams, unauthorized charges, subscription traps, or any other dishonest practices. Our goal is to earn users' trust by being open, honest, and transparent about how NebulaVM works.
+        </p>
+      </div>
+      <div class="nebula-conflict-actions">
+        <button class="primary" id="nebulaConflictOkButton" type="button">OK</button>
       </div>
     </section>
   </div>
@@ -585,6 +609,10 @@ const els = {
   emustarInfoLink: document.querySelector("#emustarInfoLink"),
   emustarInfoDialog: document.querySelector("#emustarInfoDialog"),
   emustarInfoOkButton: document.querySelector("#emustarInfoOkButton"),
+  nebulaConflictLinks: [...document.querySelectorAll("[data-nebula-conflict-link]")],
+  nebulaConflictDialog: document.querySelector("#nebulaConflictDialog"),
+  nebulaConflictPanel: document.querySelector("#nebulaConflictPanel"),
+  nebulaConflictOkButton: document.querySelector("#nebulaConflictOkButton"),
   processorMode: document.querySelector("#processorMode"),
   nativePanel: document.querySelector("#nativePanel"),
   nativeRuntimeIcon: document.querySelector("#nativeRuntimeIcon"),
@@ -3310,6 +3338,26 @@ els.emustarInfoOkButton.addEventListener("click", () => {
   els.emustarInfoDialog.hidden = true;
   els.emustarInfoLink.focus();
 });
+let nebulaConflictTrigger = null;
+const closeNebulaConflictDialog = () => {
+  els.nebulaConflictDialog.hidden = true;
+  nebulaConflictTrigger?.focus();
+};
+els.nebulaConflictLinks.forEach((link) => {
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    nebulaConflictTrigger = link;
+    els.nebulaConflictDialog.hidden = false;
+    els.nebulaConflictPanel.scrollTop = 0;
+    els.nebulaConflictPanel.focus({ preventScroll: true });
+  });
+});
+els.nebulaConflictOkButton.addEventListener("click", closeNebulaConflictDialog);
+els.nebulaConflictDialog.addEventListener("click", (event) => {
+  if (event.target === els.nebulaConflictDialog) {
+    closeNebulaConflictDialog();
+  }
+});
 els.emustarCopyShareButton.addEventListener("click", async () => {
   const shareUrl = els.emustarShareUrl.value;
   if (!shareUrl) return;
@@ -3356,6 +3404,9 @@ document.addEventListener("keydown", (event) => {
     setStoredImagesMenuOpen(false);
     if (!els.keepIsoDialog.hidden) {
       els.keepIsoNoButton.click();
+    }
+    if (!els.nebulaConflictDialog.hidden) {
+      closeNebulaConflictDialog();
     }
   }
 });

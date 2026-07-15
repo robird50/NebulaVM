@@ -1501,6 +1501,53 @@ input[type="text"] {
   width: 100%;
 }
 
+.nebula-conflict-panel {
+  gap: 14px;
+  width: min(700px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  border-color: rgba(96, 220, 255, 0.36);
+}
+
+.nebula-conflict-panel:focus {
+  outline: none;
+}
+
+.nebula-conflict-art {
+  width: min(100%, 560px);
+  max-height: 210px;
+  justify-self: center;
+  object-fit: contain;
+  filter: drop-shadow(0 14px 34px rgba(64, 174, 255, 0.16));
+}
+
+.nebula-conflict-panel h2 {
+  color: #ffdd3d;
+  font-size: 1.65rem;
+  text-align: center;
+}
+
+.nebula-conflict-copy {
+  display: grid;
+  gap: 12px;
+  color: #cbd6e3;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.nebula-conflict-copy p {
+  margin: 0;
+}
+
+.nebula-conflict-copy strong {
+  color: #f5f8fb;
+}
+
+.nebula-conflict-actions {
+  display: grid;
+}
+
 .keep-iso-panel {
   width: min(560px, 100%);
   border-color: rgba(96, 220, 255, 0.36);
