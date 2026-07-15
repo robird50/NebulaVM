@@ -121,8 +121,8 @@ app.innerHTML = `
     <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a></small>
   </main>
 
-  <div class="mobile-bypass-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
-    <section class="mobile-bypass-panel">
+  <div class="mobile-bypass-overlay popup-motion-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
+    <section class="mobile-bypass-panel popup-motion-panel">
       <button class="mobile-bypass-close" id="mobileBypassCloseButton" type="button" aria-label="Close developer bypass">x</button>
       <img class="mobile-bypass-lock" src="/assets/mobile-dev-lock.png" alt="" />
       <p id="mobileBypassText">Enter the confidential 6-digit developer code to unlock the mobile testing build.</p>
@@ -509,8 +509,8 @@ app.innerHTML = `
     <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a></footer>
   </main>
 
-  <div class="display-choice-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>
-    <section class="display-choice-panel emustar-info-panel">
+  <div class="display-choice-overlay popup-motion-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>
+    <section class="display-choice-panel emustar-info-panel popup-motion-panel">
       <img class="emustar-info-icon" src="/assets/emustar-icon.png" alt="" />
       <h2 id="emustarInfoTitle">EMUSTAR</h2>
       <div class="emustar-info-copy">
@@ -527,8 +527,8 @@ app.innerHTML = `
     </section>
   </div>
 
-  <div class="display-choice-overlay" id="nebulaConflictDialog" role="dialog" aria-modal="true" aria-labelledby="nebulaConflictTitle" hidden>
-    <section class="display-choice-panel nebula-conflict-panel" id="nebulaConflictPanel" tabindex="-1">
+  <div class="display-choice-overlay popup-motion-overlay" id="nebulaConflictDialog" role="dialog" aria-modal="true" aria-labelledby="nebulaConflictTitle" hidden>
+    <section class="display-choice-panel nebula-conflict-panel popup-motion-panel" id="nebulaConflictPanel" tabindex="-1">
       <img class="nebula-conflict-art" src="/assets/nebula-conflict.png" alt="NebulaVM is not connected with the unrelated Nebula astrology app" />
       <h2 id="nebulaConflictTitle">The Nebula Conflict</h2>
       <div class="nebula-conflict-copy">
@@ -551,8 +551,8 @@ app.innerHTML = `
     </section>
   </div>
 
-  <div class="display-choice-overlay" id="keepIsoDialog" role="dialog" aria-modal="true" aria-labelledby="keepIsoTitle" hidden>
-    <section class="display-choice-panel keep-iso-panel">
+  <div class="display-choice-overlay popup-motion-overlay" id="keepIsoDialog" role="dialog" aria-modal="true" aria-labelledby="keepIsoTitle" hidden>
+    <section class="display-choice-panel keep-iso-panel popup-motion-panel">
       <img class="keep-iso-art" src="/assets/stored-iso-host.png" alt="" />
       <h2 id="keepIsoTitle">Keep this ISO on the host computer?</h2>
       <div class="keep-iso-copy">
@@ -682,6 +682,112 @@ const els = {
   clearLogButton: document.querySelector("#clearLogButton"),
 };
 
+const POPUP_MOTION_MS = 640;
+const popupMotionOrigins = new WeakMap();
+const popupMotionPending = new WeakMap();
+const prefersReducedPopupMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const popupMotionPanel = (dialog) => dialog?.querySelector(".popup-motion-panel");
+const clampPopupValue = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
+
+const clearPendingPopupMotion = (dialog) => {
+  popupMotionPending.get(dialog)?.();
+  popupMotionPending.delete(dialog);
+};
+
+const setPopupMotionGeometry = (dialog, trigger) => {
+  const panel = popupMotionPanel(dialog);
+  if (!panel) return;
+
+  const panelRect = panel.getBoundingClientRect();
+  const viewportWidth = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+  const viewportHeight = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+  const usableTrigger = trigger instanceof Element && trigger.isConnected ? trigger : null;
+  const triggerRect = usableTrigger?.getBoundingClientRect();
+  const targetX = triggerRect ? triggerRect.left + triggerRect.width / 2 : viewportWidth / 2;
+  const targetY = triggerRect ? triggerRect.top + triggerRect.height / 2 : viewportHeight / 2;
+  const panelX = panelRect.left + panelRect.width / 2;
+  const panelY = panelRect.top + panelRect.height / 2;
+  const deltaX = targetX - panelX;
+  const deltaY = targetY - panelY;
+  const startScaleX = clampPopupValue((triggerRect?.width || 28) / Math.max(panelRect.width, 1), 0.035, 0.34);
+  const startScaleY = clampPopupValue((triggerRect?.height || 28) / Math.max(panelRect.height, 1), 0.035, 0.34);
+  const rotation = clampPopupValue((deltaX / viewportWidth) * 14, -8, 8);
+  const skewX = clampPopupValue((-deltaY / viewportHeight) * 16, -9, 9);
+  const skewY = clampPopupValue((deltaX / viewportWidth) * 16, -9, 9);
+
+  const setStep = (name, progress) => {
+    panel.style.setProperty(`--popup-dx-${name}`, `${deltaX * (1 - progress)}px`);
+    panel.style.setProperty(`--popup-dy-${name}`, `${deltaY * (1 - progress)}px`);
+    panel.style.setProperty(`--popup-sx-${name}`, String(startScaleX + (1 - startScaleX) * progress));
+    panel.style.setProperty(`--popup-sy-${name}`, String(startScaleY + (1 - startScaleY) * progress));
+    panel.style.setProperty(`--popup-rotate-${name}`, `${rotation * (1 - progress)}deg`);
+    panel.style.setProperty(`--popup-skew-x-${name}`, `${skewX * (1 - progress)}deg`);
+    panel.style.setProperty(`--popup-skew-y-${name}`, `${skewY * (1 - progress)}deg`);
+  };
+
+  setStep("start", 0);
+  setStep("one", 0.27);
+  setStep("two", 0.56);
+  setStep("three", 0.82);
+};
+
+const focusPopupElement = (element) => {
+  if (element && typeof element.focus === "function") {
+    element.focus({ preventScroll: true });
+  }
+};
+
+const openPopupFrom = (dialog, trigger, focusTarget) => {
+  if (!dialog) return;
+  clearPendingPopupMotion(dialog);
+  popupMotionOrigins.set(dialog, trigger);
+  dialog.dataset.popupState = "";
+  dialog.classList.remove("is-popup-opening", "is-popup-closing");
+  dialog.classList.add("is-popup-preparing");
+  dialog.hidden = false;
+
+  const panel = popupMotionPanel(dialog);
+  setPopupMotionGeometry(dialog, trigger);
+  if (panel) void panel.offsetWidth;
+  dialog.classList.remove("is-popup-preparing");
+  if (!prefersReducedPopupMotion()) {
+    dialog.classList.add("is-popup-opening");
+  }
+  focusPopupElement(focusTarget || panel);
+};
+
+const closePopupTo = (dialog, trigger = popupMotionOrigins.get(dialog)) => {
+  if (!dialog || dialog.hidden || dialog.dataset.popupState === "closing") return;
+  clearPendingPopupMotion(dialog);
+  const panel = popupMotionPanel(dialog);
+
+  const finish = () => {
+    clearPendingPopupMotion(dialog);
+    dialog.hidden = true;
+    dialog.dataset.popupState = "";
+    dialog.classList.remove("is-popup-opening", "is-popup-closing", "is-popup-preparing");
+    focusPopupElement(trigger);
+  };
+
+  if (!panel || prefersReducedPopupMotion()) {
+    finish();
+    return;
+  }
+
+  setPopupMotionGeometry(dialog, trigger);
+  dialog.dataset.popupState = "closing";
+  dialog.classList.remove("is-popup-opening");
+  void panel.offsetWidth;
+  dialog.classList.add("is-popup-closing");
+
+  let timeoutId;
+  const cleanup = () => {
+    window.clearTimeout(timeoutId);
+  };
+  timeoutId = window.setTimeout(finish, POPUP_MOTION_MS);
+  popupMotionPending.set(dialog, cleanup);
+};
+
 const savedNativeDisplayMode = window.localStorage.getItem("nebulavm.emustar.display");
 if (isNetlifyLauncher) {
   els.nativeDisplayMode.value = "viewport";
@@ -728,15 +834,15 @@ const refreshMobileBypassLockMessage = () => {
 };
 
 const closeMobileBypassDialog = () => {
-  els.mobileBypassDialog.hidden = true;
+  closePopupTo(els.mobileBypassDialog, els.mobileBypassButton);
   resetMobilePin();
   setMobileBypassFeedback("");
 };
 
 const openMobileBypassDialog = () => {
-  els.mobileBypassDialog.hidden = false;
   resetMobilePin();
   refreshMobileBypassLockMessage();
+  openPopupFrom(els.mobileBypassDialog, els.mobileBypassButton, els.mobileBypassCloseButton);
 };
 
 const applyMobileDevMode = () => {
@@ -1288,13 +1394,13 @@ const removeStoredIso = async (id) => {
 const askKeepStagedIso = () =>
   new Promise((resolvePrompt) => {
     els.keepIsoDontAsk.checked = false;
-    els.keepIsoDialog.hidden = false;
+    openPopupFrom(els.keepIsoDialog, els.dropZone, els.keepIsoYesButton);
 
     const finish = (keep) => {
       if (els.keepIsoDontAsk.checked) {
         window.localStorage.setItem(STORED_ISO_PROMPT_KEY, keep ? "always" : "never");
       }
-      els.keepIsoDialog.hidden = true;
+      closePopupTo(els.keepIsoDialog, els.dropZone);
       els.keepIsoYesButton.onclick = null;
       els.keepIsoNoButton.onclick = null;
       resolvePrompt(keep);
@@ -1302,7 +1408,6 @@ const askKeepStagedIso = () =>
 
     els.keepIsoYesButton.onclick = () => finish(true);
     els.keepIsoNoButton.onclick = () => finish(false);
-    els.keepIsoYesButton.focus();
   });
 
 const saveStagedIsoAsStored = async (file, stagedData) => {
@@ -3331,25 +3436,26 @@ const updateBackendUi = () => {
 
 els.emulatorMode.addEventListener("change", updateBackendUi);
 els.emustarInfoLink.addEventListener("click", () => {
-  els.emustarInfoDialog.hidden = false;
-  els.emustarInfoOkButton.focus();
+  openPopupFrom(els.emustarInfoDialog, els.emustarInfoLink, els.emustarInfoOkButton);
 });
 els.emustarInfoOkButton.addEventListener("click", () => {
-  els.emustarInfoDialog.hidden = true;
-  els.emustarInfoLink.focus();
+  closePopupTo(els.emustarInfoDialog, els.emustarInfoLink);
+});
+els.emustarInfoDialog.addEventListener("click", (event) => {
+  if (event.target === els.emustarInfoDialog) {
+    closePopupTo(els.emustarInfoDialog, els.emustarInfoLink);
+  }
 });
 let nebulaConflictTrigger = null;
 const closeNebulaConflictDialog = () => {
-  els.nebulaConflictDialog.hidden = true;
-  nebulaConflictTrigger?.focus();
+  closePopupTo(els.nebulaConflictDialog, nebulaConflictTrigger);
 };
 els.nebulaConflictLinks.forEach((link) => {
   link.addEventListener("click", (event) => {
     event.preventDefault();
     nebulaConflictTrigger = link;
-    els.nebulaConflictDialog.hidden = false;
     els.nebulaConflictPanel.scrollTop = 0;
-    els.nebulaConflictPanel.focus({ preventScroll: true });
+    openPopupFrom(els.nebulaConflictDialog, link, els.nebulaConflictPanel);
   });
 });
 els.nebulaConflictOkButton.addEventListener("click", closeNebulaConflictDialog);
@@ -3404,6 +3510,9 @@ document.addEventListener("keydown", (event) => {
     setStoredImagesMenuOpen(false);
     if (!els.keepIsoDialog.hidden) {
       els.keepIsoNoButton.click();
+    }
+    if (!els.emustarInfoDialog.hidden) {
+      closePopupTo(els.emustarInfoDialog, els.emustarInfoLink);
     }
     if (!els.nebulaConflictDialog.hidden) {
       closeNebulaConflictDialog();

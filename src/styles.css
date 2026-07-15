@@ -152,6 +152,115 @@ button:disabled {
   color: #fff176;
 }
 
+.popup-motion-panel {
+  transform-origin: center;
+  backface-visibility: hidden;
+  will-change: transform, clip-path, opacity, filter;
+}
+
+.popup-motion-overlay.is-popup-preparing > .popup-motion-panel {
+  opacity: 0;
+}
+
+.popup-motion-overlay.is-popup-opening {
+  animation: popup-overlay-arrive 300ms ease-out both;
+}
+
+.popup-motion-overlay.is-popup-opening > .popup-motion-panel {
+  animation: popup-panel-unfold 640ms cubic-bezier(0.16, 0.82, 0.2, 1) both;
+}
+
+.popup-motion-overlay.is-popup-closing {
+  pointer-events: none;
+  animation: popup-overlay-arrive 560ms linear reverse both;
+}
+
+.popup-motion-overlay.is-popup-closing > .popup-motion-panel {
+  animation: popup-panel-unfold 560ms linear reverse both;
+}
+
+@keyframes popup-overlay-arrive {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes popup-panel-unfold {
+  0% {
+    opacity: 0;
+    border-radius: 999px;
+    clip-path: polygon(42% 47%, 58% 38%, 64% 61%, 36% 68%);
+    filter: blur(7px) brightness(1.25);
+    transform:
+      translate3d(var(--popup-dx-start, 0), var(--popup-dy-start, 0), 0)
+      scale(var(--popup-sx-start, 0.05), var(--popup-sy-start, 0.05))
+      rotate(var(--popup-rotate-start, 0deg))
+      skew(var(--popup-skew-x-start, 0deg), var(--popup-skew-y-start, 0deg));
+  }
+
+  24% {
+    opacity: 0.72;
+    border-radius: 42px 8px 54px 12px;
+    clip-path: polygon(8% 38%, 86% 5%, 100% 62%, 16% 98%);
+    filter: blur(2px) brightness(1.12);
+    transform:
+      translate3d(var(--popup-dx-one, 0), var(--popup-dy-one, 0), 0)
+      scale(var(--popup-sx-one, 0.3), var(--popup-sy-one, 0.3))
+      rotate(var(--popup-rotate-one, 0deg))
+      skew(var(--popup-skew-x-one, 0deg), var(--popup-skew-y-one, 0deg));
+  }
+
+  52% {
+    opacity: 0.92;
+    border-radius: 28px 8px 36px 10px;
+    clip-path: polygon(2% 16%, 94% 0, 100% 76%, 8% 100%);
+    filter: blur(0.7px) brightness(1.06);
+    transform:
+      translate3d(var(--popup-dx-two, 0), var(--popup-dy-two, 0), 0)
+      scale(var(--popup-sx-two, 0.6), var(--popup-sy-two, 0.6))
+      rotate(var(--popup-rotate-two, 0deg))
+      skew(var(--popup-skew-x-two, 0deg), var(--popup-skew-y-two, 0deg));
+  }
+
+  78% {
+    opacity: 1;
+    border-radius: 16px 8px 20px 8px;
+    clip-path: polygon(0 4%, 97% 0, 100% 90%, 4% 100%);
+    filter: none;
+    transform:
+      translate3d(var(--popup-dx-three, 0), var(--popup-dy-three, 0), 0)
+      scale(var(--popup-sx-three, 0.84), var(--popup-sy-three, 0.84))
+      rotate(var(--popup-rotate-three, 0deg))
+      skew(var(--popup-skew-x-three, 0deg), var(--popup-skew-y-three, 0deg));
+  }
+
+  100% {
+    opacity: 1;
+    border-radius: 8px;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    filter: none;
+    transform: translate3d(0, 0, 0) scale(1) rotate(0) skew(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup-motion-overlay,
+  .popup-motion-overlay > .popup-motion-panel {
+    animation: none !important;
+  }
+
+  .popup-motion-overlay > .popup-motion-panel {
+    opacity: 1;
+    clip-path: none;
+    filter: none;
+    transform: none;
+  }
+}
+
 .mobile-bypass-overlay {
   position: fixed;
   inset: 0;
