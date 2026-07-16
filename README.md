@@ -30,9 +30,10 @@ Open `http://127.0.0.1:5174/`.
 The mobile testing bypass is validated by the backend, not by browser JavaScript.
 Set `NEBULAVM_MOBILE_DEV_CODE_HASH` to the SHA-256 hash of the private 6-digit
 developer code in Netlify and in local `.env` files when testing locally.
-Set `NEBULAVM_MOBILE_DEV_ALLOWED_IPS` to the permitted public IP address. Multiple
-addresses can be separated with commas; local development may also include `127.0.0.1`
-and `::1`. The IP check runs only after the submitted code is correct.
+Set `NEBULAVM_MOBILE_DEV_ALLOWED_IPS` to the permitted public IPv6 address. IPv4
+entries are ignored and IPv4 requests are always denied. Multiple IPv6 addresses can
+be separated with commas; local development may also include `::1`. The IP check runs
+only after the submitted code is correct.
 
 ```powershell
 node -e "console.log(require('crypto').createHash('sha256').update('your-6-digit-code').digest('hex'))"

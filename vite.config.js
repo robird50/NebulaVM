@@ -283,12 +283,14 @@ const normalizeMobileDevIp = (value) => {
   return ip.toLowerCase();
 };
 
+const isMobileDevIpv6 = (value) => normalizeMobileDevIp(value).includes(":");
+
 const configuredMobileDevAllowedIps = () =>
   new Set(
     String(localEnvValue("NEBULAVM_MOBILE_DEV_ALLOWED_IPS") || "")
       .split(/[\s,]+/)
       .map(normalizeMobileDevIp)
-      .filter(Boolean),
+      .filter((ip) => ip && isMobileDevIpv6(ip)),
   );
 
 const mobileDevClientIp = (req) =>
@@ -339,7 +341,7 @@ const verifyMobileDevUnlock = (req, body = {}) => {
         body: { ok: false, error: "Mobile developer IP access is not configured." },
       };
     }
-    if (!clientIp || !allowedIps.has(clientIp)) {
+    if (!isMobileDevIpv6(clientIp) || !allowedIps.has(clientIp)) {
       return {
         status: 403,
         body: { ok: false, error: "Your IP has not been granted permission to view this page" },

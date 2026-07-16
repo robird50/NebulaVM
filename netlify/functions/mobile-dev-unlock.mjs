@@ -45,12 +45,14 @@ const normalizeIp = (value) => {
   return ip.toLowerCase();
 };
 
+const isIpv6 = (value) => normalizeIp(value).includes(":");
+
 const configuredAllowedIps = () =>
   new Set(
     String(process.env.NEBULAVM_MOBILE_DEV_ALLOWED_IPS || "")
       .split(/[\s,]+/)
       .map(normalizeIp)
-      .filter(Boolean),
+      .filter((ip) => ip && isIpv6(ip)),
   );
 
 const requestClientIp = (request, context = {}) =>
@@ -112,7 +114,7 @@ export default async (request, context = {}) => {
     if (!allowedIps.size) {
       return json(503, { ok: false, error: "Mobile developer IP access is not configured." });
     }
-    if (!clientIp || !allowedIps.has(clientIp)) {
+    if (!isIpv6(clientIp) || !allowedIps.has(clientIp)) {
       return json(403, { ok: false, error: "Your IP has not been granted permission to view this page" });
     }
 
