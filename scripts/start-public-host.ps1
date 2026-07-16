@@ -14,43 +14,47 @@ $netlifyRegistryUrl = if ($env:NEBULAVM_REGISTRY_URL) {
   "https://nebulavm.netlify.app/.netlify/functions/host-registry"
 }
 $lastRegistryPublish = Get-Date 0
-$hyperVModule = Get-ChildItem `
-  "$env:SystemRoot\System32\WindowsPowerShell\v1.0\Modules\Hyper-V" `
-  -Recurse `
-  -Filter "Hyper-V.psd1" `
-  -ErrorAction SilentlyContinue |
-  Sort-Object FullName -Descending |
-  Select-Object -First 1
 
-if ($hyperVModule) {
-  Import-Module $hyperVModule.FullName -Force
+function Get-NebulaHostToken {
+  if (-not (Test-Path -LiteralPath $hostTokenPath)) {
+    return ""
+  }
+  return (Get-Content -LiteralPath $hostTokenPath -Raw).Trim()
 }
 
-function Start-NebulaGuest {
-  if (-not (Get-Command Get-VM -ErrorAction SilentlyContinue)) {
-    return
+function Get-NebulaAuthorizationHeaders {
+  $headers = @{}
+  $token = Get-NebulaHostToken
+  if ($token) {
+    $headers.Authorization = "Bearer $token"
   }
-
-  $vm = Get-VM -Name "NebulaVM-EMUSTAR" -ErrorAction SilentlyContinue
-  if ($vm -and $vm.State -eq "Off") {
-    Start-VM -VM $vm | Out-Null
-  }
+  return $headers
 }
 
 function Test-NebulaHost {
   try {
-    $headers = @{}
-    if (Test-Path -LiteralPath $hostTokenPath) {
-      $token = (Get-Content -LiteralPath $hostTokenPath -Raw).Trim()
-      if ($token) {
-        $headers.Authorization = "Bearer $token"
-      }
-    }
     $response = Invoke-WebRequest `
       -UseBasicParsing `
       -Uri "http://127.0.0.1:5174/api/emustar-host/info" `
-      -Headers $headers `
+      -Headers (Get-NebulaAuthorizationHeaders) `
       -TimeoutSec 5
+    return $response.StatusCode -eq 200
+  } catch {
+    return $false
+  }
+}
+
+function Test-NebulaPublicHost([string]$PublicUrl) {
+  if (-not $PublicUrl) {
+    return $false
+  }
+
+  try {
+    $response = Invoke-WebRequest `
+      -UseBasicParsing `
+      -Uri "$($PublicUrl.TrimEnd('/'))/api/emustar-host/info" `
+      -Headers (Get-NebulaAuthorizationHeaders) `
+      -TimeoutSec 12
     return $response.StatusCode -eq 200
   } catch {
     return $false
@@ -78,8 +82,57 @@ function Start-NebulaHost {
   throw "NebulaVM Host did not start on port 5174."
 }
 
+function Get-NebulaTunnelProcesses {
+  try {
+    return @(
+      Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction Stop |
+        Where-Object {
+          $_.CommandLine -like "*tunnel*" -and
+          $_.CommandLine -like "*127.0.0.1:5174*"
+        }
+    )
+  } catch {
+    return @()
+  }
+}
+
+function Stop-NebulaTunnels {
+  foreach ($tunnelProcess in (Get-NebulaTunnelProcesses)) {
+    Stop-Process -Id $tunnelProcess.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Get-PublicUrlFromLog {
+  if (-not (Test-Path -LiteralPath $cloudflaredLogPath)) {
+    return ""
+  }
+
+  $match = Select-String `
+    -Path $cloudflaredLogPath `
+    -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" `
+    -AllMatches |
+    Select-Object -Last 1
+  if (-not $match) {
+    return ""
+  }
+  return ($match.Matches.Value | Select-Object -Last 1)
+}
+
+function Test-TunnelRejected {
+  if (-not (Test-Path -LiteralPath $cloudflaredLogPath)) {
+    return $false
+  }
+  return [bool](Select-String `
+    -Path $cloudflaredLogPath `
+    -Pattern "Unauthorized: Tunnel not found|Register tunnel error from server side" `
+    -Quiet)
+}
+
 function Start-NebulaTunnel {
+  Stop-NebulaTunnels
+  Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $cloudflaredLogPath -Force -ErrorAction SilentlyContinue
+
   $process = Start-Process `
     -FilePath $cloudflaredPath `
     -ArgumentList @(
@@ -93,103 +146,107 @@ function Start-NebulaTunnel {
     -WindowStyle Hidden `
     -PassThru
 
-  $deadline = (Get-Date).AddSeconds(60)
-  while ((Get-Date) -lt $deadline -and -not $process.HasExited) {
-    Start-Sleep -Milliseconds 500
-    if (-not (Test-Path -LiteralPath $cloudflaredLogPath)) {
-      continue
+  $deadline = (Get-Date).AddSeconds(90)
+  while ((Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds 750
+    $process.Refresh()
+    if ($process.HasExited -or (Test-TunnelRejected)) {
+      break
     }
-    $match = Select-String `
-      -Path $cloudflaredLogPath `
-      -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" `
-      -AllMatches
-    if ($match) {
-      $publicUrl = $match.Matches.Value | Select-Object -First 1
+
+    $publicUrl = Get-PublicUrlFromLog
+    if ($publicUrl -and (Test-NebulaPublicHost $publicUrl)) {
       Set-Content -LiteralPath $publicUrlPath -Value $publicUrl -Encoding ASCII
-      return $process
+      return @{
+        Process = $process
+        PublicUrl = $publicUrl
+      }
     }
   }
 
   if (-not $process.HasExited) {
-    Stop-Process -Id $process.Id -Force
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
   }
-  throw "The NebulaVM public tunnel did not become ready."
+  Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
+  throw "The NebulaVM public tunnel did not pass its health check."
 }
 
-function Sync-PublicUrlFromLog {
-  if (-not (Test-Path -LiteralPath $cloudflaredLogPath)) {
+function Publish-NetlifyRegistry([string]$PublicUrl, [switch]$Force) {
+  $hostToken = Get-NebulaHostToken
+  if (-not $PublicUrl -or -not $hostToken) {
     return
   }
-
-  $match = Select-String `
-    -Path $cloudflaredLogPath `
-    -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" `
-    -AllMatches |
-    Select-Object -Last 1
-  if ($match) {
-    $publicUrl = $match.Matches.Value | Select-Object -Last 1
-    Set-Content -LiteralPath $publicUrlPath -Value $publicUrl -Encoding ASCII
+  if (-not $Force -and ((Get-Date) - $script:lastRegistryPublish).TotalSeconds -lt 30) {
+    return
   }
+  if (-not (Test-NebulaPublicHost $PublicUrl)) {
+    throw "The public tunnel failed its health check before registry publishing."
+  }
+
+  $body = @{
+    publicUrl = $PublicUrl
+    accessToken = $hostToken
+  } | ConvertTo-Json -Compress
+  Invoke-WebRequest `
+    -UseBasicParsing `
+    -Method Post `
+    -Uri $netlifyRegistryUrl `
+    -ContentType "application/json" `
+    -Body $body `
+    -TimeoutSec 15 | Out-Null
+  $script:lastRegistryPublish = Get-Date
 }
 
-function Publish-NetlifyRegistry {
-  if (-not (Test-Path -LiteralPath $publicUrlPath) -or -not (Test-Path -LiteralPath $hostTokenPath)) {
-    return
-  }
-
-  if (((Get-Date) - $script:lastRegistryPublish).TotalSeconds -lt 30) {
-    return
-  }
-
-  $publicUrl = (Get-Content -LiteralPath $publicUrlPath -Raw).Trim()
-  $hostToken = (Get-Content -LiteralPath $hostTokenPath -Raw).Trim()
-  if (-not $publicUrl -or -not $hostToken) {
-    return
-  }
-
-  try {
-    $body = @{
-      publicUrl = $publicUrl
-      accessToken = $hostToken
-    } | ConvertTo-Json -Compress
-    Invoke-WebRequest `
-      -UseBasicParsing `
-      -Method Post `
-      -Uri $netlifyRegistryUrl `
-      -ContentType "application/json" `
-      -Body $body `
-      -TimeoutSec 15 | Out-Null
-    $script:lastRegistryPublish = Get-Date
-  } catch {
-    Add-Content `
-      -LiteralPath $cloudflaredLogPath `
-      -Value "[$(Get-Date -Format o)] Netlify registry publish failed: $($_.Exception.Message)"
-  }
+$createdNew = $false
+$supervisorMutex = [System.Threading.Mutex]::new(
+  $true,
+  "Global\NebulaVM-Host-Supervisor",
+  [ref]$createdNew
+)
+if (-not $createdNew) {
+  $supervisorMutex.Dispose()
+  exit 0
 }
 
 Set-Location $projectRoot
-while ($true) {
-  try {
-    Start-NebulaGuest
-    Start-NebulaHost
-    $tunnel = Start-NebulaTunnel
-    while (-not $tunnel.HasExited) {
-      Start-Sleep -Seconds 5
-      Sync-PublicUrlFromLog
-      Publish-NetlifyRegistry
+try {
+  while ($true) {
+    try {
       Start-NebulaHost
-      Start-NebulaGuest
+      $tunnel = Start-NebulaTunnel
+      Publish-NetlifyRegistry -PublicUrl $tunnel.PublicUrl -Force
+
+      $consecutiveHealthFailures = 0
+      while ($true) {
+        Start-Sleep -Seconds 5
+        $tunnel.Process.Refresh()
+        if ($tunnel.Process.HasExited -or (Test-TunnelRejected)) {
+          throw "The public tunnel stopped or was rejected."
+        }
+
+        Start-NebulaHost
+        if (Test-NebulaPublicHost $tunnel.PublicUrl) {
+          $consecutiveHealthFailures = 0
+          Publish-NetlifyRegistry -PublicUrl $tunnel.PublicUrl
+        } else {
+          $consecutiveHealthFailures += 1
+          if ($consecutiveHealthFailures -ge 3) {
+            throw "The public tunnel failed three consecutive health checks."
+          }
+        }
+      }
+    } catch {
+      Add-Content `
+        -LiteralPath $cloudflaredLogPath `
+        -Value "[$(Get-Date -Format o)] Host supervisor: $($_.Exception.Message)"
+      Stop-NebulaTunnels
+      Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 5
     }
-  } catch {
-    Add-Content `
-      -LiteralPath $cloudflaredLogPath `
-      -Value "[$(Get-Date -Format o)] Host supervisor: $($_.Exception.Message)"
   }
-  if (-not (Get-Process cloudflared -ErrorAction SilentlyContinue)) {
-    Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
-  } else {
-    Sync-PublicUrlFromLog
-    Publish-NetlifyRegistry
-  }
-  Start-Sleep -Seconds 5
+} finally {
+  Stop-NebulaTunnels
+  Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
+  $supervisorMutex.ReleaseMutex()
+  $supervisorMutex.Dispose()
 }

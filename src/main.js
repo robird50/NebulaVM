@@ -1635,8 +1635,7 @@ const uploadBrowserIsoChunkToBase = (base, file, uploadId, start, end, onProgres
     xhr.send(file.slice(start, end));
   });
 
-const uploadBrowserIsoToBase = async (base, file, onProgress) => {
-  const uploadId = createHostUploadId(file);
+const uploadBrowserIsoToBase = async (base, file, uploadId, onProgress) => {
   let uploadedBytes = 0;
 
   while (uploadedBytes < file.size) {
@@ -1679,15 +1678,31 @@ const uploadBrowserIsoToBase = async (base, file, onProgress) => {
 };
 
 const uploadBrowserIsoToHost = async (file, onProgress) => {
+  const uploadId = createHostUploadId(file);
   let lastError = new Error(nativeQemuBridgeMessage);
-  for (const base of emustarHostBaseCandidates()) {
-    try {
-      state.hostStagedIsoBase = base;
-      const data = await uploadBrowserIsoToBase(base, file, onProgress);
-      state.nativeQemuApiBase = base;
-      return { data, base };
-    } catch (error) {
-      lastError = error instanceof TypeError ? new Error(nativeQemuBridgeMessage) : error;
+
+  const recoveryAttempts = isNetlifyLauncher ? 6 : 1;
+  for (let recoveryAttempt = 0; recoveryAttempt < recoveryAttempts; recoveryAttempt += 1) {
+    if (isNetlifyLauncher && recoveryAttempt > 0) {
+      await wait(5000);
+      await fetchNetlifyHostRegistry();
+    }
+
+    let bases = emustarHostBaseCandidates();
+    if (isNetlifyLauncher && bases.length === 0) {
+      await fetchNetlifyHostRegistry();
+      bases = emustarHostBaseCandidates();
+    }
+
+    for (const base of bases) {
+      try {
+        state.hostStagedIsoBase = base;
+        const data = await uploadBrowserIsoToBase(base, file, uploadId, onProgress);
+        state.nativeQemuApiBase = base;
+        return { data, base };
+      } catch (error) {
+        lastError = error instanceof TypeError ? new Error(nativeQemuBridgeMessage) : error;
+      }
     }
   }
   throw new Error(lastError.message || nativeQemuBridgeMessage);
@@ -1716,7 +1731,7 @@ const updateHostStagingProgress = ({ bytesUploaded = 0, totalBytes = 0, startedA
   els.hostStagingSpeed.textContent = complete ? "Complete" : formatTransferSpeed(speed);
 };
 
-const cleanupStagedHostIso = async ({ keepalive = false, silent = false } = {}) => {
+const cleanupStagedHostIso = async ({ keepalive = false, silent = false, preserveUploadLock = false } = {}) => {
   const sessionId = state.hostStagedIsoSessionId || state.nativeSessionId;
   const shouldCleanup = Boolean(state.hostStagedIsoPath || state.hostStagedIsoSessionId);
   if (!shouldCleanup || !sessionId) return;
@@ -1726,11 +1741,13 @@ const cleanupStagedHostIso = async ({ keepalive = false, silent = false } = {}) 
       els.nativeIsoPath.value = "";
     }
     state.hostStagedIsoBase = "";
-    state.hostStagedIsoFileKey = "";
     state.hostStagedIsoPath = "";
     state.hostStagedIsoSessionId = "";
-    state.hostStagedIsoUploadPromise = null;
-    state.hostStagedIsoUploading = false;
+    if (!preserveUploadLock) {
+      state.hostStagedIsoFileKey = "";
+      state.hostStagedIsoUploadPromise = null;
+      state.hostStagedIsoUploading = false;
+    }
     resetHostStagingProgress();
   };
 
@@ -1766,63 +1783,71 @@ const cleanupStagedHostIso = async ({ keepalive = false, silent = false } = {}) 
   }
 };
 
-const stageSelectedIsoForEmustar = async (file = state.isoFile) => {
+const stageSelectedIsoForEmustar = (file = state.isoFile) => {
   if (!isHyperVMode() || !file) return els.nativeIsoPath.value.trim();
 
   const fileKey = browserIsoFileKey(file);
-  const storedIso = await findStoredIsoForFile(file);
-  if (storedIso?.isoPath) {
-    await selectStoredIso(storedIso);
-    return storedIso.isoPath;
-  }
-
   if (state.hostStagedIsoPath && state.hostStagedIsoFileKey === fileKey) {
     els.nativeIsoPath.value = state.hostStagedIsoPath;
     updateButtons();
-    return state.hostStagedIsoPath;
+    return Promise.resolve(state.hostStagedIsoPath);
   }
-  if (state.hostStagedIsoUploadPromise && state.hostStagedIsoFileKey === fileKey) {
-    await state.hostStagedIsoUploadPromise;
-    return state.hostStagedIsoPath;
+  if (state.hostStagedIsoUploadPromise) {
+    if (state.hostStagedIsoFileKey === fileKey) {
+      return state.hostStagedIsoUploadPromise;
+    }
+    return state.hostStagedIsoUploadPromise.then(
+      () => stageSelectedIsoForEmustar(file),
+      () => stageSelectedIsoForEmustar(file),
+    );
   }
 
-  await cleanupStagedHostIso({ silent: true });
   state.hostStagedIsoUploading = true;
   state.hostStagedIsoFileKey = fileKey;
-  state.hostStagedIsoSessionId = state.nativeSessionId;
   updateButtons();
   log(`Staging ${file.name} to the EMUSTAR host for this tab.`);
   const stagingStartedAt = performance.now();
   updateHostStagingProgress({ bytesUploaded: 0, totalBytes: file.size, startedAt: stagingStartedAt });
 
-  state.hostStagedIsoUploadPromise = uploadBrowserIsoToHost(file, ({ bytesUploaded = 0, totalBytes = file.size }) => {
-    const percent = totalBytes > 0 ? Math.max(0, Math.min(100, (bytesUploaded / totalBytes) * 100)) : 0;
-    els.isoMeta.textContent = `Staging to host ${Math.floor(percent)}%`;
-    updateHostStagingProgress({ bytesUploaded, totalBytes, startedAt: stagingStartedAt });
-  })
-    .then(async ({ data, base }) => {
-      state.hostStagedIsoBase = base;
-      state.hostStagedIsoPath = data.isoPath || "";
-      state.hostStagedIsoSessionId = data.sessionId || state.nativeSessionId;
-      if (!state.hostStagedIsoPath) {
-        throw new Error("The EMUSTAR host did not return an ISO path.");
-      }
-      els.nativeIsoPath.value = state.hostStagedIsoPath;
-      els.isoMeta.textContent = `${file.name} staged on host - ${formatBytes(file.size)}`;
-      updateHostStagingProgress({
-        bytesUploaded: file.size,
-        totalBytes: file.size,
-        startedAt: stagingStartedAt,
-        complete: true,
-      });
-      log(`Staged browser ISO on the EMUSTAR host: ${state.hostStagedIsoPath}`);
-      const storedItem = await maybeKeepStagedIsoOnHost(file, data).catch((error) => {
-        log(`Stored ISO prompt failed: ${error.message}`);
-        return null;
-      });
-      if (storedItem?.isoPath) return storedItem.isoPath;
-      return state.hostStagedIsoPath;
-    })
+  const uploadTask = (async () => {
+    const storedIso = await findStoredIsoForFile(file);
+    if (storedIso?.isoPath) {
+      await selectStoredIso(storedIso);
+      return storedIso.isoPath;
+    }
+
+    await cleanupStagedHostIso({ silent: true, preserveUploadLock: true });
+    state.hostStagedIsoFileKey = fileKey;
+    state.hostStagedIsoSessionId = state.nativeSessionId;
+
+    const { data, base } = await uploadBrowserIsoToHost(file, ({ bytesUploaded = 0, totalBytes = file.size }) => {
+      const percent = totalBytes > 0 ? Math.max(0, Math.min(100, (bytesUploaded / totalBytes) * 100)) : 0;
+      els.isoMeta.textContent = `Staging to host ${Math.floor(percent)}%`;
+      updateHostStagingProgress({ bytesUploaded, totalBytes, startedAt: stagingStartedAt });
+    });
+
+    state.hostStagedIsoBase = base;
+    state.hostStagedIsoPath = data.isoPath || "";
+    state.hostStagedIsoSessionId = data.sessionId || state.nativeSessionId;
+    if (!state.hostStagedIsoPath) {
+      throw new Error("The EMUSTAR host did not return an ISO path.");
+    }
+    els.nativeIsoPath.value = state.hostStagedIsoPath;
+    els.isoMeta.textContent = `${file.name} staged on host - ${formatBytes(file.size)}`;
+    updateHostStagingProgress({
+      bytesUploaded: file.size,
+      totalBytes: file.size,
+      startedAt: stagingStartedAt,
+      complete: true,
+    });
+    log(`Staged browser ISO on the EMUSTAR host: ${state.hostStagedIsoPath}`);
+    const storedItem = await maybeKeepStagedIsoOnHost(file, data).catch((error) => {
+      log(`Stored ISO prompt failed: ${error.message}`);
+      return null;
+    });
+    if (storedItem?.isoPath) return storedItem.isoPath;
+    return state.hostStagedIsoPath;
+  })()
     .catch((error) => {
       els.isoMeta.textContent = `${file.name} - host staging failed`;
       els.hostStagingSpeed.textContent = "Failed";
@@ -1830,12 +1855,15 @@ const stageSelectedIsoForEmustar = async (file = state.isoFile) => {
       throw error;
     })
     .finally(() => {
-      state.hostStagedIsoUploading = false;
-      state.hostStagedIsoUploadPromise = null;
-      updateButtons();
+      if (state.hostStagedIsoUploadPromise === uploadTask) {
+        state.hostStagedIsoUploading = false;
+        state.hostStagedIsoUploadPromise = null;
+        updateButtons();
+      }
     });
 
-  return state.hostStagedIsoUploadPromise;
+  state.hostStagedIsoUploadPromise = uploadTask;
+  return uploadTask;
 };
 
 const fetchNetlifyHostRegistry = async () => {

@@ -610,9 +610,6 @@ const saveBrowserIsoUploadChunk = async (req) => {
     throw new Error("Invalid browser upload chunk range.");
   }
 
-  if (chunkStart === 0) {
-    cleanupBrowserIsoUploadSession(safeSessionId);
-  }
   mkdirSync(sessionDirectory, { recursive: true });
 
   const headerName = decodeHeaderFilename(req.headers["x-nebulavm-filename"]);
