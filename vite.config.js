@@ -273,13 +273,35 @@ const safeEqualHex = (left, right) => {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 };
 
+const normalizeMobileDevIp = (value) => {
+  let ip = String(value || "").split(",")[0].trim().replace(/^"|"$/g, "");
+  const bracketed = ip.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracketed) ip = bracketed[1];
+  if (/^::ffff:/i.test(ip)) ip = ip.slice(7);
+  const zoneIndex = ip.indexOf("%");
+  if (zoneIndex >= 0) ip = ip.slice(0, zoneIndex);
+  return ip.toLowerCase();
+};
+
+const configuredMobileDevAllowedIps = () =>
+  new Set(
+    String(localEnvValue("NEBULAVM_MOBILE_DEV_ALLOWED_IPS") || "")
+      .split(/[\s,]+/)
+      .map(normalizeMobileDevIp)
+      .filter(Boolean),
+  );
+
+const mobileDevClientIp = (req) =>
+  normalizeMobileDevIp(
+    req.headers["cf-connecting-ip"] ||
+      req.headers["x-forwarded-for"] ||
+      req.socket?.remoteAddress ||
+      "",
+  );
+
 const mobileDevClientKey = (req) => {
-  const forwardedFor = String(req.headers["x-forwarded-for"] || "")
-    .split(",")[0]
-    .trim();
-  const remoteAddress = String(req.socket?.remoteAddress || "");
   const userAgent = String(req.headers["user-agent"] || "").slice(0, 180);
-  return sha256Hex(`${forwardedFor || remoteAddress}|${userAgent}`);
+  return sha256Hex(`${mobileDevClientIp(req)}|${userAgent}`);
 };
 
 const verifyMobileDevUnlock = (req, body = {}) => {
@@ -309,6 +331,21 @@ const verifyMobileDevUnlock = (req, body = {}) => {
   }
 
   if (safeEqualHex(sha256Hex(code), expectedHash)) {
+    const allowedIps = configuredMobileDevAllowedIps();
+    const clientIp = mobileDevClientIp(req);
+    if (!allowedIps.size) {
+      return {
+        status: 503,
+        body: { ok: false, error: "Mobile developer IP access is not configured." },
+      };
+    }
+    if (!clientIp || !allowedIps.has(clientIp)) {
+      return {
+        status: 403,
+        body: { ok: false, error: "Your IP has not been granted permission to view this page" },
+      };
+    }
+
     mobileDevAttempts.set(key, { attempts: 0, lockUntil: 0 });
     return { status: 200, body: { ok: true } };
   }

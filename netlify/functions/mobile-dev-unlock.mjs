@@ -35,17 +35,41 @@ const safeEqualHex = (left, right) => {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 };
 
-const clientKey = (request) => {
-  const forwardedFor = String(request.headers.get("x-forwarded-for") || "")
-    .split(",")[0]
-    .trim();
+const normalizeIp = (value) => {
+  let ip = String(value || "").split(",")[0].trim().replace(/^"|"$/g, "");
+  const bracketed = ip.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracketed) ip = bracketed[1];
+  if (/^::ffff:/i.test(ip)) ip = ip.slice(7);
+  const zoneIndex = ip.indexOf("%");
+  if (zoneIndex >= 0) ip = ip.slice(0, zoneIndex);
+  return ip.toLowerCase();
+};
+
+const configuredAllowedIps = () =>
+  new Set(
+    String(process.env.NEBULAVM_MOBILE_DEV_ALLOWED_IPS || "")
+      .split(/[\s,]+/)
+      .map(normalizeIp)
+      .filter(Boolean),
+  );
+
+const requestClientIp = (request, context = {}) =>
+  normalizeIp(
+    context.ip ||
+      request.headers.get("x-nf-client-connection-ip") ||
+      request.headers.get("x-forwarded-for") ||
+      "",
+  );
+
+const clientKey = (request, context) => {
+  const clientIp = requestClientIp(request, context);
   const userAgent = String(request.headers.get("user-agent") || "").slice(0, 180);
-  return sha256(`${forwardedFor}|${userAgent}`);
+  return sha256(`${clientIp}|${userAgent}`);
 };
 
 const remainingMs = (lockUntil) => Math.max(0, Number(lockUntil || 0) - Date.now());
 
-export default async (request) => {
+export default async (request, context = {}) => {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers });
   }
@@ -66,7 +90,7 @@ export default async (request) => {
   }
 
   const store = getStore(STORE_NAME);
-  const key = clientKey(request);
+  const key = clientKey(request, context);
   const saved = (await store.get(key, { type: "json" }).catch(() => null)) || {
     attempts: 0,
     lockUntil: 0,
@@ -83,6 +107,15 @@ export default async (request) => {
   }
 
   if (safeEqualHex(sha256(code), expectedHash)) {
+    const allowedIps = configuredAllowedIps();
+    const clientIp = requestClientIp(request, context);
+    if (!allowedIps.size) {
+      return json(503, { ok: false, error: "Mobile developer IP access is not configured." });
+    }
+    if (!clientIp || !allowedIps.has(clientIp)) {
+      return json(403, { ok: false, error: "Your IP has not been granted permission to view this page" });
+    }
+
     await store.setJSON(key, {
       attempts: 0,
       lockUntil: 0,
