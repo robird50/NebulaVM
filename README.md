@@ -35,6 +35,10 @@ entries are ignored and IPv4 requests are always denied. Multiple IPv6 addresses
 be separated with commas; local development may also include `::1`. The IP check runs
 only after the submitted code is correct.
 
+Device-specific IPv6 grants may also be stored as SHA-256 fingerprints in the backend
+source. This permits an exact IPv6 address without publishing the raw address. The
+developer code is still required, and IPv4 remains denied.
+
 ```powershell
 node -e "console.log(require('crypto').createHash('sha256').update('your-6-digit-code').digest('hex'))"
 ```

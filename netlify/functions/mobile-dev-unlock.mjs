@@ -4,6 +4,9 @@ import { createHash, timingSafeEqual } from "node:crypto";
 const STORE_NAME = "nebulavm-mobile-dev-unlock";
 const MAX_ATTEMPTS = 5;
 const LOCK_MS = 5 * 60 * 1000;
+const SOURCE_APPROVED_IPV6_HASHES = new Set([
+  "7ee703782af08ddbff3952e81b0ae298ed9ab12dedf02f995dc2e657c41c9270",
+]);
 
 const headers = {
   "Content-Type": "application/json",
@@ -54,6 +57,9 @@ const configuredAllowedIps = () =>
       .map(normalizeIp)
       .filter((ip) => ip && isIpv6(ip)),
   );
+
+const isApprovedIpv6 = (ip, configuredIps) =>
+  isIpv6(ip) && (configuredIps.has(ip) || SOURCE_APPROVED_IPV6_HASHES.has(sha256(ip)));
 
 const requestClientIp = (request, context = {}) =>
   normalizeIp(
@@ -111,10 +117,10 @@ export default async (request, context = {}) => {
   if (safeEqualHex(sha256(code), expectedHash)) {
     const allowedIps = configuredAllowedIps();
     const clientIp = requestClientIp(request, context);
-    if (!allowedIps.size) {
+    if (!allowedIps.size && !SOURCE_APPROVED_IPV6_HASHES.size) {
       return json(503, { ok: false, error: "Mobile developer IP access is not configured." });
     }
-    if (!isIpv6(clientIp) || !allowedIps.has(clientIp)) {
+    if (!isApprovedIpv6(clientIp, allowedIps)) {
       return json(403, { ok: false, error: "Your IP has not been granted permission to view this page" });
     }
 
