@@ -7,7 +7,8 @@
     "dev": "vite --host 127.0.0.1",
     "host": "vite --host 0.0.0.0 --port 5174 --strictPort",
     "build": "vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test"
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.9",

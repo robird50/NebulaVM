@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import dgram from "node:dgram";
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import net from "node:net";
@@ -9,6 +9,22 @@ import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import WebSocket, { WebSocketServer } from "ws";
+import {
+  MOBILE_DEVICE_DEV_COOKIE,
+  SOURCE_APPROVED_IPV6_HASHES,
+  createDeviceRecord,
+  createDeviceToken,
+  isApprovedIpv6,
+  isDeviceTokenValid,
+  isIpv6,
+  normalizeIp,
+  parseAllowedIpv6,
+  parseCookies,
+  renewDeviceRecord,
+  safeEqualHex,
+  serializeDeviceCookie,
+  sha256Hex,
+} from "./lib/mobileDevAccess.mjs";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
@@ -223,9 +239,10 @@ const setNativeQemuCors = (req, res) => {
   res.setHeader("Vary", "Origin");
 };
 
-const json = (res, status, payload) => {
+const json = (res, status, payload, headers = {}) => {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
+  Object.entries(headers).forEach(([name, value]) => res.setHeader(name, value));
   res.end(JSON.stringify(payload));
 };
 
@@ -253,11 +270,7 @@ const readJsonBody = (req) =>
 const mobileDevAttempts = new Map();
 const mobileDevMaxAttempts = 5;
 const mobileDevLockMs = 5 * 60 * 1000;
-const sourceApprovedMobileDevIpv6Hashes = new Set([
-  "7ee703782af08ddbff3952e81b0ae298ed9ab12dedf02f995dc2e657c41c9270",
-]);
-
-const sha256Hex = (value) => createHash("sha256").update(String(value)).digest("hex");
+let mobileDevApprovedDevice = null;
 
 const configuredMobileDevCodeHash = () => {
   const directHash = String(localEnvValue("NEBULAVM_MOBILE_DEV_CODE_HASH") || "").trim().toLowerCase();
@@ -269,39 +282,8 @@ const configuredMobileDevCodeHash = () => {
   return "";
 };
 
-const safeEqualHex = (left, right) => {
-  if (!/^[a-f0-9]{64}$/i.test(left) || !/^[a-f0-9]{64}$/i.test(right)) return false;
-  const leftBuffer = Buffer.from(left, "hex");
-  const rightBuffer = Buffer.from(right, "hex");
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
-};
-
-const normalizeMobileDevIp = (value) => {
-  let ip = String(value || "").split(",")[0].trim().replace(/^"|"$/g, "");
-  const bracketed = ip.match(/^\[([^\]]+)\](?::\d+)?$/);
-  if (bracketed) ip = bracketed[1];
-  if (/^::ffff:/i.test(ip)) ip = ip.slice(7);
-  const zoneIndex = ip.indexOf("%");
-  if (zoneIndex >= 0) ip = ip.slice(0, zoneIndex);
-  return ip.toLowerCase();
-};
-
-const isMobileDevIpv6 = (value) => normalizeMobileDevIp(value).includes(":");
-
-const configuredMobileDevAllowedIps = () =>
-  new Set(
-    String(localEnvValue("NEBULAVM_MOBILE_DEV_ALLOWED_IPS") || "")
-      .split(/[\s,]+/)
-      .map(normalizeMobileDevIp)
-      .filter((ip) => ip && isMobileDevIpv6(ip)),
-  );
-
-const isApprovedMobileDevIpv6 = (ip, configuredIps) =>
-  isMobileDevIpv6(ip) &&
-  (configuredIps.has(ip) || sourceApprovedMobileDevIpv6Hashes.has(sha256Hex(ip)));
-
 const mobileDevClientIp = (req) =>
-  normalizeMobileDevIp(
+  normalizeIp(
     req.headers["cf-connecting-ip"] ||
       req.headers["x-forwarded-for"] ||
       req.socket?.remoteAddress ||
@@ -310,13 +292,40 @@ const mobileDevClientIp = (req) =>
 
 const mobileDevClientKey = (req) => {
   const userAgent = String(req.headers["user-agent"] || "").slice(0, 180);
-  return sha256Hex(`${mobileDevClientIp(req)}|${userAgent}`);
+  return `attempt-${sha256Hex(`${mobileDevClientIp(req)}|${userAgent}`)}`;
 };
 
 const verifyMobileDevUnlock = (req, body = {}) => {
   const expectedHash = configuredMobileDevCodeHash();
   if (!expectedHash) {
     return { status: 503, body: { ok: false, error: "Mobile developer unlock is not configured." } };
+  }
+
+  const denied = () => ({
+    status: 403,
+    body: { ok: false, error: "Your IP has not been granted permission to view this page" },
+  });
+  const clientIp = mobileDevClientIp(req);
+  if (!isIpv6(clientIp)) return denied();
+
+  const token = parseCookies(req.headers.cookie)[MOBILE_DEVICE_DEV_COOKIE] || "";
+  const hasValidDevice = isDeviceTokenValid(mobileDevApprovedDevice, token);
+  const deviceSuccess = (record, savedToken, deviceEnrolled) => {
+    mobileDevApprovedDevice = renewDeviceRecord(record);
+    return {
+      status: 200,
+      body: { ok: true, deviceEnrolled },
+      headers: {
+        "Set-Cookie": serializeDeviceCookie(savedToken, {
+          secure: false,
+          cookieName: MOBILE_DEVICE_DEV_COOKIE,
+        }),
+      },
+    };
+  };
+
+  if (body.validateDevice === true) {
+    return hasValidDevice ? deviceSuccess(mobileDevApprovedDevice, token, false) : denied();
   }
 
   const code = String(body.code || "").trim();
@@ -340,23 +349,33 @@ const verifyMobileDevUnlock = (req, body = {}) => {
   }
 
   if (safeEqualHex(sha256Hex(code), expectedHash)) {
-    const allowedIps = configuredMobileDevAllowedIps();
-    const clientIp = mobileDevClientIp(req);
-    if (!allowedIps.size && !sourceApprovedMobileDevIpv6Hashes.size) {
+    if (hasValidDevice) {
+      mobileDevAttempts.set(key, { attempts: 0, lockUntil: 0 });
+      return deviceSuccess(mobileDevApprovedDevice, token, false);
+    }
+
+    const allowedIps = parseAllowedIpv6(localEnvValue("NEBULAVM_MOBILE_DEV_ALLOWED_IPS"));
+    if (!allowedIps.size && !SOURCE_APPROVED_IPV6_HASHES.size) {
       return {
         status: 503,
         body: { ok: false, error: "Mobile developer IP access is not configured." },
       };
     }
-    if (!isApprovedMobileDevIpv6(clientIp, allowedIps)) {
-      return {
-        status: 403,
-        body: { ok: false, error: "Your IP has not been granted permission to view this page" },
-      };
-    }
+    if (!isApprovedIpv6(clientIp, allowedIps)) return denied();
 
+    const newToken = createDeviceToken();
+    mobileDevApprovedDevice = createDeviceRecord(newToken);
     mobileDevAttempts.set(key, { attempts: 0, lockUntil: 0 });
-    return { status: 200, body: { ok: true } };
+    return {
+      status: 200,
+      body: { ok: true, deviceEnrolled: true },
+      headers: {
+        "Set-Cookie": serializeDeviceCookie(newToken, {
+          secure: false,
+          cookieName: MOBILE_DEVICE_DEV_COOKIE,
+        }),
+      },
+    };
   }
 
   const attempts = Number(saved.attempts || 0) + 1;
@@ -1427,7 +1446,7 @@ const nativeQemuPlugin = () => ({
         try {
           const body = await readJsonBody(req);
           const result = verifyMobileDevUnlock(req, body);
-          json(res, result.status, result.body);
+          json(res, result.status, result.body, result.headers);
         } catch (error) {
           json(res, 400, { ok: false, error: error.message });
         }

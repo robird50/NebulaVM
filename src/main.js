@@ -14,7 +14,7 @@ const HOST_TOKEN_STORAGE_KEY = "nebulavm.emustar.hostToken";
 const HOST_SESSION_STORAGE_KEY = "nebulavm.emustar.sessionId";
 const STORED_ISO_PROMPT_KEY = "nebulavm.emustar.storedIsoPrompt";
 const STORED_ISO_LIMIT = 2;
-const MOBILE_DEV_UNLOCK_KEY = "nebulavm.mobile.devUnlock.v2";
+const MOBILE_DEV_UNLOCK_KEY = "nebulavm.mobile.devUnlock.v3";
 const MOBILE_DEV_ATTEMPTS_KEY = "nebulavm.mobile.devAttempts";
 const MOBILE_DEV_LOCK_KEY = "nebulavm.mobile.devLockUntil";
 const MOBILE_DEV_MAX_ATTEMPTS = 5;
@@ -46,10 +46,6 @@ const isMobileOrTabletDevice = () => {
 
 if (isMobileOrTabletDevice()) {
   document.documentElement.classList.add("is-mobile-device");
-}
-
-if (window.sessionStorage.getItem(MOBILE_DEV_UNLOCK_KEY) === "1") {
-  document.documentElement.classList.add("mobile-dev-bypass");
 }
 
 const sharedHostTokenFromUrl = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
@@ -948,6 +944,33 @@ const unlockMobileDevMode = () => {
   log("Mobile developer testing build unlocked for this tab.");
 };
 
+const mobileDevUnlockUrl = () =>
+  isNetlifyLauncher ? "/.netlify/functions/mobile-dev-unlock" : "/api/mobile-dev-unlock";
+
+const validateSavedMobileDevMode = async () => {
+  if (window.sessionStorage.getItem(MOBILE_DEV_UNLOCK_KEY) !== "1") return;
+
+  try {
+    const response = await fetch(mobileDevUnlockUrl(), {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ validateDevice: true }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.ok) {
+      applyMobileDevMode();
+      return;
+    }
+  } catch {
+    // The saved browser flag cannot unlock the page without backend validation.
+  }
+
+  window.sessionStorage.removeItem(MOBILE_DEV_UNLOCK_KEY);
+  document.documentElement.classList.remove("mobile-dev-bypass");
+};
+
 const shakeMobilePin = () => {
   els.mobilePinDots.classList.remove("is-shaking");
   void els.mobilePinDots.offsetWidth;
@@ -989,9 +1012,10 @@ const verifyMobilePin = async () => {
 
   setMobileBypassFeedback("Checking...");
   try {
-    const response = await fetch(isNetlifyLauncher ? "/.netlify/functions/mobile-dev-unlock" : "/api/mobile-dev-unlock", {
+    const response = await fetch(mobileDevUnlockUrl(), {
       method: "POST",
       cache: "no-store",
+      credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: mobilePinState.digits }),
     });
@@ -3710,9 +3734,7 @@ window.addEventListener("beforeunload", () => {
 });
 
 initMobileDevBypass();
-if (window.sessionStorage.getItem(MOBILE_DEV_UNLOCK_KEY) === "1") {
-  applyMobileDevMode();
-}
+void validateSavedMobileDevMode();
 
 log("NebulaVM ready.");
 renderStoredIsoSlots();
