@@ -988,7 +988,7 @@ const installedAndroidImages = () => {
   const images = [];
   if (existsSync(systemImagesRoot)) {
     for (const apiDirectory of readdirSync(systemImagesRoot, { withFileTypes: true })) {
-      const api = Number(apiDirectory.name.match(/^android-(\d+)$/)?.[1]);
+      const api = Number(apiDirectory.name.match(/^android-(\d+)(?:\.[a-z0-9.-]+)?$/i)?.[1]);
       if (!apiDirectory.isDirectory() || !Number.isInteger(api)) continue;
       const apiPath = join(systemImagesRoot, apiDirectory.name);
       for (const tagDirectory of readdirSync(apiPath, { withFileTypes: true })) {
@@ -1012,6 +1012,7 @@ const installedAndroidImages = () => {
             imagePath,
             relativeImagePath: `system-images\\${apiDirectory.name}\\${tagDirectory.name}\\${abiDirectory.name}\\`,
             playStore: tagDirectory.name.includes("playstore"),
+            targetId: apiDirectory.name,
           });
         }
       }
@@ -1120,7 +1121,7 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
   const height = landscape ? 1080 : 1920;
   writeFileSync(
     join(avdHome, `${avdName}.ini`),
-    `avd.ini.encoding=UTF-8\npath=${avdPath}\ntarget=android-${image.api}\n`,
+    `avd.ini.encoding=UTF-8\npath=${avdPath}\ntarget=${image.targetId || `android-${image.api}`}\n`,
   );
   writeFileSync(
     join(avdPath, "config.ini"),
@@ -1164,7 +1165,7 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
       "skin.path=_no_skin",
       `tag.display=${image.playStore ? "Google Play" : image.tag}`,
       `tag.id=${image.tag}`,
-      `target=android-${image.api}`,
+      `target=${image.targetId || `android-${image.api}`}`,
       "vm.heapSize=512",
       "",
     ].join("\n"),
