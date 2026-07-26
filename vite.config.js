@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import dgram from "node:dgram";
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import net from "node:net";
-import { cpus, networkInterfaces } from "node:os";
+import { cpus, homedir, networkInterfaces } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
@@ -812,6 +812,12 @@ let nativeVm = null;
 let nativeVmOutput = "";
 let lastNativeExit = null;
 let activeNativeRuntimeName = null;
+let androidEmulatorProcess = null;
+let androidConfiguredSerial = null;
+let androidActiveSerial = null;
+let androidAvdCache = { expiresAt: 0, items: [] };
+let androidEmulatorOutput = "";
+let lastAndroidEmulatorExit = null;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
 const hyperVGuestVncPath = "/api/emustar-hyperv/vnc";
@@ -819,6 +825,337 @@ const hyperVScriptPath = resolve(workspaceDir, "scripts", "emustar-hyperv.ps1");
 const hyperVConsoleFrameScriptPath = resolve(workspaceDir, "scripts", "emustar-console-frame.ps1");
 const hyperVConsoleInputScriptPath = resolve(workspaceDir, "scripts", "emustar-console-input.ps1");
 const hyperVConsoleFramePath = resolve(workspaceDir, "vm-disks", "emustar-hyperv", "console-frame.jpg");
+
+const workspaceUserHome = () => {
+  if (process.platform === "win32") {
+    const match = normalize(workspaceDir).match(/^([A-Za-z]:\\Users\\[^\\]+)/i);
+    if (match) return match[1];
+  }
+  return process.env.USERPROFILE || homedir();
+};
+
+const androidAvdHome = () => join(workspaceUserHome(), ".android", "avd");
+
+const androidSdkRoot = () => {
+  const candidates = [
+    process.env.ANDROID_SDK_ROOT,
+    process.env.ANDROID_HOME,
+    join(process.env.LOCALAPPDATA || "", "Android", "Sdk"),
+    join(workspaceUserHome(), "AppData", "Local", "Android", "Sdk"),
+  ].filter(Boolean);
+  return normalize(candidates.find((candidate) => existsSync(candidate)) || candidates.at(-1));
+};
+
+const androidToolPath = (tool) => {
+  const sdkRoot = androidSdkRoot();
+  const filename = process.platform === "win32" ? `${tool}.exe` : tool;
+  const toolPath = tool === "emulator" ? join(sdkRoot, "emulator", filename) : join(sdkRoot, "platform-tools", filename);
+  return existsSync(toolPath) ? toolPath : null;
+};
+
+const runAndroidTool = (tool, args, options = {}) => {
+  const toolPath = androidToolPath(tool);
+  if (!toolPath) {
+    throw new Error(`${tool === "adb" ? "Android platform tools" : "Android Emulator"} were not found.`);
+  }
+  return execFileSync(toolPath, args, {
+    encoding: options.binary ? null : "utf8",
+    env: { ...process.env, ANDROID_AVD_HOME: androidAvdHome() },
+    maxBuffer: options.maxBuffer || 24 * 1024 * 1024,
+    timeout: options.timeout || 15000,
+    windowsHide: true,
+  });
+};
+
+const runAndroidToolAsync = (tool, args, options = {}) =>
+  new Promise((resolveTool, rejectTool) => {
+    const toolPath = androidToolPath(tool);
+    if (!toolPath) {
+      rejectTool(new Error(`${tool === "adb" ? "Android platform tools" : "Android Emulator"} were not found.`));
+      return;
+    }
+
+    const child = spawn(toolPath, args, {
+      cwd: workspaceDir,
+      env: { ...process.env, ANDROID_AVD_HOME: androidAvdHome() },
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout = [];
+    const stderr = [];
+    let settled = false;
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish(() => rejectTool(new Error(`${tool} timed out.`)));
+    }, options.timeout || 20000);
+
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("error", (error) => finish(() => rejectTool(error)));
+    child.on("exit", (code) => {
+      finish(() => {
+        const output = Buffer.concat(stdout);
+        if (code === 0) {
+          resolveTool(options.binary ? output : output.toString("utf8"));
+          return;
+        }
+        rejectTool(new Error(Buffer.concat(stderr).toString("utf8").trim() || `${tool} failed with code ${code}.`));
+      });
+    });
+  });
+
+const androidAvds = () => {
+  if (androidAvdCache.expiresAt > Date.now()) {
+    return androidAvdCache.items;
+  }
+  try {
+    const items = String(runAndroidTool("emulator", ["-list-avds"]))
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    androidAvdCache = { expiresAt: Date.now() + 60_000, items };
+    return items;
+  } catch {
+    return [];
+  }
+};
+
+const androidAvdVersion = (name) => {
+  const nameMatch = String(name).match(/android[_ -]?(\d+)/i);
+  if (nameMatch) return Number(nameMatch[1]);
+
+  const avdIniPath = join(androidAvdHome(), `${name}.ini`);
+  if (!existsSync(avdIniPath)) return null;
+  const avdIni = readFileSync(avdIniPath, "utf8");
+  const avdPath = avdIni.match(/^path=(.+)$/m)?.[1]?.trim();
+  const configPath = avdPath ? join(avdPath, "config.ini") : "";
+  if (!configPath || !existsSync(configPath)) return null;
+  const targetApi = Number(readFileSync(configPath, "utf8").match(/^target=android-(\d+)$/m)?.[1]);
+  return Number.isFinite(targetApi) && targetApi >= 21 ? targetApi - 20 : null;
+};
+
+const connectedAndroidSerial = (forceRefresh = false) => {
+  if (androidActiveSerial && !forceRefresh) return androidActiveSerial;
+  try {
+    const lines = String(runAndroidTool("adb", ["devices"]))
+      .split(/\r?\n/)
+      .map((line) => line.trim());
+    androidActiveSerial =
+      lines.find((line) => /^emulator-\d+\s+device$/.test(line))?.split(/\s+/)[0] || null;
+    return androidActiveSerial;
+  } catch {
+    androidActiveSerial = null;
+    return null;
+  }
+};
+
+const androidProperty = (serial, property) => {
+  if (!serial) return "";
+  try {
+    return String(runAndroidTool("adb", ["-s", serial, "shell", "getprop", property])).trim();
+  } catch {
+    return "";
+  }
+};
+
+const androidEmulatorStatus = () => {
+  const emulatorPath = androidToolPath("emulator");
+  const adbPath = androidToolPath("adb");
+  const avds = androidAvds().map((name) => ({ name, version: androidAvdVersion(name) }));
+  const serial = connectedAndroidSerial(true);
+  const release = androidProperty(serial, "ro.build.version.release");
+  return {
+    ok: true,
+    available: Boolean(emulatorPath && adbPath && avds.length),
+    sdkRoot: androidSdkRoot(),
+    emulatorPath,
+    adbPath,
+    avds,
+    installedVersions: [...new Set(avds.map((avd) => avd.version).filter(Number.isFinite))].sort((a, b) => a - b),
+    running: Boolean(serial),
+    booted: androidProperty(serial, "sys.boot_completed") === "1",
+    serial,
+    release: release || null,
+    output: androidEmulatorOutput.trim().slice(-1200),
+    lastExit: lastAndroidEmulatorExit,
+  };
+};
+
+const configureAndroidViewport = (serial) => {
+  if (!serial) return;
+  try {
+    runAndroidTool("adb", ["-s", serial, "shell", "wm", "size", "1080x1920"]);
+    runAndroidTool("adb", ["-s", serial, "shell", "wm", "density", "420"]);
+  } catch {
+    // The device can still be used if Android rejects a temporary display override.
+  } finally {
+    androidConfiguredSerial = serial;
+  }
+};
+
+const startAndroidEmulator = (body = {}) => {
+  const status = androidEmulatorStatus();
+  if (!status.available) {
+    throw new Error("Install an Android system image and create an Android Virtual Device first.");
+  }
+  if (status.running) {
+    configureAndroidViewport(status.serial);
+    return { ...status, starting: !status.booted };
+  }
+
+  const requestedVersion = Number(body.version);
+  const selected =
+    status.avds.find((avd) => avd.version === requestedVersion) ||
+    status.avds.find((avd) => avd.name === "NebulaVM_Android_16") ||
+    status.avds[0];
+  if (!selected) {
+    throw new Error(`Android ${requestedVersion || ""} is not installed on this host.`.trim());
+  }
+
+  const emulatorPath = androidToolPath("emulator");
+  androidEmulatorProcess = spawn(
+    emulatorPath,
+    [
+      "-avd",
+      selected.name,
+      "-no-window",
+      "-no-snapshot",
+      "-no-audio",
+      "-no-boot-anim",
+      "-gpu",
+      "swiftshader_indirect",
+      "-cores",
+      "4",
+      "-memory",
+      "3072",
+    ],
+    {
+      cwd: workspaceDir,
+      env: { ...process.env, ANDROID_AVD_HOME: androidAvdHome() },
+      windowsHide: true,
+      detached: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  androidEmulatorOutput = "";
+  lastAndroidEmulatorExit = null;
+  const rememberAndroidOutput = (chunk) => {
+    androidEmulatorOutput = `${androidEmulatorOutput}${chunk}`.slice(-8000);
+  };
+  androidEmulatorProcess.stdout.on("data", rememberAndroidOutput);
+  androidEmulatorProcess.stderr.on("data", rememberAndroidOutput);
+  androidEmulatorProcess.once("exit", () => {
+    lastAndroidEmulatorExit = {
+      at: new Date().toISOString(),
+      output: androidEmulatorOutput.trim().slice(-2000),
+    };
+    androidEmulatorProcess = null;
+  });
+  androidEmulatorProcess.once("error", (error) => {
+    rememberAndroidOutput(error.message);
+    androidEmulatorProcess = null;
+  });
+
+  return {
+    ok: true,
+    available: true,
+    starting: true,
+    running: true,
+    booted: false,
+    avd: selected,
+    installedVersions: status.installedVersions,
+  };
+};
+
+const androidEmulatorFrame = async () => {
+  const serial = connectedAndroidSerial();
+  if (!serial) throw new Error("The Android Emulator is not connected yet.");
+  if (androidConfiguredSerial !== serial) {
+    configureAndroidViewport(serial);
+  }
+  let image;
+  try {
+    image = await runAndroidToolAsync("adb", ["-s", serial, "exec-out", "screencap", "-p"], {
+      binary: true,
+      timeout: 20000,
+    });
+  } catch (error) {
+    androidActiveSerial = null;
+    throw error;
+  }
+  if (!image?.length) throw new Error("The Android Emulator returned an empty frame.");
+  return image;
+};
+
+const sendAndroidEmulatorInput = async (body = {}) => {
+  const serial = connectedAndroidSerial();
+  if (!serial) throw new Error("The Android Emulator is not connected.");
+  const clampCoordinate = (value, maximum) =>
+    String(Math.max(0, Math.min(maximum, Math.round(Number(value) || 0))));
+  const keyMap = {
+    back: "KEYCODE_BACK",
+    home: "KEYCODE_HOME",
+    recents: "KEYCODE_APP_SWITCH",
+    enter: "KEYCODE_ENTER",
+    escape: "KEYCODE_BACK",
+  };
+
+  if (body.type === "key" && keyMap[body.key]) {
+    await runAndroidToolAsync("adb", ["-s", serial, "shell", "input", "keyevent", keyMap[body.key]]);
+  } else if (body.type === "tap") {
+    await runAndroidToolAsync("adb", [
+      "-s",
+      serial,
+      "shell",
+      "input",
+      "tap",
+      clampCoordinate(body.x, 1080),
+      clampCoordinate(body.y, 1920),
+    ]);
+  } else if (body.type === "swipe") {
+    await runAndroidToolAsync("adb", [
+      "-s",
+      serial,
+      "shell",
+      "input",
+      "swipe",
+      clampCoordinate(body.x1, 1080),
+      clampCoordinate(body.y1, 1920),
+      clampCoordinate(body.x2, 1080),
+      clampCoordinate(body.y2, 1920),
+      String(Math.max(50, Math.min(3000, Math.round(Number(body.duration) || 250)))),
+    ]);
+  } else if (body.type === "text") {
+    const text = String(body.text || "").slice(0, 500).replace(/%/g, "%25").replace(/\s/g, "%s");
+    await runAndroidToolAsync("adb", ["-s", serial, "shell", "input", "text", text]);
+  } else {
+    throw new Error("Unsupported Android input.");
+  }
+  return { ok: true };
+};
+
+const stopAndroidEmulator = () => {
+  const serial = connectedAndroidSerial();
+  if (serial) {
+    try {
+      runAndroidTool("adb", ["-s", serial, "emu", "kill"], { timeout: 10000 });
+    } catch {
+      androidEmulatorProcess?.kill();
+    }
+  } else {
+    androidEmulatorProcess?.kill();
+  }
+  androidEmulatorProcess = null;
+  androidConfiguredSerial = null;
+  androidActiveSerial = null;
+  return { ok: true };
+};
 
 const runHyperVAction = (action, config = {}, timeoutMs = 30000) =>
   new Promise((resolveAction, rejectAction) => {
@@ -1426,10 +1763,11 @@ const nativeQemuPlugin = () => ({
       const url = new URL(req.url || "/", "http://localhost");
       const isNativeQemuApi = url.pathname.startsWith("/api/native-qemu");
       const isHyperVApi = url.pathname.startsWith("/api/emustar-hyperv");
+      const isAndroidApi = url.pathname.startsWith("/api/android-emulator");
       const isHostApi = url.pathname.startsWith("/api/emustar-host/");
       const isMobileDevUnlockApi =
         url.pathname === "/api/mobile-dev-unlock" || url.pathname === "/.netlify/functions/mobile-dev-unlock";
-      if (!isNativeQemuApi && !isHyperVApi && !isHostApi && !isMobileDevUnlockApi) {
+      if (!isNativeQemuApi && !isHyperVApi && !isAndroidApi && !isHostApi && !isMobileDevUnlockApi) {
         next();
         return;
       }
@@ -1590,6 +1928,39 @@ const nativeQemuPlugin = () => ({
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/resize-display") {
           const body = await readJsonBody(req);
           json(res, 200, await runHyperVAction("ResizeDisplay", body, 12000));
+          return;
+        }
+
+        if (req.method === "GET" && url.pathname === "/api/android-emulator/status") {
+          json(res, 200, androidEmulatorStatus());
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/android-emulator/start") {
+          const body = await readJsonBody(req);
+          json(res, 200, startAndroidEmulator(body));
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/android-emulator/stop") {
+          json(res, 200, stopAndroidEmulator());
+          return;
+        }
+
+        if (req.method === "GET" && url.pathname === "/api/android-emulator/frame") {
+          const image = await androidEmulatorFrame();
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "image/png");
+          res.setHeader("Cache-Control", "no-store");
+          res.setHeader("X-NebulaVM-Frame-Width", "1080");
+          res.setHeader("X-NebulaVM-Frame-Height", "1920");
+          res.end(image);
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/android-emulator/input") {
+          const body = await readJsonBody(req);
+          json(res, 200, await sendAndroidEmulatorInput(body));
           return;
         }
 

@@ -7,6 +7,8 @@ Vite, v86, EMUSTAR, and optional QEMU backends.
 
 - Lightweight x86 guests can run locally in the browser through v86.
 - Optional QEMU backends support additional x64 and ARM64 boot media.
+- Android mode provides a lightweight browser simulator and can automatically
+  connect to a real Android Studio Emulator through NebulaVM Host.
 - EMUSTAR serves an installed Windows 11 x64 Hyper-V guest to a browser through
   an authenticated noVNC connection.
 - A free Cloudflare Quick Tunnel makes the EMUSTAR browser link reachable from
@@ -119,6 +121,18 @@ limited to 2 GB images. Large Windows ISOs are not practical in that mode.
 Direct `QEMU x64`, `QEMU ARM64 / Windows`, and `QEMU ARM64 / Ubuntu` modes use
 the separately installed native QEMU bridge. `Remote VM / browser stream`
 embeds an existing browser-compatible remote desktop URL.
+
+## Android
+
+Choose **Android** in the emulator menu. When NebulaVM Host can find Android
+Studio, platform tools, and an installed Android Virtual Device, it launches
+the real emulator headlessly and streams its 9:16 display into the browser.
+Touch, keyboard input, Back, Home, and Recent Apps are forwarded through ADB.
+
+Only the Windows host needs Android Studio. Other computers can use the Android
+device through the normal NebulaVM host link. NebulaVM selects an installed
+Android image when the requested version is unavailable, and keeps the
+lightweight browser simulator as a fallback when the host cannot be reached.
 
 ## Limits
 

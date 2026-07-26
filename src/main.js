@@ -106,6 +106,11 @@ const state = {
   androidView: "home",
   androidHistory: ["home"],
   androidRecents: [],
+  androidNativeActive: false,
+  androidNativeFrameTimer: null,
+  androidNativeFrameUrl: null,
+  androidNativePointer: null,
+  androidNativeInputController: null,
 };
 
 app.innerHTML = `
@@ -1304,6 +1309,81 @@ const fetchHyperVFrame = async () => {
   }
 
   throw new Error(lastError.message || nativeQemuBridgeMessage);
+};
+
+const androidBridgeMessage = isNetlifyLauncher
+  ? "The Android host is offline. Keep the Windows host running NebulaVM Host, then try again."
+  : "The real Android Emulator needs NebulaVM Host running locally.";
+
+const prepareAndroidBridgeBases = async () => {
+  if (isNetlifyLauncher && !state.nativeQemuApiBase) {
+    await fetchNetlifyHostRegistry();
+  }
+  return nativeBridgeBases();
+};
+
+const fetchAndroidJson = async (path, options) => {
+  const uniqueBridgeBases = await prepareAndroidBridgeBases();
+  let lastError = new Error(androidBridgeMessage);
+
+  for (const base of uniqueBridgeBases) {
+    try {
+      const headers = new Headers(options?.headers || {});
+      if (state.nativeHostToken) {
+        headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+      }
+      const response = await fetch(`${base}/api/android-emulator/${path}`, {
+        cache: "no-store",
+        ...options,
+        headers,
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.toLowerCase().includes("application/json")) continue;
+      const data = await response.json();
+      state.nativeQemuApiBase = base;
+      return { response, data, base };
+    } catch (error) {
+      lastError = error instanceof TypeError ? new Error(androidBridgeMessage) : error;
+    }
+  }
+
+  throw new Error(lastError.message || androidBridgeMessage);
+};
+
+const fetchAndroidFrame = async () => {
+  const uniqueBridgeBases = await prepareAndroidBridgeBases();
+  let lastError = new Error(androidBridgeMessage);
+
+  for (const base of uniqueBridgeBases) {
+    try {
+      const headers = new Headers();
+      if (state.nativeHostToken) {
+        headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+      }
+      const response = await fetch(`${base}/api/android-emulator/frame?t=${Date.now()}`, {
+        cache: "no-store",
+        headers,
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!response.ok || !contentType.toLowerCase().startsWith("image/")) {
+        if (contentType.toLowerCase().includes("application/json")) {
+          const data = await response.json();
+          throw new Error(data.error || "The Android frame is not ready.");
+        }
+        throw new Error(response.statusText || "The Android frame is not ready.");
+      }
+      state.nativeQemuApiBase = base;
+      return {
+        blob: await response.blob(),
+        width: Number(response.headers.get("X-NebulaVM-Frame-Width")) || 1080,
+        height: Number(response.headers.get("X-NebulaVM-Frame-Height")) || 1920,
+      };
+    } catch (error) {
+      lastError = error instanceof TypeError ? new Error(androidBridgeMessage) : error;
+    }
+  }
+
+  throw new Error(lastError.message || androidBridgeMessage);
 };
 
 const viewportDesktopSize = () => {
@@ -3382,6 +3462,10 @@ const openAndroidView = (view) => {
 
 const androidBack = () => {
   if (!state.running) return;
+  if (state.androidNativeActive) {
+    void sendNativeAndroidInput({ type: "key", key: "back" });
+    return;
+  }
   if (state.androidView === "recents") {
     state.androidView = state.androidHistory.at(-1) || "home";
   } else if (state.androidHistory.length > 1) {
@@ -3393,6 +3477,10 @@ const androidBack = () => {
 
 const androidHome = () => {
   if (!state.running) return;
+  if (state.androidNativeActive) {
+    void sendNativeAndroidInput({ type: "key", key: "home" });
+    return;
+  }
   state.androidView = "home";
   state.androidHistory = ["home"];
   renderAndroidView();
@@ -3400,11 +3488,215 @@ const androidHome = () => {
 
 const androidRecents = () => {
   if (!state.running) return;
+  if (state.androidNativeActive) {
+    void sendNativeAndroidInput({ type: "key", key: "recents" });
+    return;
+  }
   state.androidView = "recents";
   renderAndroidView();
 };
 
-const bootAndroid = () => {
+const stopNativeAndroidFrames = () => {
+  if (state.androidNativeFrameTimer) {
+    window.clearTimeout(state.androidNativeFrameTimer);
+    state.androidNativeFrameTimer = null;
+  }
+  if (state.androidNativeFrameUrl) {
+    URL.revokeObjectURL(state.androidNativeFrameUrl);
+    state.androidNativeFrameUrl = null;
+  }
+};
+
+const sendNativeAndroidInput = async (payload) => {
+  if (!state.androidNativeActive) return;
+  try {
+    const { response, data } = await fetchAndroidJson("input", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Android rejected the input.");
+    }
+  } catch (error) {
+    log(`Android input failed: ${error.message}`);
+  }
+};
+
+const scheduleNativeAndroidFrame = (image, delay = 450) => {
+  if (!state.androidNativeActive || !state.emulator) return;
+  window.clearTimeout(state.androidNativeFrameTimer);
+  state.androidNativeFrameTimer = window.setTimeout(() => {
+    void refreshNativeAndroidFrame(image);
+  }, delay);
+};
+
+const refreshNativeAndroidFrame = async (image) => {
+  if (!state.androidNativeActive || !state.emulator) return;
+  if (!state.running) {
+    scheduleNativeAndroidFrame(image, 600);
+    return;
+  }
+
+  try {
+    const frame = await fetchAndroidFrame();
+    const nextUrl = URL.createObjectURL(frame.blob);
+    image.src = nextUrl;
+    if (state.androidNativeFrameUrl) URL.revokeObjectURL(state.androidNativeFrameUrl);
+    state.androidNativeFrameUrl = nextUrl;
+    image.dataset.frameWidth = String(frame.width);
+    image.dataset.frameHeight = String(frame.height);
+    image.hidden = false;
+    setViewportSummary(`${androidVersionLabel()} is live from the Android Emulator`);
+    scheduleNativeAndroidFrame(image);
+  } catch (error) {
+    const { data: status } = await fetchAndroidJson("status").catch(() => ({ data: null }));
+    if (status?.booted) {
+      setViewportSummary("Android is running; waiting for the next display frame");
+    } else {
+      setViewportSummary("Android Emulator is starting on the host");
+    }
+    scheduleNativeAndroidFrame(image, 900);
+  }
+};
+
+const nativeAndroidCoordinates = (event, image) => {
+  const rect = image.getBoundingClientRect();
+  const frameWidth = Number(image.dataset.frameWidth) || 1080;
+  const frameHeight = Number(image.dataset.frameHeight) || 1920;
+  return {
+    x: Math.max(0, Math.min(frameWidth, ((event.clientX - rect.left) / rect.width) * frameWidth)),
+    y: Math.max(0, Math.min(frameHeight, ((event.clientY - rect.top) / rect.height) * frameHeight)),
+  };
+};
+
+const bootNativeAndroid = async (status) => {
+  const installedVersions = status.installedVersions || [];
+  let requestedVersion = Number(els.androidVersion.value);
+  if (installedVersions.length && !installedVersions.includes(requestedVersion)) {
+    requestedVersion = installedVersions.at(-1);
+    els.androidVersion.value = String(requestedVersion);
+    log(`Android ${requestedVersion} is the installed real device image, so NebulaVM selected it.`);
+  }
+
+  const { response, data } = await fetchAndroidJson("start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version: requestedVersion }),
+  });
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || "The Android Emulator could not start.");
+  }
+
+  els.screenContainer.querySelector(".vga-text").hidden = true;
+  els.screenContainer.querySelector(".vga-canvas").hidden = true;
+  els.qemuTerminal.hidden = true;
+  els.nativeDisplay.hidden = true;
+  els.remoteFrame.hidden = true;
+  els.androidDisplay.hidden = false;
+  els.displayKicker.textContent = "Android Emulator";
+  els.androidDevice.classList.add("is-native");
+  els.androidDevice.classList.remove("is-paused");
+  els.androidSurface.replaceChildren();
+  els.androidSurface.tabIndex = 0;
+  state.androidNativeInputController?.abort();
+  state.androidNativeInputController = new AbortController();
+
+  const image = document.createElement("img");
+  image.className = "android-native-frame";
+  image.alt = "Live Android Emulator display";
+  image.draggable = false;
+  image.hidden = true;
+  els.androidSurface.append(image);
+
+  image.addEventListener("pointerdown", (event) => {
+    image.setPointerCapture(event.pointerId);
+    state.androidNativePointer = {
+      ...nativeAndroidCoordinates(event, image),
+      startedAt: performance.now(),
+    };
+  });
+  image.addEventListener("pointerup", (event) => {
+    const start = state.androidNativePointer;
+    state.androidNativePointer = null;
+    if (!start) return;
+    const end = nativeAndroidCoordinates(event, image);
+    const distance = Math.hypot(end.x - start.x, end.y - start.y);
+    if (distance < 18) {
+      void sendNativeAndroidInput({ type: "tap", x: end.x, y: end.y });
+    } else {
+      void sendNativeAndroidInput({
+        type: "swipe",
+        x1: start.x,
+        y1: start.y,
+        x2: end.x,
+        y2: end.y,
+        duration: performance.now() - start.startedAt,
+      });
+    }
+  });
+  image.addEventListener("pointercancel", () => {
+    state.androidNativePointer = null;
+  });
+  els.androidSurface.addEventListener(
+    "keydown",
+    (event) => {
+      if (!state.androidNativeActive) return;
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        void sendNativeAndroidInput({ type: "key", key: "back" });
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        void sendNativeAndroidInput({ type: "key", key: "enter" });
+      } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        void sendNativeAndroidInput({ type: "text", text: event.key });
+      }
+    },
+    { signal: state.androidNativeInputController.signal },
+  );
+
+  state.androidNativeActive = true;
+  state.running = true;
+  state.emulator = {
+    stop: async () => {
+      state.running = false;
+      stopNativeAndroidFrames();
+      els.androidDevice.classList.add("is-paused");
+      setPowerState("Android paused", "paused");
+      updateButtons();
+    },
+    run: () => {
+      state.running = true;
+      els.androidDevice.classList.remove("is-paused");
+      setPowerState("Android running", "running");
+      scheduleNativeAndroidFrame(image, 0);
+      updateButtons();
+    },
+    destroy: async () => {
+      stopNativeAndroidFrames();
+      state.androidNativeActive = false;
+      state.androidNativeInputController?.abort();
+      state.androidNativeInputController = null;
+      els.androidDevice.classList.remove("is-native", "is-paused");
+      await fetchAndroidJson("stop", { method: "POST" }).catch(() => {});
+      els.androidDisplay.hidden = true;
+    },
+    restart: () => {
+      void sendNativeAndroidInput({ type: "key", key: "home" });
+    },
+  };
+
+  els.machineTitle.textContent = `${androidVersionLabel()} - Real device`;
+  els.ramMetric.textContent = `${androidVersionLabel()} native`;
+  setPowerState(data.booted ? "Android running" : "Android starting", data.booted ? "running" : "booting");
+  setViewportSummary(data.booted ? "Real Android is live from the host" : "Android Emulator is starting on the host");
+  log(`${androidVersionLabel()} real Android Emulator connected through NebulaVM Host.`);
+  scheduleNativeAndroidFrame(image, 0);
+  updateButtons();
+};
+
+const bootAndroidSimulator = () => {
   els.screenContainer.querySelector(".vga-text").hidden = true;
   els.screenContainer.querySelector(".vga-canvas").hidden = true;
   els.qemuTerminal.hidden = true;
@@ -3446,6 +3738,21 @@ const bootAndroid = () => {
   renderAndroidView();
   log(`${androidVersionLabel()} browser simulator started.`);
   updateButtons();
+};
+
+const bootAndroid = async () => {
+  try {
+    const { response, data: status } = await fetchAndroidJson("status");
+    if (response.ok && status.available) {
+      await bootNativeAndroid(status);
+      return;
+    }
+  } catch (error) {
+    log(`Real Android host unavailable: ${error.message}`);
+  }
+
+  bootAndroidSimulator();
+  log("Using the lightweight browser simulator because no real Android host is available.");
 };
 
 const bootEmulator = async () => {
@@ -3493,7 +3800,7 @@ const bootEmulator = async () => {
 
   try {
     if (isAndroidMode()) {
-      bootAndroid();
+      await bootAndroid();
     } else if (isRemoteMode()) {
       await bootRemoteVm();
     } else if (isHyperVMode()) {
@@ -3887,7 +4194,13 @@ const updateBackendUi = () => {
 };
 
 els.emulatorMode.addEventListener("change", updateBackendUi);
-els.androidVersion.addEventListener("change", () => {
+els.androidVersion.addEventListener("change", async () => {
+  if (state.androidNativeActive) {
+    await stopEmulator();
+    log(`Selected ${androidVersionLabel()}. Start Android to use that installed device image.`);
+    updateBackendUi();
+    return;
+  }
   if (isAndroidMode() && state.emulator) {
     state.androidView = "home";
     state.androidHistory = ["home"];
