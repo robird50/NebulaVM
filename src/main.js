@@ -12,6 +12,7 @@ const app = document.querySelector("#app");
 const COMMIT_ID = typeof __NEBULAVM_COMMIT__ === "string" ? __NEBULAVM_COMMIT__ : "local";
 const HOST_TOKEN_STORAGE_KEY = "nebulavm.emustar.hostToken";
 const HOST_SESSION_STORAGE_KEY = "nebulavm.emustar.sessionId";
+const HOST_DEVICE_STORAGE_KEY = "nebulavm.emustar.deviceId.v1";
 const STORED_ISO_PROMPT_KEY = "nebulavm.emustar.storedIsoPrompt";
 const STORED_ISO_LIMIT = 2;
 const MOBILE_DEV_UNLOCK_KEY = "nebulavm.mobile.devUnlock.v3";
@@ -70,6 +71,11 @@ const savedSessionId =
   window.sessionStorage.getItem(HOST_SESSION_STORAGE_KEY) ||
   (crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 window.sessionStorage.setItem(HOST_SESSION_STORAGE_KEY, savedSessionId);
+const storedDeviceId = window.localStorage.getItem(HOST_DEVICE_STORAGE_KEY) || "";
+const savedDeviceId = /^[a-zA-Z0-9_-]{16,128}$/.test(storedDeviceId)
+  ? storedDeviceId
+  : `device-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+window.localStorage.setItem(HOST_DEVICE_STORAGE_KEY, savedDeviceId);
 
 const state = {
   isoFile: null,
@@ -83,6 +89,7 @@ const state = {
   nativeQemuApiBase: null,
   nativeHostToken: savedHostToken,
   nativeSessionId: savedSessionId,
+  nativeDeviceId: savedDeviceId,
   nativeRfb: null,
   nativeRuntimeName: null,
   nativeMonitorTimer: null,
@@ -1265,6 +1272,7 @@ const fetchNativeQemuJson = async (path, options) => {
       if (state.nativeHostToken) {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
+      headers.set("X-NebulaVM-Device", state.nativeDeviceId);
       const response = await fetch(`${base}/api/native-qemu/${path}`, {
         cache: "no-store",
         ...options,
@@ -1297,6 +1305,7 @@ const fetchHyperVJson = async (path, options) => {
       if (state.nativeHostToken) {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
+      headers.set("X-NebulaVM-Device", state.nativeDeviceId);
       const response = await fetch(`${base}/api/emustar-hyperv/${path}`, {
         cache: "no-store",
         ...options,
@@ -1507,6 +1516,7 @@ const fetchEmustarHostJson = async (path, options) => {
       if (state.nativeHostToken) {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
+      headers.set("X-NebulaVM-Device", state.nativeDeviceId);
       const response = await fetch(`${base}/api/emustar-host/${path}`, {
         cache: "no-store",
         ...options,
@@ -1819,6 +1829,7 @@ const uploadBrowserIsoChunkToBase = (base, file, uploadId, start, end, onProgres
       xhr.setRequestHeader("Authorization", `Bearer ${state.nativeHostToken}`);
     }
     xhr.setRequestHeader("X-NebulaVM-Filename", encodeURIComponent(file.name));
+    xhr.setRequestHeader("X-NebulaVM-Device", state.nativeDeviceId);
     xhr.setRequestHeader("X-NebulaVM-Session", state.nativeSessionId);
     xhr.setRequestHeader("X-NebulaVM-Upload-Id", uploadId);
     xhr.setRequestHeader("X-NebulaVM-Chunk-Start", String(start));
@@ -1965,7 +1976,7 @@ const cleanupStagedHostIso = async ({ keepalive = false, silent = false, preserv
 
   if (keepalive) {
     const base = (state.hostStagedIsoBase || state.nativeQemuApiBase || window.location.origin).replace(/\/$/, "");
-    const params = new URLSearchParams({ sessionId });
+    const params = new URLSearchParams({ sessionId, deviceId: state.nativeDeviceId });
     if (state.nativeHostToken) params.set("token", state.nativeHostToken);
     const url = `${base}/api/emustar-host/upload-session-cleanup?${params}`;
     if (navigator.sendBeacon?.(url)) {

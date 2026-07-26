@@ -25,6 +25,7 @@ import {
   serializeDeviceCookie,
   sha256Hex,
 } from "./lib/mobileDevAccess.mjs";
+import { normalizeStoredIsoOwnerId, storedIsosForOwner } from "./lib/storedIsoOwnership.mjs";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
@@ -230,6 +231,7 @@ const setNativeQemuCors = (req, res) => {
       "X-NebulaVM-Chunk-End",
       "X-NebulaVM-Chunk-Start",
       "X-NebulaVM-Filename",
+      "X-NebulaVM-Device",
       "X-NebulaVM-Session",
       "X-NebulaVM-Total-Bytes",
       "X-NebulaVM-Upload-Id",
@@ -461,6 +463,16 @@ const isPathInsideDirectory = (candidatePath, parentDirectory) => {
 const storedIsoFileKey = ({ fileKey, name, size }) =>
   String(fileKey || `${name || ""}:${Number(size) || 0}`).trim().slice(0, 240);
 
+const storedIsoOwnerId = (req, fallback = "") => {
+  const ownerId = normalizeStoredIsoOwnerId(req.headers["x-nebulavm-device"] || fallback);
+  if (!ownerId) {
+    const error = new Error("This stored ISO request is missing a valid device identity.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return ownerId;
+};
+
 const loadStoredIsoManifest = () => {
   if (!existsSync(storedIsoManifestPath)) return [];
   try {
@@ -509,26 +521,43 @@ const cleanupStoredIsos = () => {
     saveStoredIsoManifest(kept);
   }
 
-  return kept.map(storedIsoSnapshot);
+  return kept;
 };
 
-const listStoredIsos = () => ({
+const listStoredIsos = (ownerId) => ({
   ok: true,
   limit: storedIsoLimit,
   ttlHours: Math.round(storedIsoTtlMs / 60 / 60 / 1000),
-  items: cleanupStoredIsos(),
+  items: storedIsosForOwner(cleanupStoredIsos(), ownerId).map(storedIsoSnapshot),
 });
 
-const removeStoredIso = (id) => {
+const assertStoredIsoAccess = (req, isoPath) => {
+  const candidatePath = stripPathQuotes(isoPath);
+  if (!candidatePath || !isPathInsideDirectory(candidatePath, storedIsoDirectory)) return;
+
+  const ownerId = storedIsoOwnerId(req);
+  const resolvedCandidate = resolve(candidatePath).toLowerCase();
+  const target = cleanupStoredIsos().find(
+    (item) => item.isoPath && resolve(item.isoPath).toLowerCase() === resolvedCandidate,
+  );
+  if (!target || normalizeStoredIsoOwnerId(target.ownerId) !== ownerId) {
+    const error = new Error("This stored ISO belongs to a different device.");
+    error.statusCode = 403;
+    throw error;
+  }
+};
+
+const removeStoredIso = (ownerId, id) => {
   const safeId = sanitizeUploadId(id);
   const items = cleanupStoredIsos();
-  const target = items.find((item) => item.id === safeId);
+  const ownerItems = storedIsosForOwner(items, ownerId);
+  const target = ownerItems.find((item) => item.id === safeId);
   if (!target) {
     return {
       ok: true,
       removed: false,
       limit: storedIsoLimit,
-      items,
+      items: ownerItems.map(storedIsoSnapshot),
     };
   }
 
@@ -542,11 +571,11 @@ const removeStoredIso = (id) => {
     ok: true,
     removed: true,
     limit: storedIsoLimit,
-    items: nextItems,
+    items: storedIsosForOwner(nextItems, ownerId).map(storedIsoSnapshot),
   };
 };
 
-const storeBrowserIsoOnHost = (body) => {
+const storeBrowserIsoOnHost = (ownerId, body) => {
   const sourcePath = stripPathQuotes(body.isoPath);
   if (!sourcePath || !isAbsolute(sourcePath) || !existsSync(sourcePath)) {
     throw new Error("The staged ISO was not found on the host computer.");
@@ -554,12 +583,30 @@ const storeBrowserIsoOnHost = (body) => {
   if (!isPathInsideDirectory(sourcePath, isoImportDirectory) || isPathInsideDirectory(sourcePath, storedIsoDirectory)) {
     throw new Error("Only NebulaVM-staged ISOs can be saved as stored images.");
   }
+  const { sessionDirectory } = browserUploadSessionDirectory(body.sessionId);
+  if (!isPathInsideDirectory(sourcePath, sessionDirectory)) {
+    throw new Error("This staged ISO does not belong to the requesting browser session.");
+  }
 
   const name = sanitizeFilename(body.name || body.fileName || sourcePath.split(/[\\/]/).pop() || "stored.iso");
   const size = Number(body.size) || statSync(sourcePath).size;
   const fileKey = storedIsoFileKey({ fileKey: body.fileKey, name, size });
   const current = cleanupStoredIsos();
-  const existing = current.find((item) => item.fileKey === fileKey || (item.name === name && Number(item.size) === size));
+  const ownerItems = storedIsosForOwner(current, ownerId);
+  let existing = ownerItems.find(
+    (item) => item.fileKey === fileKey || (item.name === name && Number(item.size) === size),
+  );
+  if (!existing) {
+    existing = current.find(
+      (item) =>
+        !normalizeStoredIsoOwnerId(item.ownerId) &&
+        (item.fileKey === fileKey || (item.name === name && Number(item.size) === size)),
+    );
+    if (existing) {
+      existing.ownerId = ownerId;
+      saveStoredIsoManifest(current);
+    }
+  }
   if (existing) {
     rmSync(sourcePath, { force: true });
     if (body.sessionId) {
@@ -569,8 +616,8 @@ const storeBrowserIsoOnHost = (body) => {
       ok: true,
       duplicate: true,
       limit: storedIsoLimit,
-      item: existing,
-      items: current,
+      item: storedIsoSnapshot(existing),
+      items: storedIsosForOwner(current, ownerId).map(storedIsoSnapshot),
     };
   }
 
@@ -580,7 +627,7 @@ const storeBrowserIsoOnHost = (body) => {
       slotLimitReached: true,
       error: `Stored ISO slots are full. Remove an ISO before saving another one.`,
       limit: storedIsoLimit,
-      items: current,
+      items: ownerItems.map(storedIsoSnapshot),
     };
   }
 
@@ -600,10 +647,11 @@ const storeBrowserIsoOnHost = (body) => {
     fileKey,
     size,
     isoPath: storedPath,
+    ownerId,
     storedAt: storedAt.toISOString(),
     expiresAt: new Date(storedAt.getTime() + storedIsoTtlMs).toISOString(),
   };
-  const items = [...current, item].map(storedIsoSnapshot);
+  const items = [...current, item];
   saveStoredIsoManifest(items);
 
   return {
@@ -611,7 +659,7 @@ const storeBrowserIsoOnHost = (body) => {
     duplicate: false,
     limit: storedIsoLimit,
     item: storedIsoSnapshot(item),
-    items,
+    items: storedIsosForOwner(items, ownerId).map(storedIsoSnapshot),
   };
 };
 
@@ -2079,20 +2127,20 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-host/stored-isos") {
-          json(res, 200, listStoredIsos());
+          json(res, 200, listStoredIsos(storedIsoOwnerId(req)));
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-host/stored-isos") {
           const body = await readJsonBody(req);
-          const result = storeBrowserIsoOnHost(body);
+          const result = storeBrowserIsoOnHost(storedIsoOwnerId(req), body);
           json(res, result.ok ? 200 : 409, result);
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-host/stored-isos/remove") {
           const body = await readJsonBody(req);
-          json(res, 200, removeStoredIso(body.id || ""));
+          json(res, 200, removeStoredIso(storedIsoOwnerId(req), body.id || ""));
           return;
         }
 
@@ -2113,6 +2161,7 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") {
           const body = await readJsonBody(req);
+          assertStoredIsoAccess(req, body.isoPath);
           const result = await runHyperVAction("Start", {
               ...body,
               vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
@@ -2216,6 +2265,7 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "POST" && url.pathname === "/api/native-qemu/start") {
           const body = await readJsonBody(req);
+          assertStoredIsoAccess(req, body.isoPath);
           const result = await startNativeVm(body);
           json(res, 200, {
             ok: true,
