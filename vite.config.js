@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import dgram from "node:dgram";
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { cpus, homedir, networkInterfaces } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
@@ -812,11 +812,8 @@ let nativeVm = null;
 let nativeVmOutput = "";
 let lastNativeExit = null;
 let activeNativeRuntimeName = null;
-let androidEmulatorProcess = null;
-let androidConfiguredSerial = null;
-let androidActiveSerial = null;
-let androidAvdCache = { expiresAt: 0, items: [] };
-let androidEmulatorOutput = "";
+let androidRuntime = null;
+let androidImageCache = { expiresAt: 0, items: [] };
 let lastAndroidEmulatorExit = null;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
@@ -833,8 +830,6 @@ const workspaceUserHome = () => {
   }
   return process.env.USERPROFILE || homedir();
 };
-
-const androidAvdHome = () => join(workspaceUserHome(), ".android", "avd");
 
 const androidSdkRoot = () => {
   const candidates = [
@@ -860,7 +855,12 @@ const runAndroidTool = (tool, args, options = {}) => {
   }
   return execFileSync(toolPath, args, {
     encoding: options.binary ? null : "utf8",
-    env: { ...process.env, ANDROID_AVD_HOME: androidAvdHome() },
+    env: {
+      ...process.env,
+      ANDROID_SDK_ROOT: androidSdkRoot(),
+      ANDROID_HOME: androidSdkRoot(),
+      ...(options.avdHome ? { ANDROID_AVD_HOME: options.avdHome } : {}),
+    },
     maxBuffer: options.maxBuffer || 24 * 1024 * 1024,
     timeout: options.timeout || 15000,
     windowsHide: true,
@@ -877,7 +877,12 @@ const runAndroidToolAsync = (tool, args, options = {}) =>
 
     const child = spawn(toolPath, args, {
       cwd: workspaceDir,
-      env: { ...process.env, ANDROID_AVD_HOME: androidAvdHome() },
+      env: {
+        ...process.env,
+        ANDROID_SDK_ROOT: androidSdkRoot(),
+        ANDROID_HOME: androidSdkRoot(),
+        ...(options.avdHome ? { ANDROID_AVD_HOME: options.avdHome } : {}),
+      },
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -910,47 +915,119 @@ const runAndroidToolAsync = (tool, args, options = {}) =>
     });
   });
 
-const androidAvds = () => {
-  if (androidAvdCache.expiresAt > Date.now()) {
-    return androidAvdCache.items;
-  }
+const androidSessionsRoot = resolve(workspaceDir, "vm-disks", "android-sessions");
+const androidEmulatorPort = 5580;
+const androidEmulatorSerial = `emulator-${androidEmulatorPort}`;
+
+const androidPortProcessId = () => {
+  if (process.platform !== "win32") return null;
   try {
-    const items = String(runAndroidTool("emulator", ["-list-avds"]))
+    const output = execFileSync("netstat.exe", ["-ano", "-p", "TCP"], {
+      encoding: "utf8",
+      timeout: 5000,
+      windowsHide: true,
+    });
+    const line = output
       .split(/\r?\n/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    androidAvdCache = { expiresAt: Date.now() + 60_000, items };
-    return items;
+      .find((entry) => new RegExp(`(?:127\\.0\\.0\\.1|\\[?::1\\]?):${androidEmulatorPort}\\s+.*LISTENING\\s+\\d+$`, "i").test(entry.trim()));
+    const pid = Number(line?.trim().match(/(\d+)$/)?.[1]);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch {
-    return [];
+    return null;
   }
 };
 
-const androidAvdVersion = (name) => {
-  const nameMatch = String(name).match(/android[_ -]?(\d+)/i);
-  if (nameMatch) return Number(nameMatch[1]);
-
-  const avdIniPath = join(androidAvdHome(), `${name}.ini`);
-  if (!existsSync(avdIniPath)) return null;
-  const avdIni = readFileSync(avdIniPath, "utf8");
-  const avdPath = avdIni.match(/^path=(.+)$/m)?.[1]?.trim();
-  const configPath = avdPath ? join(avdPath, "config.ini") : "";
-  if (!configPath || !existsSync(configPath)) return null;
-  const targetApi = Number(readFileSync(configPath, "utf8").match(/^target=android-(\d+)$/m)?.[1]);
-  return Number.isFinite(targetApi) && targetApi >= 21 ? targetApi - 20 : null;
+const killAndroidPortProcess = () => {
+  const pid = androidPortProcessId();
+  if (!pid) return false;
+  try {
+    process.kill(pid, "SIGKILL");
+    return true;
+  } catch {
+    return false;
+  }
 };
 
-const connectedAndroidSerial = (forceRefresh = false) => {
-  if (androidActiveSerial && !forceRefresh) return androidActiveSerial;
+const androidSessionId = (req) => {
+  const raw = String(req.headers["x-nebulavm-session"] || "");
+  const safe = sanitizeSessionId(raw);
+  if (!raw || safe !== raw || safe.length < 8) {
+    throw new Error("This Android request is missing a valid private session.");
+  }
+  return safe;
+};
+
+const androidSessionDirectory = (sessionId) => {
+  const safeSessionId = sanitizeSessionId(sessionId);
+  const sessionDirectory = resolve(androidSessionsRoot, safeSessionId);
+  const root = androidSessionsRoot.endsWith(sep) ? androidSessionsRoot : `${androidSessionsRoot}${sep}`;
+  if (!sessionDirectory.startsWith(root)) throw new Error("Invalid Android session path.");
+  return { safeSessionId, sessionDirectory };
+};
+
+const removeAndroidSessionDirectory = async (sessionDirectory) => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      rmSync(sessionDirectory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!["EBUSY", "EPERM", "ENOTEMPTY"].includes(error.code) || attempt === 19) throw error;
+      await new Promise((resolveRetry) => setTimeout(resolveRetry, 500));
+    }
+  }
+};
+
+const androidReleaseMajor = (release) => {
+  const major = Number(String(release || "").match(/^\d+/)?.[0]);
+  return Number.isInteger(major) && major >= 1 && major <= 17 ? major : null;
+};
+
+const installedAndroidImages = () => {
+  if (androidImageCache.expiresAt > Date.now()) return androidImageCache.items;
+  const systemImagesRoot = join(androidSdkRoot(), "system-images");
+  const images = [];
+  if (existsSync(systemImagesRoot)) {
+    for (const apiDirectory of readdirSync(systemImagesRoot, { withFileTypes: true })) {
+      const api = Number(apiDirectory.name.match(/^android-(\d+)$/)?.[1]);
+      if (!apiDirectory.isDirectory() || !Number.isInteger(api)) continue;
+      const apiPath = join(systemImagesRoot, apiDirectory.name);
+      for (const tagDirectory of readdirSync(apiPath, { withFileTypes: true })) {
+        if (!tagDirectory.isDirectory()) continue;
+        const tagPath = join(apiPath, tagDirectory.name);
+        for (const abiDirectory of readdirSync(tagPath, { withFileTypes: true })) {
+          if (!abiDirectory.isDirectory()) continue;
+          const imagePath = join(tagPath, abiDirectory.name);
+          const buildPropPath = join(imagePath, "build.prop");
+          if (!existsSync(buildPropPath) || !existsSync(join(imagePath, "system.img"))) continue;
+          const buildProp = readFileSync(buildPropPath, "utf8");
+          const release = buildProp.match(/^ro\.build\.version\.release=(.+)$/m)?.[1]?.trim() || "";
+          const version = androidReleaseMajor(release);
+          if (!version) continue;
+          images.push({
+            version,
+            api,
+            release,
+            tag: tagDirectory.name,
+            abi: abiDirectory.name,
+            imagePath,
+            relativeImagePath: `system-images\\${apiDirectory.name}\\${tagDirectory.name}\\${abiDirectory.name}\\`,
+            playStore: tagDirectory.name.includes("playstore"),
+          });
+        }
+      }
+    }
+  }
+  images.sort((left, right) => left.version - right.version || right.api - left.api);
+  androidImageCache = { expiresAt: Date.now() + 60_000, items: images };
+  return images;
+};
+
+const connectedAndroidSerial = () => {
+  if (!androidRuntime) return null;
   try {
-    const lines = String(runAndroidTool("adb", ["devices"]))
-      .split(/\r?\n/)
-      .map((line) => line.trim());
-    androidActiveSerial =
-      lines.find((line) => /^emulator-\d+\s+device$/.test(line))?.split(/\s+/)[0] || null;
-    return androidActiveSerial;
+    const line = String(runAndroidTool("adb", ["-s", androidRuntime.serial, "get-state"], { timeout: 5000 })).trim();
+    return line === "device" ? androidRuntime.serial : null;
   } catch {
-    androidActiveSerial = null;
     return null;
   }
 };
@@ -964,66 +1041,174 @@ const androidProperty = (serial, property) => {
   }
 };
 
-const androidEmulatorStatus = () => {
+const androidVersionCatalog = () => {
+  const images = installedAndroidImages();
+  return Array.from({ length: 17 }, (_, index) => {
+    const version = index + 1;
+    const image = images.find((candidate) => candidate.version === version);
+    return {
+      version,
+      available: Boolean(image),
+      api: image?.api || null,
+      release: image?.release || null,
+      label: image ? `Android ${version} (API ${image.api})` : `Android ${version} (not installed)`,
+    };
+  });
+};
+
+const assertAndroidOwner = (sessionId) => {
+  if (!androidRuntime || androidRuntime.sessionId !== sessionId) {
+    throw new Error("This private Android session does not belong to this browser.");
+  }
+  return androidRuntime;
+};
+
+const androidEmulatorStatus = (sessionId) => {
   const emulatorPath = androidToolPath("emulator");
   const adbPath = androidToolPath("adb");
-  const avds = androidAvds().map((name) => ({ name, version: androidAvdVersion(name) }));
-  const serial = connectedAndroidSerial(true);
-  const release = androidProperty(serial, "ro.build.version.release");
+  const images = installedAndroidImages();
+  const ownsRuntime = Boolean(androidRuntime && androidRuntime.sessionId === sessionId);
+  const serial = ownsRuntime ? connectedAndroidSerial() : null;
+  const release = ownsRuntime ? androidProperty(serial, "ro.build.version.release") : "";
   return {
     ok: true,
-    available: Boolean(emulatorPath && adbPath && avds.length),
+    available: Boolean(emulatorPath && adbPath && images.length),
     sdkRoot: androidSdkRoot(),
-    emulatorPath,
-    adbPath,
-    avds,
-    installedVersions: [...new Set(avds.map((avd) => avd.version).filter(Number.isFinite))].sort((a, b) => a - b),
-    running: Boolean(serial),
+    versions: androidVersionCatalog(),
+    installedVersions: [...new Set(images.map((image) => image.version))],
+    busy: Boolean(androidRuntime && !ownsRuntime),
+    running: Boolean(ownsRuntime && androidRuntime),
     booted: androidProperty(serial, "sys.boot_completed") === "1",
-    serial,
     release: release || null,
-    output: androidEmulatorOutput.trim().slice(-1200),
+    orientation: ownsRuntime ? androidRuntime.orientation : null,
+    specs: ownsRuntime ? androidRuntime.specs : null,
+    output: ownsRuntime ? androidRuntime.output.trim().slice(-1200) : "",
     lastExit: lastAndroidEmulatorExit,
   };
 };
 
-const configureAndroidViewport = (serial) => {
+const configureAndroidViewport = (runtime) => {
+  const { serial, orientation } = runtime;
   if (!serial) return;
+  const landscape = orientation === "landscape";
+  const width = landscape ? 1920 : 1080;
+  const height = landscape ? 1080 : 1920;
   try {
-    runAndroidTool("adb", ["-s", serial, "shell", "wm", "size", "1080x1920"]);
-    runAndroidTool("adb", ["-s", serial, "shell", "wm", "density", "420"]);
+    runAndroidTool("adb", ["-s", serial, "shell", "wm", "size", `${width}x${height}`]);
+    runAndroidTool("adb", ["-s", serial, "shell", "wm", "density", landscape ? "280" : "420"]);
   } catch {
     // The device can still be used if Android rejects a temporary display override.
   } finally {
-    androidConfiguredSerial = serial;
+    runtime.configured = true;
   }
 };
 
-const startAndroidEmulator = (body = {}) => {
-  const status = androidEmulatorStatus();
+const androidInteger = (value, fallback, minimum, maximum) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback;
+};
+
+const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
+  const { sessionDirectory } = androidSessionDirectory(sessionId);
+  rmSync(sessionDirectory, { recursive: true, force: true });
+  const avdHome = join(sessionDirectory, "avd");
+  const avdName = `NebulaVM_${sessionId.slice(0, 12)}_Android_${image.version}`;
+  const avdPath = join(avdHome, `${avdName}.avd`);
+  mkdirSync(avdPath, { recursive: true });
+  const landscape = orientation === "landscape";
+  const width = landscape ? 1920 : 1080;
+  const height = landscape ? 1080 : 1920;
+  writeFileSync(
+    join(avdHome, `${avdName}.ini`),
+    `avd.ini.encoding=UTF-8\npath=${avdPath}\ntarget=android-${image.api}\n`,
+  );
+  writeFileSync(
+    join(avdPath, "config.ini"),
+    [
+      `AvdId=${avdName}`,
+      `PlayStore.enabled=${image.playStore ? "true" : "false"}`,
+      `abi.type=${image.abi}`,
+      `avd.ini.displayname=NebulaVM private Android ${image.version}`,
+      `disk.dataPartition.size=${specs.storageGb}G`,
+      "fastboot.forceColdBoot=yes",
+      "fastboot.forceFastBoot=no",
+      "hw.accelerometer=yes",
+      "hw.audioInput=yes",
+      "hw.battery=yes",
+      "hw.camera.back=emulated",
+      "hw.camera.front=emulated",
+      `hw.cpu.arch=${image.abi}`,
+      `hw.cpu.ncore=${specs.cores}`,
+      "hw.dPad=no",
+      "hw.device.manufacturer=Google",
+      "hw.device.name=pixel_6",
+      "hw.gps=yes",
+      "hw.gpu.enabled=yes",
+      "hw.gpu.mode=auto",
+      `hw.initialOrientation=${orientation}`,
+      "hw.keyboard=yes",
+      `hw.lcd.density=${landscape ? 280 : 420}`,
+      `hw.lcd.height=${height}`,
+      `hw.lcd.width=${width}`,
+      "hw.mainKeys=no",
+      `hw.ramSize=${specs.memoryMb}`,
+      "hw.sdCard=no",
+      "hw.sensors.orientation=yes",
+      "hw.sensors.proximity=yes",
+      `image.sysdir.1=${image.relativeImagePath}`,
+      "runtime.network.latency=none",
+      "runtime.network.speed=full",
+      "showDeviceFrame=no",
+      "skin.dynamic=yes",
+      `skin.name=${width}x${height}`,
+      "skin.path=_no_skin",
+      `tag.display=${image.playStore ? "Google Play" : image.tag}`,
+      `tag.id=${image.tag}`,
+      `target=android-${image.api}`,
+      "vm.heapSize=512",
+      "",
+    ].join("\n"),
+  );
+  return { sessionDirectory, avdHome, avdName, avdPath };
+};
+
+const startAndroidEmulator = (sessionId, body = {}) => {
+  const status = androidEmulatorStatus(sessionId);
   if (!status.available) {
-    throw new Error("Install an Android system image and create an Android Virtual Device first.");
+    throw new Error("Install a genuine Android system image in Android Studio first.");
   }
-  if (status.running) {
-    configureAndroidViewport(status.serial);
-    return { ...status, starting: !status.booted };
+  if (androidRuntime) {
+    if (androidRuntime.sessionId !== sessionId) {
+      const error = new Error("Android is currently in use by another private browser session.");
+      error.statusCode = 409;
+      throw error;
+    }
+    return { ...androidEmulatorStatus(sessionId), starting: !status.booted };
   }
 
   const requestedVersion = Number(body.version);
-  const selected =
-    status.avds.find((avd) => avd.version === requestedVersion) ||
-    status.avds.find((avd) => avd.name === "NebulaVM_Android_16") ||
-    status.avds[0];
-  if (!selected) {
-    throw new Error(`Android ${requestedVersion || ""} is not installed on this host.`.trim());
+  const image = installedAndroidImages().find((candidate) => candidate.version === requestedVersion);
+  if (!image) {
+    const error = new Error(`A genuine Android ${requestedVersion || ""} system image is not installed on this host.`.trim());
+    error.statusCode = 400;
+    throw error;
   }
+  const specs = {
+    cores: androidInteger(body.cores, 4, 1, Math.min(4, cpus().length)),
+    memoryMb: androidInteger(body.memoryMb, 3072, 1024, 4096),
+    storageGb: androidInteger(body.storageGb, 8, 4, 32),
+  };
+  const orientation = body.orientation === "landscape" ? "landscape" : "portrait";
+  const disposable = createDisposableAndroidAvd(sessionId, image, specs, orientation);
 
   const emulatorPath = androidToolPath("emulator");
-  androidEmulatorProcess = spawn(
+  const processHandle = spawn(
     emulatorPath,
     [
       "-avd",
-      selected.name,
+      disposable.avdName,
+      "-port",
+      String(androidEmulatorPort),
       "-no-window",
       "-no-snapshot",
       "-no-audio",
@@ -1031,35 +1216,60 @@ const startAndroidEmulator = (body = {}) => {
       "-gpu",
       "swiftshader_indirect",
       "-cores",
-      "4",
+      String(specs.cores),
       "-memory",
-      "3072",
+      String(specs.memoryMb),
     ],
     {
       cwd: workspaceDir,
-      env: { ...process.env, ANDROID_AVD_HOME: androidAvdHome() },
+      env: {
+        ...process.env,
+        ANDROID_SDK_ROOT: androidSdkRoot(),
+        ANDROID_HOME: androidSdkRoot(),
+        ANDROID_AVD_HOME: disposable.avdHome,
+      },
       windowsHide: true,
       detached: false,
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  androidEmulatorOutput = "";
+  androidRuntime = {
+    sessionId,
+    process: processHandle,
+    serial: androidEmulatorSerial,
+    output: "",
+    configured: false,
+    awake: false,
+    image,
+    specs,
+    orientation,
+    ...disposable,
+    wrapperExited: false,
+  };
   lastAndroidEmulatorExit = null;
   const rememberAndroidOutput = (chunk) => {
-    androidEmulatorOutput = `${androidEmulatorOutput}${chunk}`.slice(-8000);
+    if (androidRuntime?.sessionId === sessionId) {
+      androidRuntime.output = `${androidRuntime.output}${chunk}`.slice(-8000);
+    }
   };
-  androidEmulatorProcess.stdout.on("data", rememberAndroidOutput);
-  androidEmulatorProcess.stderr.on("data", rememberAndroidOutput);
-  androidEmulatorProcess.once("exit", () => {
+  processHandle.stdout.on("data", rememberAndroidOutput);
+  processHandle.stderr.on("data", rememberAndroidOutput);
+  processHandle.once("exit", () => {
+    const exitedRuntime = androidRuntime?.sessionId === sessionId ? androidRuntime : null;
     lastAndroidEmulatorExit = {
       at: new Date().toISOString(),
-      output: androidEmulatorOutput.trim().slice(-2000),
+      output: exitedRuntime?.output.trim().slice(-2000) || "",
     };
-    androidEmulatorProcess = null;
+    if (exitedRuntime) exitedRuntime.wrapperExited = true;
+    setTimeout(() => {
+      if (androidRuntime?.sessionId !== sessionId || androidPortProcessId()) return;
+      const failedRuntime = androidRuntime;
+      androidRuntime = null;
+      void removeAndroidSessionDirectory(failedRuntime.sessionDirectory).catch(() => {});
+    }, 2500);
   });
-  androidEmulatorProcess.once("error", (error) => {
+  processHandle.once("error", (error) => {
     rememberAndroidOutput(error.message);
-    androidEmulatorProcess = null;
   });
 
   return {
@@ -1068,16 +1278,29 @@ const startAndroidEmulator = (body = {}) => {
     starting: true,
     running: true,
     booted: false,
-    avd: selected,
+    version: image.version,
+    api: image.api,
+    orientation,
+    specs,
     installedVersions: status.installedVersions,
   };
 };
 
-const androidEmulatorFrame = async () => {
+const androidEmulatorFrame = async (sessionId) => {
+  const runtime = assertAndroidOwner(sessionId);
   const serial = connectedAndroidSerial();
   if (!serial) throw new Error("The Android Emulator is not connected yet.");
-  if (androidConfiguredSerial !== serial) {
-    configureAndroidViewport(serial);
+  if (!runtime.configured) {
+    configureAndroidViewport(runtime);
+  }
+  if (!runtime.awake && androidProperty(serial, "sys.boot_completed") === "1") {
+    try {
+      runAndroidTool("adb", ["-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"]);
+      runAndroidTool("adb", ["-s", serial, "shell", "wm", "dismiss-keyguard"]);
+    } catch {
+      // A frame can still be served if the guest does not support these commands.
+    }
+    runtime.awake = true;
   }
   let image;
   try {
@@ -1086,14 +1309,14 @@ const androidEmulatorFrame = async () => {
       timeout: 20000,
     });
   } catch (error) {
-    androidActiveSerial = null;
     throw error;
   }
   if (!image?.length) throw new Error("The Android Emulator returned an empty frame.");
   return image;
 };
 
-const sendAndroidEmulatorInput = async (body = {}) => {
+const sendAndroidEmulatorInput = async (sessionId, body = {}) => {
+  const runtime = assertAndroidOwner(sessionId);
   const serial = connectedAndroidSerial();
   if (!serial) throw new Error("The Android Emulator is not connected.");
   const clampCoordinate = (value, maximum) =>
@@ -1115,8 +1338,8 @@ const sendAndroidEmulatorInput = async (body = {}) => {
       "shell",
       "input",
       "tap",
-      clampCoordinate(body.x, 1080),
-      clampCoordinate(body.y, 1920),
+      clampCoordinate(body.x, runtime.orientation === "landscape" ? 1920 : 1080),
+      clampCoordinate(body.y, runtime.orientation === "landscape" ? 1080 : 1920),
     ]);
   } else if (body.type === "swipe") {
     await runAndroidToolAsync("adb", [
@@ -1125,10 +1348,10 @@ const sendAndroidEmulatorInput = async (body = {}) => {
       "shell",
       "input",
       "swipe",
-      clampCoordinate(body.x1, 1080),
-      clampCoordinate(body.y1, 1920),
-      clampCoordinate(body.x2, 1080),
-      clampCoordinate(body.y2, 1920),
+      clampCoordinate(body.x1, runtime.orientation === "landscape" ? 1920 : 1080),
+      clampCoordinate(body.y1, runtime.orientation === "landscape" ? 1080 : 1920),
+      clampCoordinate(body.x2, runtime.orientation === "landscape" ? 1920 : 1080),
+      clampCoordinate(body.y2, runtime.orientation === "landscape" ? 1080 : 1920),
       String(Math.max(50, Math.min(3000, Math.round(Number(body.duration) || 250)))),
     ]);
   } else if (body.type === "text") {
@@ -1140,21 +1363,35 @@ const sendAndroidEmulatorInput = async (body = {}) => {
   return { ok: true };
 };
 
-const stopAndroidEmulator = () => {
+const stopAndroidEmulator = async (sessionId) => {
+  const runtime = assertAndroidOwner(sessionId);
   const serial = connectedAndroidSerial();
   if (serial) {
     try {
       runAndroidTool("adb", ["-s", serial, "emu", "kill"], { timeout: 10000 });
     } catch {
-      androidEmulatorProcess?.kill();
+      runtime.process?.kill();
     }
   } else {
-    androidEmulatorProcess?.kill();
+    runtime.process?.kill();
   }
-  androidEmulatorProcess = null;
-  androidConfiguredSerial = null;
-  androidActiveSerial = null;
-  return { ok: true };
+  killAndroidPortProcess();
+  androidRuntime = null;
+  await removeAndroidSessionDirectory(runtime.sessionDirectory);
+  return { ok: true, deleted: true };
+};
+
+const cleanupOrphanedAndroidSessions = () => {
+  if (androidRuntime) return;
+  try {
+    runAndroidTool("adb", ["-s", androidEmulatorSerial, "emu", "kill"], { timeout: 5000 });
+  } catch {
+    // No disposable NebulaVM Android emulator is running.
+  }
+  killAndroidPortProcess();
+  if (existsSync(androidSessionsRoot)) {
+    rmSync(androidSessionsRoot, { recursive: true, force: true });
+  }
 };
 
 const runHyperVAction = (action, config = {}, timeoutMs = 30000) =>
@@ -1679,6 +1916,7 @@ const startNativeVm = async (body) => {
 const nativeQemuPlugin = () => ({
   name: "nebulavm-native-qemu",
   configureServer(server) {
+    cleanupOrphanedAndroidSessions();
     const nativeVncWss = new WebSocketServer({ noServer: true });
     const hyperVGuestVncWss = new WebSocketServer({ noServer: true });
 
@@ -1932,35 +2170,41 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "GET" && url.pathname === "/api/android-emulator/status") {
-          json(res, 200, androidEmulatorStatus());
+          const sessionId = androidSessionId(req);
+          json(res, 200, androidEmulatorStatus(sessionId));
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/android-emulator/start") {
+          const sessionId = androidSessionId(req);
           const body = await readJsonBody(req);
-          json(res, 200, startAndroidEmulator(body));
+          json(res, 200, startAndroidEmulator(sessionId, body));
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/android-emulator/stop") {
-          json(res, 200, stopAndroidEmulator());
+          const sessionId = androidSessionId(req);
+          json(res, 200, await stopAndroidEmulator(sessionId));
           return;
         }
 
         if (req.method === "GET" && url.pathname === "/api/android-emulator/frame") {
-          const image = await androidEmulatorFrame();
+          const sessionId = androidSessionId(req);
+          const runtime = assertAndroidOwner(sessionId);
+          const image = await androidEmulatorFrame(sessionId);
           res.statusCode = 200;
           res.setHeader("Content-Type", "image/png");
           res.setHeader("Cache-Control", "no-store");
-          res.setHeader("X-NebulaVM-Frame-Width", "1080");
-          res.setHeader("X-NebulaVM-Frame-Height", "1920");
+          res.setHeader("X-NebulaVM-Frame-Width", runtime.orientation === "landscape" ? "1920" : "1080");
+          res.setHeader("X-NebulaVM-Frame-Height", runtime.orientation === "landscape" ? "1080" : "1920");
           res.end(image);
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/android-emulator/input") {
+          const sessionId = androidSessionId(req);
           const body = await readJsonBody(req);
-          json(res, 200, await sendAndroidEmulatorInput(body));
+          json(res, 200, await sendAndroidEmulatorInput(sessionId, body));
           return;
         }
 
@@ -2006,7 +2250,7 @@ const nativeQemuPlugin = () => ({
 
         json(res, 404, { error: "Unknown native QEMU endpoint." });
       } catch (error) {
-        json(res, 400, { error: error.message });
+        json(res, Number(error.statusCode) || 400, { error: error.message });
       }
     });
   },

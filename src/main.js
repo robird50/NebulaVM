@@ -159,6 +159,9 @@ app.innerHTML = `
           <span class="status-dot"></span>
           <span>Powered off</span>
         </div>
+        <div class="experimental-warning-pill" id="experimentalWarningPill" hidden>
+          This emulator is experimental. Be careful as things might not go the way you want it to.
+        </div>
         <div class="stored-images-control" id="storedImagesControl">
           <button class="stored-images-button" id="storedImagesButton" type="button" aria-haspopup="menu" aria-expanded="false">
             <span class="stored-images-arrow" aria-hidden="true">v</span>
@@ -284,15 +287,57 @@ app.innerHTML = `
             </button>
           </div>
 
-          <label class="field full-span android-config" id="androidConfig" hidden>
-            <span>Android version</span>
-            <select id="androidVersion">
-              ${Array.from({ length: 17 }, (_, index) => {
-                const version = index + 1;
-                return `<option value="${version}"${version === 17 ? " selected" : ""}>Android ${version}</option>`;
-              }).join("")}
-            </select>
-          </label>
+          <section class="android-config full-span" id="androidConfig" hidden>
+            <label class="field full-span">
+              <span>Genuine Android system image</span>
+              <select id="androidVersion">
+                ${Array.from({ length: 17 }, (_, index) => {
+                  const version = index + 1;
+                  return `<option value="${version}"${version === 16 ? " selected" : ""}>Android ${version}</option>`;
+                }).join("")}
+              </select>
+            </label>
+            <div class="android-spec-grid">
+              <label class="field">
+                <span>Processor cores</span>
+                <select id="androidCores">
+                  <option value="1">1 core</option>
+                  <option value="2">2 cores</option>
+                  <option value="4" selected>4 cores</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Memory</span>
+                <select id="androidMemory">
+                  <option value="1024">1024 MB</option>
+                  <option value="2048">2048 MB</option>
+                  <option value="3072" selected>3072 MB</option>
+                  <option value="4096">4096 MB</option>
+                </select>
+              </label>
+              <label class="field full-span">
+                <span>Device storage</span>
+                <select id="androidStorage">
+                  <option value="4">4 GB</option>
+                  <option value="8" selected>8 GB</option>
+                  <option value="16">16 GB</option>
+                  <option value="32">32 GB</option>
+                </select>
+              </label>
+            </div>
+            <fieldset class="android-orientation">
+              <legend>Orientation</legend>
+              <label>
+                <input type="radio" name="androidOrientation" value="portrait" checked />
+                <span><strong>9:16</strong><small>Portrait</small></span>
+              </label>
+              <label>
+                <input type="radio" name="androidOrientation" value="landscape" />
+                <span><strong>16:9</strong><small>Landscape</small></span>
+              </label>
+            </fieldset>
+            <p class="android-image-note" id="androidImageNote">Checking installed Android system images...</p>
+          </section>
 
           <label class="field full-span pc-spec-control">
             <span>Processor</span>
@@ -682,6 +727,12 @@ const els = {
   emulatorMenuOptions: [...document.querySelectorAll("[data-emulator-option]")],
   androidConfig: document.querySelector("#androidConfig"),
   androidVersion: document.querySelector("#androidVersion"),
+  androidCores: document.querySelector("#androidCores"),
+  androidMemory: document.querySelector("#androidMemory"),
+  androidStorage: document.querySelector("#androidStorage"),
+  androidOrientation: [...document.querySelectorAll('input[name="androidOrientation"]')],
+  androidImageNote: document.querySelector("#androidImageNote"),
+  experimentalWarningPill: document.querySelector("#experimentalWarningPill"),
   pcSpecControls: [...document.querySelectorAll(".pc-spec-control")],
   workspace: document.querySelector("#workspace"),
   mediaKicker: document.querySelector("#mediaKicker"),
@@ -1332,6 +1383,7 @@ const fetchAndroidJson = async (path, options) => {
       if (state.nativeHostToken) {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
+      headers.set("X-NebulaVM-Session", state.nativeSessionId);
       const response = await fetch(`${base}/api/android-emulator/${path}`, {
         cache: "no-store",
         ...options,
@@ -1360,6 +1412,7 @@ const fetchAndroidFrame = async () => {
       if (state.nativeHostToken) {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
+      headers.set("X-NebulaVM-Session", state.nativeSessionId);
       const response = await fetch(`${base}/api/android-emulator/frame?t=${Date.now()}`, {
         cache: "no-store",
         headers,
@@ -2639,6 +2692,11 @@ const updateButtons = (busy = false) => {
   els.bootButton.textContent = androidMode ? "Start Android" : emustarMode ? "Launch EMUSTAR" : "Boot VM";
   els.stopButton.textContent = emustarMode ? "End session" : androidMode ? "Stop Android" : "Stop";
   els.pauseButton.textContent = state.running ? "Pause" : "Resume";
+  [els.androidVersion, els.androidCores, els.androidMemory, els.androidStorage, ...els.androidOrientation].forEach(
+    (control) => {
+      control.disabled = androidMode && Boolean(state.emulator);
+    },
+  );
 };
 
 const updateUptime = () => {
@@ -3333,6 +3391,31 @@ const bootRemoteVm = async () => {
 };
 
 const androidVersionLabel = () => `Android ${els.androidVersion.value}`;
+const selectedAndroidOrientation = () =>
+  els.androidOrientation.find((option) => option.checked)?.value === "landscape" ? "landscape" : "portrait";
+
+const syncAndroidOrientation = () => {
+  const landscape = selectedAndroidOrientation() === "landscape";
+  els.workspace.classList.toggle("is-android-landscape", landscape);
+};
+
+const applyAndroidVersionCatalog = (versions = []) => {
+  const catalog = new Map(versions.map((entry) => [Number(entry.version), entry]));
+  let firstAvailable = null;
+  [...els.androidVersion.options].forEach((option) => {
+    const item = catalog.get(Number(option.value));
+    option.disabled = !item?.available;
+    option.textContent = item?.label || `Android ${option.value} (not installed)`;
+    if (item?.available && firstAvailable === null) firstAvailable = option.value;
+  });
+  if (els.androidVersion.selectedOptions[0]?.disabled && firstAvailable !== null) {
+    els.androidVersion.value = firstAvailable;
+  }
+  const installed = versions.filter((entry) => entry.available).map((entry) => `Android ${entry.version}`);
+  els.androidImageNote.textContent = installed.length
+    ? `Installed genuine images: ${installed.join(", ")}. Unavailable versions need their real system image installed in Android Studio.`
+    : "No genuine Android system images are installed on the host.";
+};
 
 const androidEra = () => {
   const version = Number(els.androidVersion.value);
@@ -3571,18 +3654,27 @@ const nativeAndroidCoordinates = (event, image) => {
 };
 
 const bootNativeAndroid = async (status) => {
-  const installedVersions = status.installedVersions || [];
-  let requestedVersion = Number(els.androidVersion.value);
-  if (installedVersions.length && !installedVersions.includes(requestedVersion)) {
-    requestedVersion = installedVersions.at(-1);
-    els.androidVersion.value = String(requestedVersion);
-    log(`Android ${requestedVersion} is the installed real device image, so NebulaVM selected it.`);
+  applyAndroidVersionCatalog(status.versions || []);
+  const requestedVersion = Number(els.androidVersion.value);
+  if (status.busy) {
+    throw new Error("Android is currently in use by another private browser session.");
   }
+  if (!(status.installedVersions || []).includes(requestedVersion)) {
+    throw new Error(`A genuine Android ${requestedVersion} system image is not installed on this host.`);
+  }
+  const orientation = selectedAndroidOrientation();
+  syncAndroidOrientation();
 
   const { response, data } = await fetchAndroidJson("start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ version: requestedVersion }),
+    body: JSON.stringify({
+      version: requestedVersion,
+      cores: Number(els.androidCores.value),
+      memoryMb: Number(els.androidMemory.value),
+      storageGb: Number(els.androidStorage.value),
+      orientation,
+    }),
   });
   if (!response.ok || !data.ok) {
     throw new Error(data.error || "The Android Emulator could not start.");
@@ -3688,10 +3780,13 @@ const bootNativeAndroid = async (status) => {
   };
 
   els.machineTitle.textContent = `${androidVersionLabel()} - Real device`;
-  els.ramMetric.textContent = `${androidVersionLabel()} native`;
+  els.ramMetric.textContent = `${data.specs?.memoryMb || els.androidMemory.value} MB RAM`;
   setPowerState(data.booted ? "Android running" : "Android starting", data.booted ? "running" : "booting");
   setViewportSummary(data.booted ? "Real Android is live from the host" : "Android Emulator is starting on the host");
-  log(`${androidVersionLabel()} real Android Emulator connected through NebulaVM Host.`);
+  log(
+    `${androidVersionLabel()} private AVD created with ${data.specs?.cores || els.androidCores.value} cores, ` +
+      `${data.specs?.memoryMb || els.androidMemory.value} MB RAM, and ${orientation === "landscape" ? "16:9" : "9:16"} orientation.`,
+  );
   scheduleNativeAndroidFrame(image, 0);
   updateButtons();
 };
@@ -3741,18 +3836,15 @@ const bootAndroidSimulator = () => {
 };
 
 const bootAndroid = async () => {
-  try {
-    const { response, data: status } = await fetchAndroidJson("status");
-    if (response.ok && status.available) {
-      await bootNativeAndroid(status);
-      return;
-    }
-  } catch (error) {
-    log(`Real Android host unavailable: ${error.message}`);
+  const { response, data: status } = await fetchAndroidJson("status");
+  if (!response.ok) {
+    throw new Error(status.error || "The Android host could not be checked.");
   }
-
-  bootAndroidSimulator();
-  log("Using the lightweight browser simulator because no real Android host is available.");
+  applyAndroidVersionCatalog(status.versions || []);
+  if (!status.available) {
+    throw new Error("Android Studio Emulator and a genuine Android system image are required on the host.");
+  }
+  await bootNativeAndroid(status);
 };
 
 const bootEmulator = async () => {
@@ -4070,19 +4162,21 @@ const updateBackendUi = () => {
   els.workspace.classList.toggle("is-emustar-mode", emustarMode);
   els.workspace.classList.toggle("is-android-mode", androidMode);
   document.documentElement.classList.toggle("android-mode", androidMode);
+  els.experimentalWarningPill.hidden = !emustarMode && !androidMode;
   els.emustarInfoLink.hidden = !emustarMode;
   els.storedImagesControl.hidden = androidMode;
   els.dropZone.hidden = androidMode;
   els.mediaWarning.hidden = androidMode;
   els.demoButton.hidden = androidMode;
   els.androidConfig.hidden = !androidMode;
+  if (androidMode) syncAndroidOrientation();
   els.pcSpecControls.forEach((control) => {
     control.hidden = androidMode;
   });
   els.advancedOptions.hidden = androidMode;
   els.mediaKicker.textContent = androidMode ? "Android" : emustarMode ? "Nebula Host" : "Media";
   els.bootSourceTitle.textContent = androidMode ? "Device" : emustarMode ? "Mission media" : "Boot source";
-  els.displayKicker.textContent = androidMode ? "Android Simulator" : emustarMode ? "Nebula Console" : "Display";
+  els.displayKicker.textContent = androidMode ? "Android Device" : emustarMode ? "Nebula Console" : "Display";
   els.activityLabel.textContent = androidMode ? "Android log" : emustarMode ? "Mission log" : "Activity";
   els.screenModeIcon.src = androidMode ? "/assets/android-icon.png" : "/assets/emustar-icon.png";
   els.displayModeMark.src = androidMode ? "/assets/android-icon.png" : "/assets/emustar-icon.png";
@@ -4095,7 +4189,7 @@ const updateBackendUi = () => {
       : "Drop an ISO to begin";
   if (!state.emulator && !state.isoFile) {
     els.machineTitle.textContent = androidMode
-      ? `${androidVersionLabel()} simulator`
+      ? `${androidVersionLabel()} private device`
       : emustarMode
         ? "EMUSTAR Control Deck"
         : "Awaiting boot media";
@@ -4177,9 +4271,14 @@ const updateBackendUi = () => {
       ? "x86_64 support uses QEMU Wasm and local artifacts from public/qemu."
     : "Legacy x86, 32-bit Linux, DOS, hobby OS, and vintage Windows images work best.";
   if (androidMode && !state.emulator) {
-    setViewportSummary("Android simulator is ready to start");
+    setViewportSummary("A private Android device is ready to be created");
+    void fetchAndroidJson("status")
+      .then(({ data }) => applyAndroidVersionCatalog(data.versions || []))
+      .catch((error) => {
+        els.androidImageNote.textContent = error.message;
+      });
   }
-  els.ramMetric.textContent = androidMode ? androidVersionLabel() : `${selectedMemoryMb()} MB RAM`;
+  els.ramMetric.textContent = androidMode ? `${els.androidMemory.value} MB RAM` : `${selectedMemoryMb()} MB RAM`;
   updateMediaWarning();
   updateButtons();
   void updateEmustarHostInfo();
@@ -4209,6 +4308,16 @@ els.androidVersion.addEventListener("change", async () => {
     log(`Switched the simulator to ${androidVersionLabel()}.`);
   }
   updateBackendUi();
+});
+els.androidOrientation.forEach((option) => {
+  option.addEventListener("change", async () => {
+    syncAndroidOrientation();
+    if (state.androidNativeActive) {
+      await stopEmulator();
+      log(`Selected ${selectedAndroidOrientation() === "landscape" ? "16:9 landscape" : "9:16 portrait"}. Start Android to create a new private AVD.`);
+    }
+    updateBackendUi();
+  });
 });
 els.androidBackButton.addEventListener("click", androidBack);
 els.androidHomeButton.addEventListener("click", androidHome);
@@ -4385,6 +4494,17 @@ els.clearLogButton.addEventListener("click", () => {
 
 window.addEventListener("pagehide", () => {
   void cleanupStagedHostIso({ keepalive: true, silent: true });
+  if (state.androidNativeActive && state.nativeQemuApiBase) {
+    const headers = {
+      "X-NebulaVM-Session": state.nativeSessionId,
+      ...(state.nativeHostToken ? { Authorization: `Bearer ${state.nativeHostToken}` } : {}),
+    };
+    void fetch(`${state.nativeQemuApiBase}/api/android-emulator/stop`, {
+      method: "POST",
+      headers,
+      keepalive: true,
+    }).catch(() => {});
+  }
 });
 window.addEventListener("beforeunload", () => {
   void cleanupStagedHostIso({ keepalive: true, silent: true });

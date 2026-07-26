@@ -582,6 +582,25 @@ h2 {
   margin-top: 0;
 }
 
+.experimental-warning-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: min(100%, 620px);
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 2px solid #7f1d1d;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #070707;
+  font-size: 0.84rem;
+  font-weight: 950;
+  line-height: 1.25;
+}
+
+.experimental-warning-pill[hidden] {
+  display: none;
+}
+
 .about-strip strong {
   color: #f8fbff;
   font-weight: 900;
@@ -2171,6 +2190,75 @@ input[type="text"] {
   background: #071011;
 }
 
+.android-config {
+  display: grid;
+  gap: 14px;
+}
+
+.android-spec-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.android-orientation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.android-orientation legend {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+  color: #b9c5d5;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.android-orientation label {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-height: 58px;
+  padding: 9px 11px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 6px;
+  background: #071011;
+  cursor: pointer;
+}
+
+.android-orientation input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #a3e635;
+}
+
+.android-orientation span {
+  display: grid;
+  gap: 2px;
+}
+
+.android-orientation strong {
+  color: #f8fafc;
+  font-size: 0.96rem;
+}
+
+.android-orientation small,
+.android-image-note {
+  color: #95a6b9;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.android-image-note {
+  margin: 0;
+}
+
 .workspace.is-android-mode .screen-shell {
   width: min(100%, 430px);
   min-height: 0;
@@ -2181,6 +2269,12 @@ input[type="text"] {
   box-shadow:
     0 0 0 1px rgba(56, 189, 248, 0.15),
     0 24px 60px rgba(0, 0, 0, 0.42);
+}
+
+.workspace.is-android-mode.is-android-landscape .screen-shell {
+  width: 100%;
+  max-width: 980px;
+  aspect-ratio: 16 / 9;
 }
 
 .workspace.is-android-mode .screen-mode-icon {
