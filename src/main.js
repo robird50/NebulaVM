@@ -103,6 +103,9 @@ const state = {
   storedIsoLimit: STORED_ISO_LIMIT,
   storedImagesMenuOpen: false,
   storedIsoUploading: false,
+  androidView: "home",
+  androidHistory: ["home"],
+  androidRecents: [],
 };
 
 app.innerHTML = `
@@ -151,7 +154,7 @@ app.innerHTML = `
           <span class="status-dot"></span>
           <span>Powered off</span>
         </div>
-        <div class="stored-images-control">
+        <div class="stored-images-control" id="storedImagesControl">
           <button class="stored-images-button" id="storedImagesButton" type="button" aria-haspopup="menu" aria-expanded="false">
             <span class="stored-images-arrow" aria-hidden="true">v</span>
             <span>Stored images</span>
@@ -220,6 +223,7 @@ app.innerHTML = `
               <option value="qemu-native-arm64-windows">QEMU ARM64 / Windows</option>
               <option value="qemu-native-arm64-ubuntu">QEMU ARM64 / Ubuntu</option>
               <option value="remote-vm">Remote VM / browser stream</option>
+              <option value="android">Android</option>
             </select>
             <div class="emulator-dropdown">
               <button
@@ -264,6 +268,10 @@ app.innerHTML = `
                   <img class="emulator-menu-icon" src="/assets/remote-vm-icon.png" alt="" />
                   <span>Remote VM / browser stream</span>
                 </button>
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="android">
+                  <img class="emulator-menu-icon" src="/assets/android-icon.png" alt="" />
+                  <span>Android</span>
+                </button>
               </div>
             </div>
             <button class="emustar-info-link" id="emustarInfoLink" type="button" hidden>
@@ -271,7 +279,17 @@ app.innerHTML = `
             </button>
           </div>
 
-          <label class="field full-span">
+          <label class="field full-span android-config" id="androidConfig" hidden>
+            <span>Android version</span>
+            <select id="androidVersion">
+              ${Array.from({ length: 17 }, (_, index) => {
+                const version = index + 1;
+                return `<option value="${version}"${version === 17 ? " selected" : ""}>Android ${version}</option>`;
+              }).join("")}
+            </select>
+          </label>
+
+          <label class="field full-span pc-spec-control">
             <span>Processor</span>
             <select id="processorMode">
               <option value="x86">32-bit x86 processor</option>
@@ -280,7 +298,7 @@ app.innerHTML = `
             </select>
           </label>
 
-          <div class="field range-field full-span">
+          <div class="field range-field full-span pc-spec-control">
             <div class="range-heading">
               <label for="processorSpeed">Processor speed</label>
               <output id="processorSpeedValue" for="processorSpeed">2 GHz</output>
@@ -299,7 +317,7 @@ app.innerHTML = `
             <span class="range-endpoints" aria-hidden="true"><span>1 GHz</span><span>5 GHz</span></span>
           </div>
 
-          <label class="field">
+          <label class="field pc-spec-control">
             <span>Boot as</span>
             <select id="mediaType">
               <option value="cdrom">CD-ROM ISO</option>
@@ -308,7 +326,7 @@ app.innerHTML = `
             </select>
           </label>
 
-          <div class="field range-field">
+          <div class="field range-field pc-spec-control">
             <div class="range-heading">
               <label for="memorySlider">Memory</label>
               <output id="memorySliderValue" for="memorySlider">128 MB</output>
@@ -337,7 +355,7 @@ app.innerHTML = `
             </select>
           </div>
 
-          <label class="field">
+          <label class="field pc-spec-control">
             <span>Video memory</span>
             <select id="vgaSize">
               <option value="8388608">8 MB</option>
@@ -347,7 +365,7 @@ app.innerHTML = `
             </select>
           </label>
 
-          <label class="field">
+          <label class="field pc-spec-control">
             <span>Boot order</span>
             <select id="bootOrder">
               <option value="213">CD-ROM first</option>
@@ -493,7 +511,7 @@ app.innerHTML = `
       <section class="console-area" aria-label="Virtual machine display">
         <div class="machine-topbar">
           <div class="display-identity">
-            <img class="emustar-console-mark" src="/assets/emustar-icon.png" alt="" />
+            <img class="emustar-console-mark" id="displayModeMark" src="/assets/emustar-icon.png" alt="" />
             <div>
               <p class="kicker" id="displayKicker">Display</p>
               <h2 id="machineTitle">Awaiting boot media</h2>
@@ -518,6 +536,30 @@ app.innerHTML = `
             <pre class="qemu-terminal" id="qemuTerminal" hidden></pre>
             <div class="native-display" id="nativeDisplay" hidden></div>
             <iframe class="remote-frame" id="remoteFrame" title="Remote VM display" hidden></iframe>
+            <div class="android-display" id="androidDisplay" hidden>
+              <div class="android-device" id="androidDevice" data-era="modern">
+                <div class="android-status-bar">
+                  <span id="androidClock">9:41</span>
+                  <span class="android-status-icons" aria-label="Wi-Fi and battery status">
+                    <span class="android-signal" aria-hidden="true"></span>
+                    <span class="android-wifi" aria-hidden="true"></span>
+                    <span class="android-battery" aria-hidden="true"></span>
+                  </span>
+                </div>
+                <main class="android-surface" id="androidSurface" tabindex="-1"></main>
+                <nav class="android-navigation" aria-label="Android system navigation">
+                  <button id="androidBackButton" type="button" aria-label="Back" title="Back">
+                    <span class="android-back-shape" aria-hidden="true"></span>
+                  </button>
+                  <button id="androidHomeButton" type="button" aria-label="Home" title="Home">
+                    <span class="android-home-shape" aria-hidden="true"></span>
+                  </button>
+                  <button id="androidRecentsButton" type="button" aria-label="Recent apps" title="Recent apps">
+                    <span class="android-recents-shape" aria-hidden="true"></span>
+                  </button>
+                </nav>
+              </div>
+            </div>
             <div class="screen-placeholder" id="screenPlaceholder">
               <img class="screen-mode-icon" id="screenModeIcon" src="/assets/emustar-icon.png" alt="" hidden />
               <span class="orbital" id="screenOrbital"></span>
@@ -633,6 +675,9 @@ const els = {
   emulatorSelectedText: document.querySelector("#emulatorSelectedText"),
   emulatorMenu: document.querySelector("#emulatorMenu"),
   emulatorMenuOptions: [...document.querySelectorAll("[data-emulator-option]")],
+  androidConfig: document.querySelector("#androidConfig"),
+  androidVersion: document.querySelector("#androidVersion"),
+  pcSpecControls: [...document.querySelectorAll(".pc-spec-control")],
   workspace: document.querySelector("#workspace"),
   mediaKicker: document.querySelector("#mediaKicker"),
   bootSourceTitle: document.querySelector("#bootSourceTitle"),
@@ -646,6 +691,7 @@ const els = {
   processorMode: document.querySelector("#processorMode"),
   processorSpeed: document.querySelector("#processorSpeed"),
   processorSpeedValue: document.querySelector("#processorSpeedValue"),
+  advancedOptions: document.querySelector("#advancedOptions"),
   nativePanel: document.querySelector("#nativePanel"),
   nativeRuntimeIcon: document.querySelector("#nativeRuntimeIcon"),
   nativeRuntimeName: document.querySelector("#nativeRuntimeName"),
@@ -693,14 +739,23 @@ const els = {
   qemuTerminal: document.querySelector("#qemuTerminal"),
   nativeDisplay: document.querySelector("#nativeDisplay"),
   remoteFrame: document.querySelector("#remoteFrame"),
+  androidDisplay: document.querySelector("#androidDisplay"),
+  androidDevice: document.querySelector("#androidDevice"),
+  androidClock: document.querySelector("#androidClock"),
+  androidSurface: document.querySelector("#androidSurface"),
+  androidBackButton: document.querySelector("#androidBackButton"),
+  androidHomeButton: document.querySelector("#androidHomeButton"),
+  androidRecentsButton: document.querySelector("#androidRecentsButton"),
   placeholderMeta: document.querySelector("#placeholderMeta"),
   placeholderTitle: document.querySelector("#placeholderTitle"),
   screenModeIcon: document.querySelector("#screenModeIcon"),
   screenOrbital: document.querySelector("#screenOrbital"),
   displayKicker: document.querySelector("#displayKicker"),
+  displayModeMark: document.querySelector("#displayModeMark"),
   activityLabel: document.querySelector("#activityLabel"),
   machineTitle: document.querySelector("#machineTitle"),
   powerState: document.querySelector("#powerState"),
+  storedImagesControl: document.querySelector("#storedImagesControl"),
   storedImagesButton: document.querySelector("#storedImagesButton"),
   storedImagesMenu: document.querySelector("#storedImagesMenu"),
   storedImagesCount: document.querySelector("#storedImagesCount"),
@@ -2308,6 +2363,7 @@ const isNativeUbuntuArm64Mode = () =>
 const isNativeArm64Mode = () => isNativeWindowsArm64Mode() || isNativeUbuntuArm64Mode();
 const isNativeMode = () => isNativeX64Mode() || isNativeArm64Mode();
 const isRemoteMode = () => els.emulatorMode.value === "remote-vm";
+const isAndroidMode = () => els.emulatorMode.value === "android";
 const isNativeQemuMode = () => isStandaloneQemuMode();
 const isQemuMode = () => isBrowserQemuMode() || isNativeQemuMode();
 const isExternalMode = () => isQemuMode() || isHyperVMode() || isRemoteMode();
@@ -2333,7 +2389,8 @@ const hasEmulatorIcon = (value) =>
   value === "qemu-native-x64" ||
   value === "qemu-native-arm64-windows" ||
   value === "qemu-native-arm64-ubuntu" ||
-  value === "remote-vm";
+  value === "remote-vm" ||
+  value === "android";
 const looksLikeArm64Iso = (path) => /(^|[^a-z0-9])(arm64|aarch64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeX64Iso = (path) => /(^|[^a-z0-9])(x64|amd64|x86_64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeUbuntuIso = (path) => /(^|[^a-z0-9])ubuntu(?=[^a-z0-9]|$)/i.test(path);
@@ -2400,7 +2457,9 @@ const syncEmulatorDropdown = () => {
   els.emulatorSelectedText.textContent = getEmulatorLabel(selectedValue);
   els.emulatorSelectedIcon.classList.toggle("emulator-menu-icon-empty", !hasEmulatorIcon(selectedValue));
   els.emulatorSelectedIcon.src =
-    selectedValue === "remote-vm"
+    selectedValue === "android"
+      ? "/assets/android-icon.png"
+      : selectedValue === "remote-vm"
       ? "/assets/remote-vm-icon.png"
       : selectedValue.startsWith("qemu-native-")
         ? "/assets/qemu-icon.png"
@@ -2449,7 +2508,7 @@ const isSelectedMediaTooLarge = () =>
   state.isoFile.size > MAX_BROWSER_MEDIA_BYTES;
 
 const updateMediaWarning = () => {
-  if (!isSelectedMediaTooLarge()) {
+  if (isAndroidMode() || !isSelectedMediaTooLarge()) {
     els.mediaWarning.hidden = true;
     els.mediaWarning.textContent = "";
     return;
@@ -2466,7 +2525,10 @@ const updateButtons = (busy = false) => {
   updateWindowsCredentialUi();
   const externalMode = isExternalMode();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
-  const hasBootMedia = emustarMode
+  const androidMode = isAndroidMode();
+  const hasBootMedia = androidMode
+    ? true
+    : emustarMode
     ? Boolean(els.nativeIsoPath.value.trim() || state.isoFile)
     : isNativeMode()
     ? Boolean(els.nativeIsoPath.value.trim())
@@ -2494,12 +2556,15 @@ const updateButtons = (busy = false) => {
   els.nativeResetFirmwareButton.disabled =
     busy || !isNativeMode() || Boolean(state.emulator) || nativeUnavailable;
   els.nativeConsoleButton.disabled = busy || !isHyperVMode() || nativeUnavailable;
-  els.bootButton.textContent = emustarMode ? "Launch EMUSTAR" : "Boot VM";
-  els.stopButton.textContent = emustarMode ? "End session" : "Stop";
+  els.bootButton.textContent = androidMode ? "Start Android" : emustarMode ? "Launch EMUSTAR" : "Boot VM";
+  els.stopButton.textContent = emustarMode ? "End session" : androidMode ? "Stop Android" : "Stop";
   els.pauseButton.textContent = state.running ? "Pause" : "Resume";
 };
 
 const updateUptime = () => {
+  if (els.androidClock) {
+    els.androidClock.textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
   if (!state.startedAt) {
     els.uptimeMetric.textContent = "00:00";
     return;
@@ -2682,6 +2747,14 @@ const summarizeViewportCanvas = (canvas) => {
 };
 
 const updateViewportSummary = () => {
+  if (isAndroidMode()) {
+    setViewportSummary(
+      state.running
+        ? `${androidVersionLabel()} ${state.androidView} screen is active`
+        : "Android simulator is ready to start",
+    );
+    return;
+  }
   if (!els.screenPlaceholder.hidden) {
     setViewportSummary("Waiting for boot media to start");
     return;
@@ -2858,6 +2931,12 @@ const stopEmulator = async () => {
   state.nativeRuntimeName = null;
   els.remoteFrame.src = "about:blank";
   els.remoteFrame.hidden = true;
+  els.androidDisplay.hidden = true;
+  if (isAndroidMode()) {
+    els.placeholderTitle.textContent = `${androidVersionLabel()} ready`;
+    els.placeholderMeta.textContent = "Start Android to open the browser simulator.";
+    setViewportSummary("Android simulator is ready to start");
+  }
   updateButtons();
 };
 
@@ -3173,8 +3252,204 @@ const bootRemoteVm = async () => {
   updateButtons();
 };
 
+const androidVersionLabel = () => `Android ${els.androidVersion.value}`;
+
+const androidEra = () => {
+  const version = Number(els.androidVersion.value);
+  if (version <= 4) return "classic";
+  if (version <= 9) return "holo";
+  if (version <= 12) return "material";
+  return "modern";
+};
+
+const androidAppNames = {
+  browser: "Browser",
+  settings: "Settings",
+  files: "Files",
+  clock: "Clock",
+};
+
+const androidAppButton = (view, letter, color) => `
+  <button class="android-app" type="button" data-android-open="${view}">
+    <span class="android-app-icon" style="--app-color: ${color}">${letter}</span>
+    <span>${androidAppNames[view]}</span>
+  </button>
+`;
+
+const androidAppPage = (view, content) => `
+  <section class="android-app-page" aria-label="${androidAppNames[view]}">
+    <header>
+      <button type="button" class="android-page-back" data-android-system="back" aria-label="Back">&#8249;</button>
+      <strong>${androidAppNames[view]}</strong>
+    </header>
+    <div class="android-app-content">${content}</div>
+  </section>
+`;
+
+const renderAndroidView = () => {
+  if (!isAndroidMode()) return;
+  const version = androidVersionLabel();
+  els.androidDevice.dataset.era = androidEra();
+  els.androidDevice.dataset.version = els.androidVersion.value;
+
+  if (state.androidView === "browser") {
+    els.androidSurface.innerHTML = androidAppPage(
+      "browser",
+      `<div class="android-browser-bar">nebula://start</div>
+       <div class="android-browser-page">
+         <span class="android-browser-mark">N</span>
+         <h3>Nebula Browser</h3>
+         <p>The lightweight browser surface for ${version}.</p>
+         <button type="button" data-android-open="home">Return home</button>
+       </div>`,
+    );
+  } else if (state.androidView === "settings") {
+    els.androidSurface.innerHTML = androidAppPage(
+      "settings",
+      `<div class="android-settings-list">
+         <label><span>Wi-Fi<small>Nebula Network</small></span><input type="checkbox" checked /></label>
+         <label><span>Bluetooth<small>Ready to pair</small></span><input type="checkbox" /></label>
+         <div><span>Android version<small>${version}</small></span></div>
+         <div><span>Device name<small>Nebula Android</small></span></div>
+       </div>`,
+    );
+  } else if (state.androidView === "files") {
+    els.androidSurface.innerHTML = androidAppPage(
+      "files",
+      `<div class="android-file-list">
+         <button type="button"><span>D</span><strong>Downloads</strong><small>Empty</small></button>
+         <button type="button"><span>P</span><strong>Pictures</strong><small>4 items</small></button>
+         <button type="button"><span>M</span><strong>Music</strong><small>2 items</small></button>
+       </div>`,
+    );
+  } else if (state.androidView === "clock") {
+    const now = new Date();
+    els.androidSurface.innerHTML = androidAppPage(
+      "clock",
+      `<div class="android-clock-page">
+         <time>${now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
+         <span>${now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}</span>
+       </div>`,
+    );
+  } else if (state.androidView === "recents") {
+    const cards = state.androidRecents.length
+      ? state.androidRecents
+          .map(
+            (view) => `
+              <button class="android-recent-card" type="button" data-android-open="${view}">
+                <span>${androidAppNames[view]}</span>
+                <small>Tap to reopen</small>
+              </button>`,
+          )
+          .join("")
+      : `<p class="android-empty-recents">No recent apps</p>`;
+    els.androidSurface.innerHTML = `
+      <section class="android-recents" aria-label="Recent apps">
+        <header><strong>Recent apps</strong></header>
+        <div>${cards}</div>
+        ${state.androidRecents.length ? '<button class="android-clear-recents" type="button" data-android-clear-recents>Clear all</button>' : ""}
+      </section>`;
+  } else {
+    state.androidView = "home";
+    els.androidSurface.innerHTML = `
+      <section class="android-home" aria-label="Android home screen">
+        <div class="android-home-clock">
+          <time>${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
+          <span>${version}</span>
+        </div>
+        <div class="android-app-grid">
+          ${androidAppButton("browser", "B", "#38bdf8")}
+          ${androidAppButton("settings", "S", "#facc15")}
+          ${androidAppButton("files", "F", "#4ade80")}
+          ${androidAppButton("clock", "C", "#fb7185")}
+        </div>
+        <div class="android-search-pill">Search apps</div>
+      </section>`;
+  }
+
+  els.androidBackButton.disabled = state.androidView === "home" && state.androidHistory.length <= 1;
+  els.machineTitle.textContent = `${version} - ${state.androidView === "home" ? "Home" : state.androidView === "recents" ? "Recent apps" : androidAppNames[state.androidView]}`;
+  setViewportSummary(`${version} ${state.androidView} screen is active`);
+};
+
+const openAndroidView = (view) => {
+  if (!state.running || !androidAppNames[view]) return;
+  state.androidView = view;
+  state.androidHistory.push(view);
+  state.androidRecents = [view, ...state.androidRecents.filter((recent) => recent !== view)].slice(0, 4);
+  renderAndroidView();
+};
+
+const androidBack = () => {
+  if (!state.running) return;
+  if (state.androidView === "recents") {
+    state.androidView = state.androidHistory.at(-1) || "home";
+  } else if (state.androidHistory.length > 1) {
+    state.androidHistory.pop();
+    state.androidView = state.androidHistory.at(-1) || "home";
+  }
+  renderAndroidView();
+};
+
+const androidHome = () => {
+  if (!state.running) return;
+  state.androidView = "home";
+  state.androidHistory = ["home"];
+  renderAndroidView();
+};
+
+const androidRecents = () => {
+  if (!state.running) return;
+  state.androidView = "recents";
+  renderAndroidView();
+};
+
+const bootAndroid = () => {
+  els.screenContainer.querySelector(".vga-text").hidden = true;
+  els.screenContainer.querySelector(".vga-canvas").hidden = true;
+  els.qemuTerminal.hidden = true;
+  els.nativeDisplay.hidden = true;
+  els.remoteFrame.hidden = true;
+  els.androidDisplay.hidden = false;
+  state.androidView = "home";
+  state.androidHistory = ["home"];
+  state.androidRecents = [];
+
+  state.emulator = {
+    stop: async () => {
+      state.running = false;
+      els.androidDevice.classList.add("is-paused");
+      setPowerState("Android paused", "paused");
+      updateButtons();
+    },
+    run: () => {
+      state.running = true;
+      els.androidDevice.classList.remove("is-paused");
+      setPowerState("Android running", "running");
+      updateButtons();
+    },
+    destroy: async () => {
+      els.androidDisplay.hidden = true;
+      els.androidDevice.classList.remove("is-paused");
+    },
+    restart: () => {
+      state.androidView = "home";
+      state.androidHistory = ["home"];
+      state.androidRecents = [];
+      state.startedAt = Date.now();
+      renderAndroidView();
+    },
+  };
+  state.running = true;
+  els.ramMetric.textContent = androidVersionLabel();
+  setPowerState("Android running", "running");
+  renderAndroidView();
+  log(`${androidVersionLabel()} browser simulator started.`);
+  updateButtons();
+};
+
 const bootEmulator = async () => {
-  if (!isNativeMode() && !isRemoteMode() && !state.isoFile) return;
+  if (!isAndroidMode() && !isNativeMode() && !isRemoteMode() && !state.isoFile) return;
   if (isNativeMode() && !isHyperVMode() && !els.nativeIsoPath.value.trim()) {
     log(`Boot blocked: enter a local ISO path for ${nativeModeLabel()}.`);
     return;
@@ -3212,12 +3487,14 @@ const bootEmulator = async () => {
 
   prepareBootUi();
   log("Creating virtual machine.");
-  if (!isRemoteMode()) {
+  if (!isRemoteMode() && !isAndroidMode()) {
     log(`Hardware request: ${selectedProcessorSpeedGhz()} GHz CPU target, ${selectedMemoryMb()} MB RAM.`);
   }
 
   try {
-    if (isRemoteMode()) {
+    if (isAndroidMode()) {
+      bootAndroid();
+    } else if (isRemoteMode()) {
       await bootRemoteVm();
     } else if (isHyperVMode()) {
       await bootEmustarHyperV(qemuDisplayMode);
@@ -3481,18 +3758,40 @@ const updateBackendUi = () => {
   const externalMode = isExternalMode();
   const runtimeBrand = nativeRuntimeBrand();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
+  const androidMode = isAndroidMode();
   syncEmulatorDropdown();
   els.workspace.classList.toggle("is-emustar-mode", emustarMode);
+  els.workspace.classList.toggle("is-android-mode", androidMode);
+  document.documentElement.classList.toggle("android-mode", androidMode);
   els.emustarInfoLink.hidden = !emustarMode;
-  els.mediaKicker.textContent = emustarMode ? "Nebula Host" : "Media";
-  els.bootSourceTitle.textContent = emustarMode ? "Mission media" : "Boot source";
-  els.displayKicker.textContent = emustarMode ? "Nebula Console" : "Display";
-  els.activityLabel.textContent = emustarMode ? "Mission log" : "Activity";
-  els.screenModeIcon.hidden = !emustarMode;
-  els.screenOrbital.hidden = emustarMode;
-  els.placeholderTitle.textContent = emustarMode ? "EMUSTAR viewport standing by" : "Drop an ISO to begin";
+  els.storedImagesControl.hidden = androidMode;
+  els.dropZone.hidden = androidMode;
+  els.mediaWarning.hidden = androidMode;
+  els.demoButton.hidden = androidMode;
+  els.androidConfig.hidden = !androidMode;
+  els.pcSpecControls.forEach((control) => {
+    control.hidden = androidMode;
+  });
+  els.advancedOptions.hidden = androidMode;
+  els.mediaKicker.textContent = androidMode ? "Android" : emustarMode ? "Nebula Host" : "Media";
+  els.bootSourceTitle.textContent = androidMode ? "Device" : emustarMode ? "Mission media" : "Boot source";
+  els.displayKicker.textContent = androidMode ? "Android Simulator" : emustarMode ? "Nebula Console" : "Display";
+  els.activityLabel.textContent = androidMode ? "Android log" : emustarMode ? "Mission log" : "Activity";
+  els.screenModeIcon.src = androidMode ? "/assets/android-icon.png" : "/assets/emustar-icon.png";
+  els.displayModeMark.src = androidMode ? "/assets/android-icon.png" : "/assets/emustar-icon.png";
+  els.screenModeIcon.hidden = !emustarMode && !androidMode;
+  els.screenOrbital.hidden = emustarMode || androidMode;
+  els.placeholderTitle.textContent = androidMode
+    ? `${androidVersionLabel()} ready`
+    : emustarMode
+      ? "EMUSTAR viewport standing by"
+      : "Drop an ISO to begin";
   if (!state.emulator && !state.isoFile) {
-    els.machineTitle.textContent = emustarMode ? "EMUSTAR Control Deck" : "Awaiting boot media";
+    els.machineTitle.textContent = androidMode
+      ? `${androidVersionLabel()} simulator`
+      : emustarMode
+        ? "EMUSTAR Control Deck"
+        : "Awaiting boot media";
   }
   els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode || emustarMode ? "x64" : "x86";
   els.processorMode.disabled = emustarMode;
@@ -3506,6 +3805,9 @@ const updateBackendUi = () => {
   syncMemorySliderFromSelect();
   els.nativePanel.hidden = !nativeMode;
   els.remotePanel.hidden = !remoteMode;
+  if (!androidMode) {
+    els.androidDisplay.hidden = true;
+  }
   if (nativeMode) {
     const hostedEmustarMode = emustarMode && isNetlifyLauncher;
     els.nativeRuntimeIcon.src = isStandaloneQemuMode() ? "/assets/qemu-icon.png" : "/assets/emustar-icon.png";
@@ -3552,7 +3854,9 @@ const updateBackendUi = () => {
     : isBrowserQemuMode()
       ? "QEMU networking depends on the compiled Wasm build."
     : "Uses v86 networking support when available.";
-  els.placeholderMeta.textContent = nativeMode
+  els.placeholderMeta.textContent = androidMode
+    ? `Start ${androidVersionLabel()} with no ISO or PC hardware setup required.`
+    : nativeMode
     ? emustarMode
       ? "Choose or import an ISO to launch an EMUSTAR Hyper-V machine."
       : nativeUbuntuArm64Mode
@@ -3565,7 +3869,10 @@ const updateBackendUi = () => {
     : isBrowserQemuMode()
       ? "x86_64 support uses QEMU Wasm and local artifacts from public/qemu."
     : "Legacy x86, 32-bit Linux, DOS, hobby OS, and vintage Windows images work best.";
-  els.ramMetric.textContent = `${selectedMemoryMb()} MB RAM`;
+  if (androidMode && !state.emulator) {
+    setViewportSummary("Android simulator is ready to start");
+  }
+  els.ramMetric.textContent = androidMode ? androidVersionLabel() : `${selectedMemoryMb()} MB RAM`;
   updateMediaWarning();
   updateButtons();
   void updateEmustarHostInfo();
@@ -3580,6 +3887,41 @@ const updateBackendUi = () => {
 };
 
 els.emulatorMode.addEventListener("change", updateBackendUi);
+els.androidVersion.addEventListener("change", () => {
+  if (isAndroidMode() && state.emulator) {
+    state.androidView = "home";
+    state.androidHistory = ["home"];
+    state.androidRecents = [];
+    renderAndroidView();
+    log(`Switched the simulator to ${androidVersionLabel()}.`);
+  }
+  updateBackendUi();
+});
+els.androidBackButton.addEventListener("click", androidBack);
+els.androidHomeButton.addEventListener("click", androidHome);
+els.androidRecentsButton.addEventListener("click", androidRecents);
+els.androidSurface.addEventListener("click", (event) => {
+  const systemButton = event.target.closest("[data-android-system]");
+  if (systemButton?.dataset.androidSystem === "back") {
+    androidBack();
+    return;
+  }
+
+  const openButton = event.target.closest("[data-android-open]");
+  if (openButton) {
+    if (openButton.dataset.androidOpen === "home") {
+      androidHome();
+    } else {
+      openAndroidView(openButton.dataset.androidOpen);
+    }
+    return;
+  }
+
+  if (event.target.closest("[data-android-clear-recents]")) {
+    state.androidRecents = [];
+    renderAndroidView();
+  }
+});
 els.emustarInfoLink.addEventListener("click", () => {
   openPopupFrom(els.emustarInfoDialog, els.emustarInfoLink, els.emustarInfoOkButton);
 });
@@ -3625,7 +3967,10 @@ els.emulatorSelectButton.addEventListener("click", () => {
   setEmulatorMenuOpen(els.emulatorMenu.hidden);
 });
 els.emulatorMenuOptions.forEach((option) => {
-  option.addEventListener("click", () => {
+  option.addEventListener("click", async () => {
+    if (state.emulator && option.dataset.emulatorOption !== els.emulatorMode.value) {
+      await stopEmulator();
+    }
     els.emulatorMode.value = option.dataset.emulatorOption;
     setEmulatorMenuOpen(false);
     updateBackendUi();
