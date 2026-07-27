@@ -850,8 +850,12 @@ const findFirmwareVars = (arch, qemuPath) => {
       : [
           join(qemuDir, "share", "edk2-x86_64-vars.fd"),
           join(qemuDir, "..", "share", "edk2-x86_64-vars.fd"),
+          join(qemuDir, "share", "edk2-i386-vars.fd"),
+          join(qemuDir, "..", "share", "edk2-i386-vars.fd"),
           "C:\\Program Files\\qemu\\share\\edk2-x86_64-vars.fd",
+          "C:\\Program Files\\qemu\\share\\edk2-i386-vars.fd",
           "C:\\Program Files\\qemu\\share\\qemu\\edk2-x86_64-vars.fd",
+          "C:\\Program Files\\qemu\\share\\qemu\\edk2-i386-vars.fd",
         ];
   return candidates.map((candidate) => normalize(candidate)).find((candidate) => existsSync(candidate));
 };
@@ -1944,7 +1948,12 @@ const startNativeVm = async (body) => {
     } catch (error) {
       child.kill();
       nativeVm = null;
-      throw error;
+      const qemuError = nativeVmOutput.trim() || lastNativeExit?.output || "";
+      throw new Error(
+        qemuError
+          ? `QEMU exited before its embedded display opened: ${qemuError}`
+          : error.message,
+      );
     }
   }
 
