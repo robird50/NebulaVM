@@ -17,6 +17,7 @@ import {
 } from "../lib/mobileDevAccess.mjs";
 
 const approvedPhoneIp = "2600:8801:2120:af00:3064:125b:8c09:922f";
+const currentApprovedPhoneIp = "2600:8801:2120:af00:952c:3db6:7c4c:2f59";
 
 test("canonicalizes equivalent IPv6 spellings", () => {
   const expanded = "2600:8801:0000:0000:0000:0000:0000:0001";
@@ -35,6 +36,10 @@ test("approves the configured phone only through IPv6", () => {
   assert.equal(isIpv6(approvedPhoneIp), true);
   assert.equal(
     isApprovedIpv6(approvedPhoneIp, new Set(), SOURCE_APPROVED_IPV6_HASHES),
+    true,
+  );
+  assert.equal(
+    isApprovedIpv6(currentApprovedPhoneIp, new Set(), SOURCE_APPROVED_IPV6_HASHES),
     true,
   );
   assert.equal(isApprovedIpv6("192.0.2.4", new Set(), SOURCE_APPROVED_IPV6_HASHES), false);
