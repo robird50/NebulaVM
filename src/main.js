@@ -122,6 +122,11 @@ const state = {
   androidNativeFrameUrl: null,
   androidNativePointer: null,
   androidNativeInputController: null,
+  androidViewportMode: "device",
+  androidStudioActive: false,
+  androidStudioTimer: null,
+  androidStudioFrameUrl: null,
+  androidStudioCleanup: null,
 };
 
 app.innerHTML = `
@@ -582,6 +587,10 @@ app.innerHTML = `
           </div>
           <div class="metric-row">
             <span id="uptimeMetric">00:00</span>
+            <div class="android-view-switch" id="androidViewSwitch" role="group" aria-label="Android viewport mode" hidden>
+              <button class="is-active" type="button" data-android-viewport-mode="device" aria-pressed="true">Device</button>
+              <button type="button" data-android-viewport-mode="management" aria-pressed="false">AVD Management</button>
+            </div>
             <span class="ai-summary-pill" id="viewportSummaryMetric" aria-live="polite">
               <span class="ai-summary-stage">
                 <span class="ai-summary-text is-current">Waiting for boot media to start</span>
@@ -801,6 +810,8 @@ const els = {
   saveStateButton: document.querySelector("#saveStateButton"),
   loadStateButton: document.querySelector("#loadStateButton"),
   fullscreenButton: document.querySelector("#fullscreenButton"),
+  androidViewSwitch: document.querySelector("#androidViewSwitch"),
+  androidViewModeButtons: [...document.querySelectorAll("[data-android-viewport-mode]")],
   stateInput: document.querySelector("#stateInput"),
   screenShell: document.querySelector("#screenShell"),
   screenContainer: document.querySelector("#screenContainer"),
@@ -1451,6 +1462,63 @@ const fetchAndroidFrame = async () => {
     }
   }
 
+  throw new Error(lastError.message || androidBridgeMessage);
+};
+
+const fetchAndroidStudioJson = async (path, options) => {
+  const uniqueBridgeBases = await prepareAndroidBridgeBases();
+  let lastError = new Error(androidBridgeMessage);
+  for (const base of uniqueBridgeBases) {
+    try {
+      const headers = new Headers(options?.headers || {});
+      if (state.nativeHostToken) headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+      headers.set("X-NebulaVM-Session", state.nativeSessionId);
+      const response = await fetch(`${base}/api/android-studio/${path}`, {
+        cache: "no-store",
+        ...options,
+        headers,
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.toLowerCase().includes("application/json")) continue;
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || "Android Studio rejected the request.");
+      state.nativeQemuApiBase = base;
+      return { response, data, base };
+    } catch (error) {
+      lastError = error instanceof TypeError ? new Error(androidBridgeMessage) : error;
+    }
+  }
+  throw new Error(lastError.message || androidBridgeMessage);
+};
+
+const fetchAndroidStudioFrame = async () => {
+  const uniqueBridgeBases = await prepareAndroidBridgeBases();
+  let lastError = new Error(androidBridgeMessage);
+  for (const base of uniqueBridgeBases) {
+    try {
+      const headers = new Headers();
+      if (state.nativeHostToken) headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+      headers.set("X-NebulaVM-Session", state.nativeSessionId);
+      const response = await fetch(`${base}/api/android-studio/frame?t=${Date.now()}`, {
+        cache: "no-store",
+        headers,
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!response.ok || !contentType.toLowerCase().startsWith("image/")) {
+        const data = contentType.toLowerCase().includes("application/json") ? await response.json() : {};
+        throw new Error(data.error || "Android Studio is not ready.");
+      }
+      state.nativeQemuApiBase = base;
+      return {
+        blob: await response.blob(),
+        width: Number(response.headers.get("X-NebulaVM-Frame-Width")) || 0,
+        height: Number(response.headers.get("X-NebulaVM-Frame-Height")) || 0,
+        title: decodeURIComponent(response.headers.get("X-NebulaVM-Frame-Title") || ""),
+      };
+    } catch (error) {
+      lastError = error instanceof TypeError ? new Error(androidBridgeMessage) : error;
+    }
+  }
   throw new Error(lastError.message || androidBridgeMessage);
 };
 
@@ -3567,6 +3635,179 @@ const openAndroidView = (view) => {
   renderAndroidView();
 };
 
+const syncAndroidViewportModeButtons = () => {
+  for (const button of els.androidViewModeButtons) {
+    const active = button.dataset.androidViewportMode === state.androidViewportMode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+};
+
+const stopAndroidStudioManagement = () => {
+  state.androidStudioActive = false;
+  if (state.androidStudioTimer) {
+    window.clearTimeout(state.androidStudioTimer);
+    state.androidStudioTimer = null;
+  }
+  state.androidStudioCleanup?.();
+  state.androidStudioCleanup = null;
+  if (state.androidStudioFrameUrl) {
+    URL.revokeObjectURL(state.androidStudioFrameUrl);
+    state.androidStudioFrameUrl = null;
+  }
+};
+
+const sendAndroidStudioInput = async (payload) => {
+  if (!state.androidStudioActive) return;
+  try {
+    await fetchAndroidStudioJson("input", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    log(`Android Studio input failed: ${error.message}`);
+  }
+};
+
+const startAndroidStudioManagement = () => {
+  stopAndroidStudioManagement();
+  state.androidStudioActive = true;
+  els.screenPlaceholder.hidden = true;
+  els.screenContainer.querySelector(".vga-text").hidden = true;
+  els.screenContainer.querySelector(".vga-canvas").hidden = true;
+  els.qemuTerminal.hidden = true;
+  els.remoteFrame.hidden = true;
+  els.androidDisplay.hidden = true;
+  els.nativeDisplay.hidden = false;
+  els.displayKicker.textContent = "AVD Management";
+  els.machineTitle.textContent = "Android Studio";
+  setViewportSummary("Opening the real Android Studio window");
+
+  const shell = document.createElement("div");
+  shell.className = "android-studio-bridge";
+  shell.tabIndex = 0;
+  const image = document.createElement("img");
+  image.alt = "Live Android Studio AVD management window";
+  image.draggable = false;
+  const status = document.createElement("span");
+  status.className = "native-display-status";
+  status.textContent = "Starting Android Studio on the host...";
+  shell.append(image, status);
+  els.nativeDisplay.replaceChildren(shell);
+  shell.focus({ preventScroll: true });
+
+  const clickHandler = (event) => {
+    const rect = image.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    shell.focus();
+    void sendAndroidStudioInput({
+      type: "click",
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+  };
+  const keyHandler = (event) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const specialKeys = new Set([
+      "Enter",
+      "Escape",
+      "Backspace",
+      "Delete",
+      "Tab",
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "Home",
+      "End",
+      "PageUp",
+      "PageDown",
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5",
+      "F6",
+      "F7",
+      "F8",
+      "F9",
+      "F10",
+      "F11",
+      "F12",
+    ]);
+    if (event.key.length === 1) {
+      event.preventDefault();
+      void sendAndroidStudioInput({ type: "text", text: event.key });
+    } else if (specialKeys.has(event.key)) {
+      event.preventDefault();
+      void sendAndroidStudioInput({ type: "key", key: event.key, shiftKey: event.shiftKey });
+    }
+  };
+  const pasteHandler = (event) => {
+    const text = event.clipboardData?.getData("text") || "";
+    if (!text) return;
+    event.preventDefault();
+    void sendAndroidStudioInput({ type: "text", text });
+  };
+  image.addEventListener("click", clickHandler);
+  shell.addEventListener("keydown", keyHandler);
+  shell.addEventListener("paste", pasteHandler);
+  state.androidStudioCleanup = () => {
+    image.removeEventListener("click", clickHandler);
+    shell.removeEventListener("keydown", keyHandler);
+    shell.removeEventListener("paste", pasteHandler);
+  };
+
+  const pollFrame = async () => {
+    if (!state.androidStudioActive || state.androidViewportMode !== "management") return;
+    try {
+      const frame = await fetchAndroidStudioFrame();
+      const nextFrameUrl = URL.createObjectURL(frame.blob);
+      if (state.androidStudioFrameUrl) URL.revokeObjectURL(state.androidStudioFrameUrl);
+      state.androidStudioFrameUrl = nextFrameUrl;
+      image.src = nextFrameUrl;
+      if (frame.width) image.width = frame.width;
+      if (frame.height) image.height = frame.height;
+      status.textContent = "Click and type here to manage AVDs in Android Studio.";
+      els.machineTitle.textContent = frame.title || "Android Studio";
+      setViewportSummary("Android Studio AVD management is live");
+      state.androidStudioTimer = window.setTimeout(pollFrame, 1200);
+    } catch (error) {
+      status.textContent = `AVD Management waiting: ${error.message}`;
+      state.androidStudioTimer = window.setTimeout(pollFrame, 2000);
+    }
+  };
+  void pollFrame();
+  log("Opening Android Studio AVD Management in the browser viewport.");
+};
+
+const setAndroidViewportMode = (mode) => {
+  state.androidViewportMode = mode === "management" ? "management" : "device";
+  syncAndroidViewportModeButtons();
+  if (state.androidViewportMode === "management") {
+    startAndroidStudioManagement();
+    return;
+  }
+  stopAndroidStudioManagement();
+  els.nativeDisplay.hidden = true;
+  if (state.emulator && isAndroidMode()) {
+    els.screenPlaceholder.hidden = true;
+    els.androidDisplay.hidden = false;
+    els.displayKicker.textContent = "Android Emulator";
+    els.machineTitle.textContent = `${androidVersionLabel()} - Real device`;
+    setViewportSummary("Android device view is active");
+  } else {
+    els.androidDisplay.hidden = true;
+    els.screenPlaceholder.hidden = false;
+    els.displayKicker.textContent = "Android Emulator";
+    els.machineTitle.textContent = `${androidVersionLabel()} ready`;
+    setViewportSummary("A private Android device is ready to be created");
+  }
+};
+
 const androidBack = () => {
   if (!state.running) return;
   if (state.androidNativeActive) {
@@ -4207,6 +4448,10 @@ const updateBackendUi = () => {
   els.mediaWarning.hidden = androidMode;
   els.demoButton.hidden = androidMode;
   els.androidConfig.hidden = !androidMode;
+  els.androidViewSwitch.hidden = !androidMode;
+  if (!androidMode && state.androidViewportMode !== "device") {
+    setAndroidViewportMode("device");
+  }
   if (androidMode) syncAndroidOrientation();
   els.pcSpecControls.forEach((control) => {
     control.hidden = androidMode;
@@ -4334,6 +4579,12 @@ const updateBackendUi = () => {
   void updateBrowserQemuCapabilities();
 };
 
+els.androidViewModeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    if (!isAndroidMode()) return;
+    setAndroidViewportMode(button.dataset.androidViewportMode);
+  });
+});
 els.emulatorMode.addEventListener("change", updateBackendUi);
 els.androidVersion.addEventListener("change", async () => {
   if (state.androidNativeActive) {

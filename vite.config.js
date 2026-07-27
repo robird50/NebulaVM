@@ -874,6 +874,9 @@ const hyperVScriptPath = resolve(workspaceDir, "scripts", "emustar-hyperv.ps1");
 const hyperVConsoleFrameScriptPath = resolve(workspaceDir, "scripts", "emustar-console-frame.ps1");
 const hyperVConsoleInputScriptPath = resolve(workspaceDir, "scripts", "emustar-console-input.ps1");
 const hyperVConsoleFramePath = resolve(workspaceDir, "vm-disks", "emustar-hyperv", "console-frame.jpg");
+const androidStudioFrameScriptPath = resolve(workspaceDir, "scripts", "android-studio-frame.ps1");
+const androidStudioInputScriptPath = resolve(workspaceDir, "scripts", "android-studio-input.ps1");
+const androidStudioFramePath = resolve(workspaceDir, "vm-disks", "android-studio-frame.jpg");
 
 const workspaceUserHome = () => {
   if (process.platform === "win32") {
@@ -1701,6 +1704,40 @@ const runHyperVConsoleInput = (body) =>
     45000,
   );
 
+const runAndroidStudioFrame = () =>
+  runPowerShellJson(
+    "Android Studio frame",
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      androidStudioFrameScriptPath,
+      "-OutputPath",
+      androidStudioFramePath,
+    ],
+    60000,
+  );
+
+const runAndroidStudioInput = (body) =>
+  runPowerShellJson(
+    "Android Studio input",
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      androidStudioInputScriptPath,
+      "-ConfigBase64",
+      Buffer.from(JSON.stringify(body || {}), "utf8").toString("base64"),
+    ],
+    45000,
+  );
+
 const isPortAvailable = (port) =>
   new Promise((resolvePort) => {
     const server = net.createServer();
@@ -2181,10 +2218,18 @@ const nativeQemuPlugin = () => ({
       const isNativeQemuApi = url.pathname.startsWith("/api/native-qemu");
       const isHyperVApi = url.pathname.startsWith("/api/emustar-hyperv");
       const isAndroidApi = url.pathname.startsWith("/api/android-emulator");
+      const isAndroidStudioApi = url.pathname.startsWith("/api/android-studio");
       const isHostApi = url.pathname.startsWith("/api/emustar-host/");
       const isMobileDevUnlockApi =
         url.pathname === "/api/mobile-dev-unlock" || url.pathname === "/.netlify/functions/mobile-dev-unlock";
-      if (!isNativeQemuApi && !isHyperVApi && !isAndroidApi && !isHostApi && !isMobileDevUnlockApi) {
+      if (
+        !isNativeQemuApi &&
+        !isHyperVApi &&
+        !isAndroidApi &&
+        !isAndroidStudioApi &&
+        !isHostApi &&
+        !isMobileDevUnlockApi
+      ) {
         next();
         return;
       }
@@ -2397,6 +2442,32 @@ const nativeQemuPlugin = () => ({
           const sessionId = androidSessionId(req);
           const body = await readJsonBody(req);
           json(res, 200, await sendAndroidEmulatorInput(sessionId, body));
+          return;
+        }
+
+        if (req.method === "GET" && url.pathname === "/api/android-studio/frame") {
+          const sessionId = androidSessionId(req);
+          if (androidRuntime) assertAndroidOwner(sessionId);
+          const frame = await runAndroidStudioFrame();
+          if (!frame.outputPath || !existsSync(frame.outputPath)) {
+            throw new Error("Android Studio did not write a management frame.");
+          }
+          const image = readFileSync(frame.outputPath);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", frame.mimeType || "image/jpeg");
+          res.setHeader("Cache-Control", "no-store");
+          res.setHeader("X-NebulaVM-Frame-Width", String(frame.width || ""));
+          res.setHeader("X-NebulaVM-Frame-Height", String(frame.height || ""));
+          res.setHeader("X-NebulaVM-Frame-Title", encodeURIComponent(frame.title || ""));
+          res.end(image);
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/android-studio/input") {
+          const sessionId = androidSessionId(req);
+          if (androidRuntime) assertAndroidOwner(sessionId);
+          const body = await readJsonBody(req);
+          json(res, 200, await runAndroidStudioInput(body));
           return;
         }
 

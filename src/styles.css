@@ -1910,6 +1910,43 @@ input[type="text"] {
   font-weight: 800;
 }
 
+.android-view-switch {
+  display: inline-flex;
+  min-height: 32px;
+  padding: 3px;
+  border: 1px solid rgba(151, 239, 95, 0.35);
+  border-radius: 999px;
+  background: rgba(6, 16, 22, 0.9);
+}
+
+.android-view-switch[hidden] {
+  display: none;
+}
+
+.android-view-switch button {
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 999px;
+  color: #aebbc8;
+  background: transparent;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.android-view-switch button.is-active {
+  color: #08110a;
+  background: #a7e84f;
+  box-shadow: 0 0 14px rgba(167, 232, 79, 0.22);
+}
+
+.android-view-switch button:focus-visible {
+  outline: 2px solid #ffe45e;
+  outline-offset: 1px;
+}
+
 .metric-row .ai-summary-pill {
   width: fit-content;
   max-width: none;
@@ -2092,6 +2129,30 @@ input[type="text"] {
     radial-gradient(circle at 50% 0%, rgba(96, 220, 255, 0.11), transparent 36%),
     #02060a;
   cursor: crosshair;
+}
+
+.android-studio-bridge {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  overflow: hidden;
+  background: #11161d;
+  cursor: default;
+}
+
+.android-studio-bridge:focus-visible {
+  outline: 2px solid #a7e84f;
+  outline-offset: -3px;
+}
+
+.android-studio-bridge img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.38);
 }
 
 .hyperv-console-bridge:focus-visible {
