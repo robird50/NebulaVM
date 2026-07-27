@@ -3652,14 +3652,18 @@ const refreshNativeAndroidFrame = async (image) => {
     image.dataset.frameWidth = String(frame.width);
     image.dataset.frameHeight = String(frame.height);
     image.hidden = false;
+    els.androidSurface.querySelector(".android-native-startup")?.remove();
     setViewportSummary(`${androidVersionLabel()} is live from the Android Emulator`);
     scheduleNativeAndroidFrame(image);
   } catch (error) {
     const { data: status } = await fetchAndroidJson("status").catch(() => ({ data: null }));
+    const startupMessage = els.androidSurface.querySelector(".android-native-startup span");
     if (status?.booted) {
       setViewportSummary("Android is running; waiting for the next display frame");
+      if (startupMessage) startupMessage.textContent = "Android is running. Connecting the live display...";
     } else {
       setViewportSummary("Android Emulator is starting on the host");
+      if (startupMessage) startupMessage.textContent = "Cold boot in progress on the Windows host...";
     }
     scheduleNativeAndroidFrame(image, 900);
   }
@@ -3721,7 +3725,14 @@ const bootNativeAndroid = async (status) => {
   image.alt = "Live Android Emulator display";
   image.draggable = false;
   image.hidden = true;
-  els.androidSurface.append(image);
+  const startup = document.createElement("div");
+  startup.className = "android-native-startup";
+  startup.innerHTML = `
+    <img src="/assets/android-icon.png" alt="" />
+    <strong>Starting ${androidVersionLabel()}</strong>
+    <span>Connecting to the private Android Emulator...</span>
+  `;
+  els.androidSurface.append(image, startup);
 
   image.addEventListener("pointerdown", (event) => {
     image.setPointerCapture(event.pointerId);

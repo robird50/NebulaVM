@@ -2372,6 +2372,33 @@ input[type="text"] {
   display: none;
 }
 
+.android-native-startup {
+  display: grid;
+  max-width: 280px;
+  justify-items: center;
+  gap: 12px;
+  padding: 20px;
+  color: #f8fafc;
+  text-align: center;
+}
+
+.android-native-startup img {
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
+}
+
+.android-native-startup strong {
+  color: #bef264;
+  font-size: 1.05rem;
+}
+
+.android-native-startup span {
+  color: #a8b8c5;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .android-device.is-paused::after {
   position: absolute;
   inset: 0;

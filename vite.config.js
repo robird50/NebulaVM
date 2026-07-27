@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import dgram from "node:dgram";
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import net from "node:net";
-import { cpus, homedir, networkInterfaces } from "node:os";
+import { cpus, freemem, homedir, networkInterfaces } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
@@ -1000,6 +1000,47 @@ const killAndroidPortProcess = () => {
   }
 };
 
+const nebulaAndroidProcessIds = () => {
+  if (process.platform !== "win32") return [];
+  try {
+    const script = [
+      "Get-CimInstance Win32_Process",
+      "Where-Object { $_.CommandLine -match '(?i)(?:^|\\s)-avd\\s+NebulaVM_' }",
+      "Select-Object -ExpandProperty ProcessId",
+    ].join(" | ");
+    return execFileSync(
+      "powershell.exe",
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+      { encoding: "utf8", timeout: 10000, windowsHide: true },
+    )
+      .split(/\r?\n/)
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+  } catch {
+    return [];
+  }
+};
+
+const killNebulaAndroidProcesses = () => {
+  const processIds = nebulaAndroidProcessIds();
+  for (const pid of processIds) {
+    try {
+      execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+        timeout: 10000,
+        windowsHide: true,
+        stdio: "ignore",
+      });
+    } catch {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // The process already exited.
+      }
+    }
+  }
+  return processIds.length;
+};
+
 const androidSessionId = (req) => {
   const raw = String(req.headers["x-nebulavm-session"] || "");
   const safe = sanitizeSessionId(raw);
@@ -1238,6 +1279,8 @@ const startAndroidEmulator = (sessionId, body = {}) => {
     }
     return { ...androidEmulatorStatus(sessionId), starting: !status.booted };
   }
+  killNebulaAndroidProcesses();
+  killAndroidPortProcess();
 
   const requestedVersion = Number(body.version);
   const image = installedAndroidImages().find((candidate) => candidate.version === requestedVersion);
@@ -1251,6 +1294,13 @@ const startAndroidEmulator = (sessionId, body = {}) => {
     memoryMb: androidInteger(body.memoryMb, 3072, 1024, 4096),
     storageGb: androidInteger(body.storageGb, 8, 4, 32),
   };
+  const freeMemoryMb = Math.floor(freemem() / 1024 / 1024);
+  const hostReserveMb = 512;
+  if (freeMemoryMb < specs.memoryMb + hostReserveMb) {
+    throw new Error(
+      `Android ${requestedVersion} needs about ${specs.memoryMb + hostReserveMb} MB of free host memory with these settings, but only ${freeMemoryMb} MB is free. Lower Android RAM or close applications on the Windows host.`,
+    );
+  }
   const orientation = body.orientation === "landscape" ? "landscape" : "portrait";
   const disposable = createDisposableAndroidAvd(sessionId, image, specs, orientation);
 
@@ -1315,7 +1365,7 @@ const startAndroidEmulator = (sessionId, body = {}) => {
     };
     if (exitedRuntime) exitedRuntime.wrapperExited = true;
     setTimeout(() => {
-      if (androidRuntime?.sessionId !== sessionId || androidPortProcessId()) return;
+      if (androidRuntime?.sessionId !== sessionId || nebulaAndroidProcessIds().length) return;
       const failedRuntime = androidRuntime;
       androidRuntime = null;
       void removeAndroidSessionDirectory(failedRuntime.sessionDirectory).catch(() => {});
@@ -1428,6 +1478,7 @@ const stopAndroidEmulator = async (sessionId) => {
   } else {
     runtime.process?.kill();
   }
+  killNebulaAndroidProcesses();
   killAndroidPortProcess();
   androidRuntime = null;
   await removeAndroidSessionDirectory(runtime.sessionDirectory);
@@ -1441,6 +1492,7 @@ const cleanupOrphanedAndroidSessions = () => {
   } catch {
     // No disposable NebulaVM Android emulator is running.
   }
+  killNebulaAndroidProcesses();
   killAndroidPortProcess();
   if (existsSync(androidSessionsRoot)) {
     rmSync(androidSessionsRoot, { recursive: true, force: true });
