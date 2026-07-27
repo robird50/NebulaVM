@@ -1185,11 +1185,11 @@ const configureAndroidViewport = (runtime) => {
   const { serial, orientation } = runtime;
   if (!serial) return;
   const landscape = orientation === "landscape";
-  const width = landscape ? 1920 : 1080;
-  const height = landscape ? 1080 : 1920;
+  const width = runtime.displayWidth || (landscape ? 1920 : 1080);
+  const height = runtime.displayHeight || (landscape ? 1080 : 1920);
   try {
     runAndroidTool("adb", ["-s", serial, "shell", "wm", "size", `${width}x${height}`]);
-    runAndroidTool("adb", ["-s", serial, "shell", "wm", "density", landscape ? "280" : "420"]);
+    runAndroidTool("adb", ["-s", serial, "shell", "wm", "density", String(runtime.displayDensity || 420)]);
   } catch {
     // The device can still be used if Android rejects a temporary display override.
   } finally {
@@ -1206,12 +1206,24 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
   const { sessionDirectory } = androidSessionDirectory(sessionId);
   rmSync(sessionDirectory, { recursive: true, force: true });
   const avdHome = join(sessionDirectory, "avd");
+  const androidUserHome = join(sessionDirectory, "android-user");
+  const emulatorHome = join(androidUserHome, ".android");
   const avdName = `NebulaVM_${sessionId.slice(0, 12)}_Android_${image.version}`;
   const avdPath = join(avdHome, `${avdName}.avd`);
   mkdirSync(avdPath, { recursive: true });
+  mkdirSync(emulatorHome, { recursive: true });
   const landscape = orientation === "landscape";
-  const width = landscape ? 1920 : 1080;
-  const height = landscape ? 1080 : 1920;
+  const lowMemory = specs.memoryMb <= 768;
+  const portraitWidth =
+    specs.memoryMb <= 512 ? 360 : specs.memoryMb <= 768 ? 432 : specs.memoryMb <= 1024 ? 540 : 1080;
+  const portraitHeight =
+    specs.memoryMb <= 512 ? 640 : specs.memoryMb <= 768 ? 768 : specs.memoryMb <= 1024 ? 960 : 1920;
+  const density =
+    specs.memoryMb <= 512 ? 240 : specs.memoryMb <= 768 ? 280 : specs.memoryMb <= 1024 ? 300 : 420;
+  const width = landscape ? portraitHeight : portraitWidth;
+  const height = landscape ? portraitWidth : portraitHeight;
+  const heapMb =
+    specs.memoryMb <= 512 ? 128 : specs.memoryMb <= 1024 ? 192 : Math.min(512, Math.floor(specs.memoryMb / 4));
   writeFileSync(
     join(avdHome, `${avdName}.ini`),
     `avd.ini.encoding=UTF-8\npath=${avdPath}\ntarget=${image.targetId || `android-${image.api}`}\n`,
@@ -1229,8 +1241,8 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
       "hw.accelerometer=yes",
       "hw.audioInput=yes",
       "hw.battery=yes",
-      "hw.camera.back=emulated",
-      "hw.camera.front=emulated",
+      `hw.camera.back=${lowMemory ? "none" : "emulated"}`,
+      `hw.camera.front=${lowMemory ? "none" : "emulated"}`,
       `hw.cpu.arch=${image.abi}`,
       `hw.cpu.ncore=${specs.cores}`,
       "hw.dPad=no",
@@ -1241,7 +1253,7 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
       "hw.gpu.mode=auto",
       `hw.initialOrientation=${orientation}`,
       "hw.keyboard=yes",
-      `hw.lcd.density=${landscape ? 280 : 420}`,
+      `hw.lcd.density=${density}`,
       `hw.lcd.height=${height}`,
       `hw.lcd.width=${width}`,
       "hw.mainKeys=no",
@@ -1259,11 +1271,22 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
       `tag.display=${image.playStore ? "Google Play" : image.tag}`,
       `tag.id=${image.tag}`,
       `target=${image.targetId || `android-${image.api}`}`,
-      "vm.heapSize=512",
+      `vm.heapSize=${heapMb}`,
       "",
     ].join("\n"),
   );
-  return { sessionDirectory, avdHome, avdName, avdPath };
+  return {
+    sessionDirectory,
+    avdHome,
+    androidUserHome,
+    emulatorHome,
+    avdName,
+    avdPath,
+    displayWidth: width,
+    displayHeight: height,
+    displayDensity: density,
+    lowMemory,
+  };
 };
 
 const startAndroidEmulator = (sessionId, body = {}) => {
@@ -1289,18 +1312,30 @@ const startAndroidEmulator = (sessionId, body = {}) => {
     error.statusCode = 400;
     throw error;
   }
+  const freeMemoryMb = Math.floor(freemem() / 1024 / 1024);
+  const requestedMemoryMb = Number(body.memoryMb) || 0;
+  const adaptiveCeilingMb =
+    freeMemoryMb >= 3584
+      ? 3072
+      : freeMemoryMb >= 2560
+        ? 2048
+        : freeMemoryMb >= 1536
+          ? 1024
+          : freeMemoryMb >= 1024
+            ? 768
+            : 512;
+  const memoryMb =
+    requestedMemoryMb > 0
+      ? Math.min(androidInteger(requestedMemoryMb, 512, 512, 4096), adaptiveCeilingMb)
+      : adaptiveCeilingMb;
+  const requestedCores = androidInteger(body.cores, 4, 1, Math.min(4, cpus().length));
   const specs = {
-    cores: androidInteger(body.cores, 4, 1, Math.min(4, cpus().length)),
-    memoryMb: androidInteger(body.memoryMb, 3072, 1024, 4096),
+    cores: memoryMb <= 768 ? 1 : Math.min(requestedCores, memoryMb <= 1024 ? 2 : 4),
+    memoryMb,
+    requestedMemoryMb,
+    memoryAdapted: requestedMemoryMb === 0 || memoryMb !== requestedMemoryMb,
     storageGb: androidInteger(body.storageGb, 8, 4, 32),
   };
-  const freeMemoryMb = Math.floor(freemem() / 1024 / 1024);
-  const hostReserveMb = 512;
-  if (freeMemoryMb < specs.memoryMb + hostReserveMb) {
-    throw new Error(
-      `Android ${requestedVersion} needs about ${specs.memoryMb + hostReserveMb} MB of free host memory with these settings, but only ${freeMemoryMb} MB is free. Lower Android RAM or close applications on the Windows host.`,
-    );
-  }
   const orientation = body.orientation === "landscape" ? "landscape" : "portrait";
   const disposable = createDisposableAndroidAvd(sessionId, image, specs, orientation);
 
@@ -1322,6 +1357,8 @@ const startAndroidEmulator = (sessionId, body = {}) => {
       String(specs.cores),
       "-memory",
       String(specs.memoryMb),
+      ...(disposable.lowMemory ? ["-prop", "ro.config.low_ram=true"] : []),
+      "-no-metrics",
     ],
     {
       cwd: workspaceDir,
@@ -1330,6 +1367,9 @@ const startAndroidEmulator = (sessionId, body = {}) => {
         ANDROID_SDK_ROOT: androidSdkRoot(),
         ANDROID_HOME: androidSdkRoot(),
         ANDROID_AVD_HOME: disposable.avdHome,
+        ANDROID_USER_HOME: disposable.androidUserHome,
+        ANDROID_EMULATOR_HOME: disposable.emulatorHome,
+        ANDROID_PREFS_ROOT: disposable.androidUserHome,
       },
       windowsHide: true,
       detached: false,
@@ -1412,7 +1452,20 @@ const androidEmulatorFrame = async (sessionId) => {
       timeout: 20000,
     });
   } catch (error) {
-    throw error;
+    // Older Android releases cannot stream screencap output and may mount
+    // /sdcard read-only, but /data/local/tmp remains available over ADB.
+    const remoteFramePath = "/data/local/tmp/nebulavm-frame.png";
+    const localFramePath = join(runtime.sessionDirectory, "android-frame.png");
+    await runAndroidToolAsync("adb", ["-s", serial, "shell", "screencap", remoteFramePath], {
+      timeout: 20000,
+    });
+    await runAndroidToolAsync("adb", ["-s", serial, "pull", remoteFramePath, localFramePath], {
+      timeout: 20000,
+    });
+    image = readFileSync(localFramePath);
+    void runAndroidToolAsync("adb", ["-s", serial, "shell", "rm", "-f", remoteFramePath], {
+      timeout: 5000,
+    }).catch(() => {});
   }
   if (!image?.length) throw new Error("The Android Emulator returned an empty frame.");
   return image;
@@ -1441,8 +1494,8 @@ const sendAndroidEmulatorInput = async (sessionId, body = {}) => {
       "shell",
       "input",
       "tap",
-      clampCoordinate(body.x, runtime.orientation === "landscape" ? 1920 : 1080),
-      clampCoordinate(body.y, runtime.orientation === "landscape" ? 1080 : 1920),
+      clampCoordinate(body.x, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080)),
+      clampCoordinate(body.y, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920)),
     ]);
   } else if (body.type === "swipe") {
     await runAndroidToolAsync("adb", [
@@ -1451,10 +1504,10 @@ const sendAndroidEmulatorInput = async (sessionId, body = {}) => {
       "shell",
       "input",
       "swipe",
-      clampCoordinate(body.x1, runtime.orientation === "landscape" ? 1920 : 1080),
-      clampCoordinate(body.y1, runtime.orientation === "landscape" ? 1080 : 1920),
-      clampCoordinate(body.x2, runtime.orientation === "landscape" ? 1920 : 1080),
-      clampCoordinate(body.y2, runtime.orientation === "landscape" ? 1080 : 1920),
+      clampCoordinate(body.x1, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080)),
+      clampCoordinate(body.y1, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920)),
+      clampCoordinate(body.x2, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080)),
+      clampCoordinate(body.y2, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920)),
       String(Math.max(50, Math.min(3000, Math.round(Number(body.duration) || 250)))),
     ]);
   } else if (body.type === "text") {
@@ -2314,13 +2367,18 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "GET" && url.pathname === "/api/android-emulator/frame") {
           const sessionId = androidSessionId(req);
-          const runtime = assertAndroidOwner(sessionId);
+          assertAndroidOwner(sessionId);
           const image = await androidEmulatorFrame(sessionId);
+          const isPng = image.length >= 24 && image.subarray(1, 4).toString("ascii") === "PNG";
+          const frameWidth = isPng ? image.readUInt32BE(16) : 0;
+          const frameHeight = isPng ? image.readUInt32BE(20) : 0;
           res.statusCode = 200;
           res.setHeader("Content-Type", "image/png");
           res.setHeader("Cache-Control", "no-store");
-          res.setHeader("X-NebulaVM-Frame-Width", runtime.orientation === "landscape" ? "1920" : "1080");
-          res.setHeader("X-NebulaVM-Frame-Height", runtime.orientation === "landscape" ? "1080" : "1920");
+          if (frameWidth && frameHeight) {
+            res.setHeader("X-NebulaVM-Frame-Width", String(frameWidth));
+            res.setHeader("X-NebulaVM-Frame-Height", String(frameHeight));
+          }
           res.end(image);
           return;
         }

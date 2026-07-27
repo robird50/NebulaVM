@@ -320,9 +320,11 @@ app.innerHTML = `
               <label class="field">
                 <span>Memory</span>
                 <select id="androidMemory">
+                  <option value="0" selected>Adaptive (recommended)</option>
+                  <option value="512">512 MB</option>
                   <option value="1024">1024 MB</option>
                   <option value="2048">2048 MB</option>
-                  <option value="3072" selected>3072 MB</option>
+                  <option value="3072">3072 MB</option>
                   <option value="4096">4096 MB</option>
                 </select>
               </label>
@@ -3820,6 +3822,9 @@ const bootNativeAndroid = async (status) => {
     `${androidVersionLabel()} private AVD created with ${data.specs?.cores || els.androidCores.value} cores, ` +
       `${data.specs?.memoryMb || els.androidMemory.value} MB RAM, and ${orientation === "landscape" ? "16:9" : "9:16"} orientation.`,
   );
+  if (data.specs?.memoryAdapted) {
+    log(`Adaptive Android mode selected ${data.specs.memoryMb} MB RAM for the host's current capacity.`);
+  }
   scheduleNativeAndroidFrame(image, 0);
   updateButtons();
 };
@@ -4311,7 +4316,11 @@ const updateBackendUi = () => {
         els.androidImageNote.textContent = error.message;
       });
   }
-  els.ramMetric.textContent = androidMode ? `${els.androidMemory.value} MB RAM` : `${selectedMemoryMb()} MB RAM`;
+  els.ramMetric.textContent = androidMode
+    ? Number(els.androidMemory.value) === 0
+      ? "Adaptive RAM"
+      : `${els.androidMemory.value} MB RAM`
+    : `${selectedMemoryMb()} MB RAM`;
   updateMediaWarning();
   updateButtons();
   void updateEmustarHostInfo();
