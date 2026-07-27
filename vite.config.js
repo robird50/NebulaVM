@@ -1152,7 +1152,7 @@ const androidVersionCatalog = () => {
 
 const assertAndroidOwner = (sessionId) => {
   if (!androidRuntime || androidRuntime.sessionId !== sessionId) {
-    throw new Error("This private Android session does not belong to this browser.");
+    throw new Error("This Android session was started in another browser. Control it from that device.");
   }
   return androidRuntime;
 };
@@ -1485,24 +1485,34 @@ const sendAndroidEmulatorInput = async (sessionId, body = {}) => {
     escape: "KEYCODE_BACK",
   };
 
+  const runInput = async (args) => {
+    let lastError;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        await runAndroidToolAsync("adb", ["-s", serial, "shell", "input", ...args]);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!/can't find service:\s*input/i.test(String(error?.message || error))) throw error;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 1000));
+      }
+    }
+    throw new Error(
+      "Android is still starting. Controls will become available when the operating system finishes booting.",
+      { cause: lastError },
+    );
+  };
+
   if (body.type === "key" && keyMap[body.key]) {
-    await runAndroidToolAsync("adb", ["-s", serial, "shell", "input", "keyevent", keyMap[body.key]]);
+    await runInput(["keyevent", keyMap[body.key]]);
   } else if (body.type === "tap") {
-    await runAndroidToolAsync("adb", [
-      "-s",
-      serial,
-      "shell",
-      "input",
+    await runInput([
       "tap",
       clampCoordinate(body.x, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080)),
       clampCoordinate(body.y, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920)),
     ]);
   } else if (body.type === "swipe") {
-    await runAndroidToolAsync("adb", [
-      "-s",
-      serial,
-      "shell",
-      "input",
+    await runInput([
       "swipe",
       clampCoordinate(body.x1, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080)),
       clampCoordinate(body.y1, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920)),
@@ -1512,7 +1522,7 @@ const sendAndroidEmulatorInput = async (sessionId, body = {}) => {
     ]);
   } else if (body.type === "text") {
     const text = String(body.text || "").slice(0, 500).replace(/%/g, "%25").replace(/\s/g, "%s");
-    await runAndroidToolAsync("adb", ["-s", serial, "shell", "input", "text", text]);
+    await runInput(["text", text]);
   } else {
     throw new Error("Unsupported Android input.");
   }
