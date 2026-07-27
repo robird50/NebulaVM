@@ -135,13 +135,19 @@ function Set-LowHostMemoryProfile {
 
   $hostMemoryBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
   if ($hostMemoryBytes -le 10GB) {
-    $startupMb = [math]::Min($MemoryMb, 1024)
+    $freeMemoryMb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
+    $startupLimitMb = if ($freeMemoryMb -lt 1536) { 512 } else { 1024 }
+    $startupMb = [math]::Min($MemoryMb, $startupLimitMb)
+    $minimumMb = [math]::Min($startupMb, 256)
     Set-VMMemory -VM $Vm `
       -DynamicMemoryEnabled $true `
       -StartupBytes ($startupMb * 1MB) `
-      -MinimumBytes 512MB `
+      -MinimumBytes ($minimumMb * 1MB) `
       -MaximumBytes ($MemoryMb * 1MB) `
-      -Buffer 10
+      -Buffer 5
+    if ($startupMb -lt $MemoryMb) {
+      $warnings.Add("Low-memory host mode starts EMUSTAR with $startupMb MB and lets it grow dynamically to $MemoryMb MB.")
+    }
     return
   }
 
@@ -240,7 +246,7 @@ function Start-Emustar {
 
   $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
 
-  $memoryMb = [math]::Min(6144, [math]::Max(2048, [int]$config.memoryMb))
+  $memoryMb = [math]::Min(6144, [math]::Max(512, [int]$config.memoryMb))
   $diskSizeGb = [math]::Min(256, [math]::Max(64, [int]$config.diskSizeGb))
   $processorCount = [math]::Min(2, [math]::Max(1, [Environment]::ProcessorCount - 1))
   $diskFirst = [string]$config.bootOrder -eq "123"
@@ -349,6 +355,9 @@ function Start-Emustar {
     } catch {
       $vm = Get-VM -Name $vmName -ErrorAction Stop
       if ($vm.State -ne "Running") {
+        if ($_.Exception.Message -match "(?i)not enough memory|memory resources|0x8007000E") {
+          throw "EMUSTAR could not reserve enough host memory. Close a few applications or browser tabs, then launch it again."
+        }
         throw
       }
       $warnings.Add("EMUSTAR detected that Hyper-V had already started the VM and attached to it.")
