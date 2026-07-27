@@ -20,7 +20,7 @@ const MOBILE_DEV_ATTEMPTS_KEY = "nebulavm.mobile.devAttempts";
 const MOBILE_DEV_LOCK_KEY = "nebulavm.mobile.devLockUntil";
 const MOBILE_DEV_MAX_ATTEMPTS = 5;
 const MOBILE_DEV_LOCK_MS = 5 * 60 * 1000;
-const MOBILE_DEV_GATE_ENABLED = false;
+const MOBILE_DEV_GATE_ENABLED = true;
 const hostedLauncherHostnames = new Set(["nebulavm.online", "www.nebulavm.online"]);
 const isNetlifyLauncher =
   /\.netlify\.app$/i.test(window.location.hostname) || hostedLauncherHostnames.has(window.location.hostname);
