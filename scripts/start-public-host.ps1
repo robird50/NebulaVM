@@ -50,6 +50,12 @@ function Test-NebulaPublicHost([string]$PublicUrl) {
   }
 
   try {
+    $publicUri = [Uri]$PublicUrl
+    $dnsLookup = [Net.Dns]::GetHostAddressesAsync($publicUri.DnsSafeHost)
+    if (-not $dnsLookup.Wait(4000) -or $dnsLookup.Result.Count -eq 0) {
+      return $false
+    }
+
     $response = Invoke-WebRequest `
       -UseBasicParsing `
       -Uri "$($PublicUrl.TrimEnd('/'))/api/emustar-host/info" `

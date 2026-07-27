@@ -1412,11 +1412,10 @@ const updateAndroidHostMemory = (hostMemory) => {
   els.hostMemoryMetric.textContent = `${availableLabel} GB/${totalLabel} GB available on host`;
 };
 
-const fetchAndroidJson = async (path, options) => {
-  const uniqueBridgeBases = await prepareAndroidBridgeBases();
+const requestAndroidJsonFromBases = async (path, options, bridgeBases) => {
   let lastError = new Error(androidBridgeMessage);
 
-  for (const base of uniqueBridgeBases) {
+  for (const base of bridgeBases) {
     try {
       const headers = new Headers(options?.headers || {});
       if (state.nativeHostToken) {
@@ -1440,6 +1439,24 @@ const fetchAndroidJson = async (path, options) => {
   }
 
   throw new Error(lastError.message || androidBridgeMessage);
+};
+
+const fetchAndroidJson = async (path, options) => {
+  const uniqueBridgeBases = await prepareAndroidBridgeBases();
+  const previousBase = state.nativeQemuApiBase;
+
+  try {
+    return await requestAndroidJsonFromBases(path, options, uniqueBridgeBases);
+  } catch (error) {
+    if (!isNetlifyLauncher) throw error;
+
+    state.nativeQemuApiBase = null;
+    const refreshedHost = await fetchNetlifyHostRegistry();
+    if (!refreshedHost?.publicUrl || refreshedHost.publicUrl === previousBase) {
+      throw error;
+    }
+    return requestAndroidJsonFromBases(path, options, [refreshedHost.publicUrl]);
+  }
 };
 
 const fetchAndroidFrame = async () => {
