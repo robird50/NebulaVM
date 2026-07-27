@@ -1140,7 +1140,12 @@ const installedAndroidImages = () => {
       }
     }
   }
-  images.sort((left, right) => left.version - right.version || right.api - left.api);
+  images.sort(
+    (left, right) =>
+      left.version - right.version ||
+      right.api - left.api ||
+      Number(left.playStore) - Number(right.playStore),
+  );
   androidImageCache = { expiresAt: Date.now() + 60_000, items: images };
   return images;
 };
@@ -1317,6 +1322,9 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
       `disk.dataPartition.size=${specs.storageGb}G`,
       "fastboot.forceColdBoot=yes",
       "fastboot.forceFastBoot=no",
+      "firstboot.bootFromDownloadableSnapshot=false",
+      "firstboot.bootFromLocalSnapshot=false",
+      "firstboot.saveToLocalSnapshot=false",
       "hw.accelerometer=yes",
       "hw.audioInput=yes",
       "hw.battery=yes",
@@ -1394,18 +1402,26 @@ const startAndroidEmulator = (sessionId, body = {}) => {
   const freeMemoryMb = Math.floor(freemem() / 1024 / 1024);
   const requestedMemoryMb = Number(body.memoryMb) || 0;
   const adaptiveCeilingMb =
-    freeMemoryMb >= 3584
+    freeMemoryMb >= 5120
       ? 3072
-      : freeMemoryMb >= 2560
+      : freeMemoryMb >= 3840
         ? 2048
-        : freeMemoryMb >= 1536
+        : freeMemoryMb >= 2560
           ? 1024
-          : freeMemoryMb >= 1024
+          : freeMemoryMb >= 1408
             ? 768
             : 512;
+  const modernAndroid = requestedVersion >= 15;
+  if (modernAndroid && freeMemoryMb < 2560) {
+    const error = new Error(
+      `Android ${requestedVersion} needs at least 1024 MB plus Windows breathing room. Only ${freeMemoryMb} MB is currently available on the host. Close a few host apps, then try again.`,
+    );
+    error.statusCode = 503;
+    throw error;
+  }
   const memoryMb =
     requestedMemoryMb > 0
-      ? Math.min(androidInteger(requestedMemoryMb, 512, 512, 4096), adaptiveCeilingMb)
+      ? Math.min(androidInteger(requestedMemoryMb, 1024, modernAndroid ? 1024 : 512, 4096), adaptiveCeilingMb)
       : adaptiveCeilingMb;
   const requestedCores = androidInteger(body.cores, 4, 1, Math.min(4, cpus().length));
   const specs = {
@@ -1428,16 +1444,30 @@ const startAndroidEmulator = (sessionId, body = {}) => {
       String(androidEmulatorPort),
       "-no-window",
       "-no-snapshot",
+      "-no-snapstorage",
+      "-no-snapshot-load",
+      "-no-snapshot-save",
       "-no-audio",
       "-no-boot-anim",
       "-gpu",
       "swiftshader_indirect",
+      "-feature",
+      "-BluetoothEmulation",
+      "-feature",
+      "-Mac80211hwsimUserspaceManaged",
+      "-feature",
+      "-ModemSimulator",
+      "-feature",
+      "-Uwb",
       "-cores",
       String(specs.cores),
       "-memory",
       String(specs.memoryMb),
       ...(disposable.lowMemory ? ["-prop", "ro.config.low_ram=true"] : []),
       "-no-metrics",
+      "-qemu",
+      "-m",
+      String(specs.memoryMb),
     ],
     {
       cwd: workspaceDir,
