@@ -20,6 +20,7 @@ const MOBILE_DEV_ATTEMPTS_KEY = "nebulavm.mobile.devAttempts";
 const MOBILE_DEV_LOCK_KEY = "nebulavm.mobile.devLockUntil";
 const MOBILE_DEV_MAX_ATTEMPTS = 5;
 const MOBILE_DEV_LOCK_MS = 5 * 60 * 1000;
+const MOBILE_DEV_GATE_ENABLED = false;
 const hostedLauncherHostnames = new Set(["nebulavm.online", "www.nebulavm.online"]);
 const isNetlifyLauncher =
   /\.netlify\.app$/i.test(window.location.hostname) || hostedLauncherHostnames.has(window.location.hostname);
@@ -47,6 +48,9 @@ const isMobileOrTabletDevice = () => {
 
 if (isMobileOrTabletDevice()) {
   document.documentElement.classList.add("is-mobile-device");
+  if (!MOBILE_DEV_GATE_ENABLED) {
+    document.documentElement.classList.add("mobile-dev-bypass");
+  }
 }
 
 const sharedHostTokenFromUrl = new URLSearchParams(window.location.hash.slice(1)).get("token") || "";
@@ -4529,8 +4533,12 @@ window.addEventListener("beforeunload", () => {
   void stopEmulator();
 });
 
-initMobileDevBypass();
-void validateSavedMobileDevMode();
+if (MOBILE_DEV_GATE_ENABLED) {
+  initMobileDevBypass();
+  void validateSavedMobileDevMode();
+} else if (isMobileOrTabletDevice()) {
+  applyMobileDevMode();
+}
 
 log("NebulaVM ready.");
 renderStoredIsoSlots();
