@@ -123,6 +123,8 @@ const state = {
   androidNativePointer: null,
   androidNativeInputController: null,
   androidNativeLeaseTimer: null,
+  androidColdBootTimer: null,
+  androidColdBootEndsAt: 0,
   androidViewportMode: "device",
   androidStudioActive: false,
   androidStudioTimer: null,
@@ -3910,6 +3912,48 @@ const stopNativeAndroidFrames = () => {
   }
 };
 
+const stopAndroidColdBootCountdown = () => {
+  if (state.androidColdBootTimer) {
+    window.clearInterval(state.androidColdBootTimer);
+    state.androidColdBootTimer = null;
+  }
+  state.androidColdBootEndsAt = 0;
+};
+
+const formatColdBootRemaining = (seconds) => {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remainder = safeSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")} remaining`;
+};
+
+const estimateAndroidColdBootSeconds = (version, specs = {}) => {
+  const memoryMb = Number(specs.memoryMb) || 1024;
+  const cores = Number(specs.cores) || 1;
+  let estimate = version >= 15 ? 270 : version >= 11 ? 210 : version >= 8 ? 165 : 120;
+  if (memoryMb <= 512) estimate *= 1.8;
+  else if (memoryMb <= 768) estimate *= 1.35;
+  else if (memoryMb >= 2048) estimate *= 0.82;
+  if (cores <= 1) estimate *= 1.15;
+  else if (cores >= 4) estimate *= 0.88;
+  return Math.round(Math.max(90, Math.min(900, estimate)));
+};
+
+const startAndroidColdBootCountdown = (element, version, specs) => {
+  stopAndroidColdBootCountdown();
+  state.androidColdBootEndsAt = Date.now() + estimateAndroidColdBootSeconds(version, specs) * 1000;
+  const update = () => {
+    if (!element.isConnected || !state.androidNativeActive) {
+      stopAndroidColdBootCountdown();
+      return;
+    }
+    element.textContent = formatColdBootRemaining((state.androidColdBootEndsAt - Date.now()) / 1000);
+  };
+  update();
+  state.androidColdBootTimer = window.setInterval(update, 1000);
+};
+
 const stopAndroidLeaseHeartbeat = () => {
   if (!state.androidNativeLeaseTimer) return;
   window.clearInterval(state.androidNativeLeaseTimer);
@@ -3974,6 +4018,7 @@ const refreshNativeAndroidFrame = async (image) => {
     image.dataset.frameWidth = String(frame.width);
     image.dataset.frameHeight = String(frame.height);
     image.hidden = false;
+    stopAndroidColdBootCountdown();
     els.androidSurface.querySelector(".android-native-startup")?.remove();
     setViewportSummary(`${androidVersionLabel()} is live from the Android Emulator`);
     scheduleNativeAndroidFrame(image);
@@ -3981,6 +4026,8 @@ const refreshNativeAndroidFrame = async (image) => {
     const { data: status } = await fetchAndroidJson("status").catch(() => ({ data: null }));
     const startupMessage = els.androidSurface.querySelector(".android-native-startup span");
     if (status?.booted) {
+      stopAndroidColdBootCountdown();
+      els.androidSurface.querySelector(".android-cold-boot-countdown")?.remove();
       setViewportSummary("Android is running; waiting for the next display frame");
       if (startupMessage) startupMessage.textContent = "Android is running. Connecting the live display...";
     } else {
@@ -4053,8 +4100,13 @@ const bootNativeAndroid = async (status) => {
     <img src="/assets/android-icon.png" alt="" />
     <strong>Starting ${androidVersionLabel()}</strong>
     <span>Connecting to the private Android Emulator...</span>
+    <time class="android-cold-boot-countdown">00:00:00 remaining</time>
   `;
   els.androidSurface.append(image, startup);
+  const coldBootCountdown = startup.querySelector(".android-cold-boot-countdown");
+  if (data.booted) {
+    coldBootCountdown.remove();
+  }
 
   image.addEventListener("pointerdown", (event) => {
     image.setPointerCapture(event.pointerId);
@@ -4104,6 +4156,9 @@ const bootNativeAndroid = async (status) => {
   );
 
   state.androidNativeActive = true;
+  if (!data.booted) {
+    startAndroidColdBootCountdown(coldBootCountdown, requestedVersion, data.specs);
+  }
   startAndroidLeaseHeartbeat();
   state.running = true;
   state.emulator = {
@@ -4125,6 +4180,7 @@ const bootNativeAndroid = async (status) => {
       setAndroidViewportMode("device", { force: true });
       stopNativeAndroidFrames();
       stopAndroidLeaseHeartbeat();
+      stopAndroidColdBootCountdown();
       state.androidNativeActive = false;
       state.androidNativeInputController?.abort();
       state.androidNativeInputController = null;

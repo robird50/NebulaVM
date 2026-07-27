@@ -2498,6 +2498,20 @@ input[type="text"] {
   line-height: 1.45;
 }
 
+.android-cold-boot-countdown {
+  min-width: 158px;
+  padding: 7px 11px;
+  border: 1px solid rgba(190, 242, 100, 0.48);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.88);
+  color: #bef264;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .android-device.is-paused::after {
   position: absolute;
   inset: 0;
