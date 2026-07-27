@@ -170,9 +170,18 @@ function Set-LowHostMemoryProfile {
   $hostMemoryBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
   if ($hostMemoryBytes -le 10GB) {
     $freeMemoryMb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
-    $startupLimitMb = if ($freeMemoryMb -lt 1536) { 512 } else { 1024 }
-    $startupMb = [math]::Min($MemoryMb, $startupLimitMb)
-    $minimumMb = [math]::Min($startupMb, 256)
+    $preferredStartupMb = [math]::Min($MemoryMb, 1024)
+    $minimumBootMb = [math]::Min($MemoryMb, 768)
+    $reserveMb = 512
+    $startupMb = if ($freeMemoryMb -ge ($preferredStartupMb + $reserveMb)) {
+      $preferredStartupMb
+    } else {
+      $minimumBootMb
+    }
+    $minimumMb = [math]::Min($startupMb, 512)
+    if ($freeMemoryMb -lt ($startupMb + $reserveMb)) {
+      throw "EMUSTAR needs about $($startupMb + $reserveMb) MB of free host memory to boot this ISO, but only $freeMemoryMb MB is currently free. Close a few applications or browser tabs, then launch it again."
+    }
     Set-VMMemory -VM $Vm `
       -DynamicMemoryEnabled $true `
       -StartupBytes ($startupMb * 1MB) `
@@ -312,22 +321,30 @@ function Start-Emustar {
     $sameDisk = $mountedDisk -and
       ([IO.Path]::GetFullPath($mountedDisk) -eq [IO.Path]::GetFullPath($vhdPath))
     if ($sameIso -and $sameDisk) {
-      if ([string]$config.displayMode -eq "external") {
-        Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
-      } else {
-        Close-EmustarConsole | Out-Null
+      $configuredMemory = Get-VMMemory -VM $vm
+      $requestedMaximumBytes = $memoryMb * 1MB
+      $requiredStartupBytes = [math]::Min($memoryMb, 768) * 1MB
+      $memoryMatches = [int64]$configuredMemory.Maximum -eq [int64]$requestedMaximumBytes -and
+        [int64]$configuredMemory.Startup -ge [int64]$requiredStartupBytes
+      if ($memoryMatches) {
+        if ([string]$config.displayMode -eq "external") {
+          Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
+        } else {
+          Close-EmustarConsole | Out-Null
+        }
+        $warnings.Add("EMUSTAR attached to the VM that was already running with this ISO.")
+        return [ordered]@{
+          ok = $true
+          engine = "Microsoft Hyper-V"
+          created = $false
+          attachedExisting = $true
+          bootOrder = $(if ($diskFirst) { "disk-first" } else { "cdrom-first" })
+          displayMode = [string]$config.displayMode
+          vm = Get-VmSnapshot -Vm $vm
+          warnings = $warnings
+        }
       }
-      $warnings.Add("EMUSTAR attached to the VM that was already running with this ISO.")
-      return [ordered]@{
-        ok = $true
-        engine = "Microsoft Hyper-V"
-        created = $false
-        attachedExisting = $true
-        bootOrder = $(if ($diskFirst) { "disk-first" } else { "cdrom-first" })
-        displayMode = [string]$config.displayMode
-        vm = Get-VmSnapshot -Vm $vm
-        warnings = $warnings
-      }
+      $warnings.Add("EMUSTAR restarted the existing VM to apply the requested memory settings.")
     }
   }
 

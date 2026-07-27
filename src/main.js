@@ -2397,11 +2397,10 @@ const startHyperVSetupConsole = (base) => {
 };
 
 const adoptRunningHyperVViewport = async (status, base) => {
-  if (!isHyperVMode() || status.vm?.state !== "Running" || !status.vncReady || !status.vncPath) {
+  if (!isHyperVMode() || status.vm?.state !== "Running") {
     return false;
   }
 
-  stopHyperVSetupConsole();
   els.nativeDisplayMode.value = "viewport";
   window.localStorage.setItem("nebulavm.emustar.display", "viewport");
   els.screenPlaceholder.hidden = true;
@@ -2421,9 +2420,13 @@ const adoptRunningHyperVViewport = async (status, base) => {
     state.statsTimer = window.setInterval(updateUptime, 1000);
   }
 
-  if (!state.nativeRfb) {
+  if (status.vncReady && status.vncPath && !state.nativeRfb) {
+    stopHyperVSetupConsole();
     state.nativeRfb = connectNativeDisplay(base, status.vncPath, "EMUSTAR", status.vncPassword || "");
     log("Attached to the running EMUSTAR display in the browser viewport.");
+  } else if (!status.vncReady && !state.hyperVConsoleActive) {
+    startHyperVSetupConsole(base);
+    log("Attached to the running EMUSTAR setup mirror in the browser viewport.");
   }
 
   if (!state.emulator) {
@@ -2439,11 +2442,15 @@ const adoptRunningHyperVViewport = async (status, base) => {
 
   els.machineTitle.textContent = "EMUSTAR Control Deck";
   setPowerState("EMUSTAR Hyper-V", "running");
-  setViewportSummary("EMUSTAR display is live in the browser");
+  setViewportSummary(status.vncReady
+    ? "EMUSTAR display is live in the browser"
+    : "EMUSTAR setup is live in the browser");
   updateUptime();
   updateButtons();
   monitorNativeVm();
-  await closeHyperVConsole();
+  if (status.vncReady) {
+    await closeHyperVConsole();
+  }
   return true;
 };
 

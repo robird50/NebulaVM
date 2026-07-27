@@ -1752,6 +1752,12 @@ const startNativeVm = async (body) => {
   if (nativeVm) {
     throw new Error(`A native QEMU VM is already running with pid ${nativeVm.pid}.`);
   }
+  const hyperVStatus = await runHyperVAction("Status", {}, 45000).catch(() => null);
+  if (hyperVStatus?.vm?.state === "Running") {
+    throw new Error(
+      "EMUSTAR Hyper-V is already running. End that session before starting a separate QEMU emulator.",
+    );
+  }
 
   const arch = normalizeArch(body.arch);
   const profile = normalizeNativeProfile(body.profile, arch);
@@ -2162,6 +2168,11 @@ const nativeQemuPlugin = () => ({
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") {
           const body = await readJsonBody(req);
           assertStoredIsoAccess(req, body.isoPath);
+          if (nativeVm) {
+            throw new Error(
+              "A native QEMU emulator is already running. Stop it before launching EMUSTAR Hyper-V.",
+            );
+          }
           const storageOwnerId = storedIsoOwnerId(req);
           const result = await runHyperVAction("Start", {
               ...body,
