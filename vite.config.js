@@ -867,6 +867,7 @@ let activeNativeRuntimeName = null;
 let androidRuntime = null;
 let androidImageCache = { expiresAt: 0, items: [] };
 let lastAndroidEmulatorExit = null;
+const androidSessionLeaseMs = 75_000;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
 const hyperVGuestVncPath = "/api/emustar-hyperv/vnc";
@@ -1178,18 +1179,63 @@ const androidVersionCatalog = () => {
   });
 };
 
+const releaseAndroidRuntime = (runtime, reason = "Android session released") => {
+  if (!runtime || androidRuntime !== runtime) return Promise.resolve(false);
+  if (runtime.leaseTimer) {
+    clearTimeout(runtime.leaseTimer);
+    runtime.leaseTimer = null;
+  }
+  androidRuntime = null;
+  try {
+    runtime.process?.kill();
+  } catch {
+    // The wrapper may already have exited.
+  }
+  killNebulaAndroidProcesses();
+  killAndroidPortProcess();
+  removeAndroidStudioAvdReference(runtime);
+  lastAndroidEmulatorExit = {
+    at: new Date().toISOString(),
+    output: `${reason}\n${runtime.output || ""}`.trim().slice(-2000),
+  };
+  return removeAndroidSessionDirectory(runtime.sessionDirectory)
+    .catch(() => {})
+    .then(() => true);
+};
+
+const renewAndroidLease = (runtime) => {
+  if (!runtime || androidRuntime !== runtime) return;
+  if (runtime.leaseTimer) clearTimeout(runtime.leaseTimer);
+  runtime.leaseExpiresAt = Date.now() + androidSessionLeaseMs;
+  runtime.leaseTimer = setTimeout(() => {
+    if (androidRuntime !== runtime || Date.now() < runtime.leaseExpiresAt) return;
+    void releaseAndroidRuntime(runtime, "Android session lease expired after its browser stopped responding.");
+  }, androidSessionLeaseMs + 250);
+  runtime.leaseTimer.unref?.();
+};
+
+const expireStaleAndroidRuntime = () => {
+  if (!androidRuntime || Date.now() < (androidRuntime.leaseExpiresAt || 0)) return false;
+  void releaseAndroidRuntime(androidRuntime, "Android session lease expired and was reclaimed.");
+  return true;
+};
+
 const assertAndroidOwner = (sessionId) => {
+  expireStaleAndroidRuntime();
   if (!androidRuntime || androidRuntime.sessionId !== sessionId) {
     throw new Error("This Android session was started in another browser. Control it from that device.");
   }
+  renewAndroidLease(androidRuntime);
   return androidRuntime;
 };
 
 const androidEmulatorStatus = (sessionId) => {
+  expireStaleAndroidRuntime();
   const emulatorPath = androidToolPath("emulator");
   const adbPath = androidToolPath("adb");
   const images = installedAndroidImages();
   const ownsRuntime = Boolean(androidRuntime && androidRuntime.sessionId === sessionId);
+  if (ownsRuntime) renewAndroidLease(androidRuntime);
   const serial = ownsRuntime ? connectedAndroidSerial() : null;
   const release = ownsRuntime ? androidProperty(serial, "ro.build.version.release") : "";
   return {
@@ -1205,6 +1251,7 @@ const androidEmulatorStatus = (sessionId) => {
     orientation: ownsRuntime ? androidRuntime.orientation : null,
     specs: ownsRuntime ? androidRuntime.specs : null,
     output: ownsRuntime ? androidRuntime.output.trim().slice(-1200) : "",
+    leaseRemainingMs: ownsRuntime ? Math.max(0, androidRuntime.leaseExpiresAt - Date.now()) : null,
     lastExit: lastAndroidEmulatorExit,
   };
 };
@@ -1416,7 +1463,10 @@ const startAndroidEmulator = (sessionId, body = {}) => {
     orientation,
     ...disposable,
     wrapperExited: false,
+    leaseExpiresAt: 0,
+    leaseTimer: null,
   };
+  renewAndroidLease(androidRuntime);
   exposeAndroidAvdToStudio(androidRuntime);
   lastAndroidEmulatorExit = null;
   const rememberAndroidOutput = (chunk) => {
@@ -1428,17 +1478,17 @@ const startAndroidEmulator = (sessionId, body = {}) => {
   processHandle.stderr.on("data", rememberAndroidOutput);
   processHandle.once("exit", () => {
     const exitedRuntime = androidRuntime?.sessionId === sessionId ? androidRuntime : null;
-    lastAndroidEmulatorExit = {
-      at: new Date().toISOString(),
-      output: exitedRuntime?.output.trim().slice(-2000) || "",
-    };
-    if (exitedRuntime) exitedRuntime.wrapperExited = true;
+    if (exitedRuntime) {
+      lastAndroidEmulatorExit = {
+        at: new Date().toISOString(),
+        output: exitedRuntime.output.trim().slice(-2000),
+      };
+      exitedRuntime.wrapperExited = true;
+    }
     setTimeout(() => {
       if (androidRuntime?.sessionId !== sessionId || nebulaAndroidProcessIds().length) return;
       const failedRuntime = androidRuntime;
-      androidRuntime = null;
-      removeAndroidStudioAvdReference(failedRuntime);
-      void removeAndroidSessionDirectory(failedRuntime.sessionDirectory).catch(() => {});
+      void releaseAndroidRuntime(failedRuntime, "Android emulator exited.");
     }, 2500);
   });
   processHandle.once("error", (error) => {
@@ -1571,11 +1621,7 @@ const stopAndroidEmulator = async (sessionId) => {
   } else {
     runtime.process?.kill();
   }
-  killNebulaAndroidProcesses();
-  killAndroidPortProcess();
-  androidRuntime = null;
-  removeAndroidStudioAvdReference(runtime);
-  await removeAndroidSessionDirectory(runtime.sessionDirectory);
+  await releaseAndroidRuntime(runtime, "Android session stopped by its browser.");
   return { ok: true, deleted: true };
 };
 

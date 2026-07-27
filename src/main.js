@@ -122,6 +122,7 @@ const state = {
   androidNativeFrameUrl: null,
   androidNativePointer: null,
   androidNativeInputController: null,
+  androidNativeLeaseTimer: null,
   androidViewportMode: "device",
   androidStudioActive: false,
   androidStudioTimer: null,
@@ -3879,6 +3880,30 @@ const stopNativeAndroidFrames = () => {
   }
 };
 
+const stopAndroidLeaseHeartbeat = () => {
+  if (!state.androidNativeLeaseTimer) return;
+  window.clearInterval(state.androidNativeLeaseTimer);
+  state.androidNativeLeaseTimer = null;
+};
+
+const startAndroidLeaseHeartbeat = () => {
+  stopAndroidLeaseHeartbeat();
+  state.androidNativeLeaseTimer = window.setInterval(async () => {
+    if (!state.androidNativeActive || !state.emulator) {
+      stopAndroidLeaseHeartbeat();
+      return;
+    }
+    try {
+      const { response, data } = await fetchAndroidJson("status");
+      if (!response.ok || !data.running) {
+        throw new Error(data.error || "The private Android session is no longer active.");
+      }
+    } catch (error) {
+      log(`Android session heartbeat failed: ${error.message}`);
+    }
+  }, 15_000);
+};
+
 const sendNativeAndroidInput = async (payload) => {
   if (!state.androidNativeActive) return;
   try {
@@ -4049,6 +4074,7 @@ const bootNativeAndroid = async (status) => {
   );
 
   state.androidNativeActive = true;
+  startAndroidLeaseHeartbeat();
   state.running = true;
   state.emulator = {
     stop: async () => {
@@ -4068,6 +4094,7 @@ const bootNativeAndroid = async (status) => {
     destroy: async () => {
       setAndroidViewportMode("device", { force: true });
       stopNativeAndroidFrames();
+      stopAndroidLeaseHeartbeat();
       state.androidNativeActive = false;
       state.androidNativeInputController?.abort();
       state.androidNativeInputController = null;
@@ -4825,6 +4852,7 @@ window.addEventListener("pagehide", () => {
   }
 });
 window.addEventListener("beforeunload", () => {
+  stopAndroidLeaseHeartbeat();
   void cleanupStagedHostIso({ keepalive: true, silent: true });
   void stopEmulator();
 });
