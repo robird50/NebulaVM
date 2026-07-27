@@ -2162,8 +2162,10 @@ const nativeQemuPlugin = () => ({
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") {
           const body = await readJsonBody(req);
           assertStoredIsoAccess(req, body.isoPath);
+          const storageOwnerId = storedIsoOwnerId(req);
           const result = await runHyperVAction("Start", {
               ...body,
+              storageOwnerId,
               vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
             }, 120000);
           json(res, 200, await withHyperVDisplayStatus(result));

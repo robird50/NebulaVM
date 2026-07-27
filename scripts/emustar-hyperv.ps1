@@ -127,6 +127,40 @@ function Get-BootDevice {
   return Get-VMDvdDrive -VM $Vm | Select-Object -First 1
 }
 
+function Get-IsolatedDiskPath {
+  param(
+    [string]$VmDirectory,
+    [string]$IsoPath,
+    [string]$OwnerId
+  )
+
+  $safeOwnerId = ([string]$OwnerId -replace "[^a-zA-Z0-9_-]", "-").Trim("-")
+  if ([string]::IsNullOrWhiteSpace($safeOwnerId)) {
+    throw "EMUSTAR did not receive a valid storage owner."
+  }
+
+  $mediaName = [IO.Path]::GetFileNameWithoutExtension($IsoPath)
+  $safeMediaName = ($mediaName -replace "[^a-zA-Z0-9_-]", "-").Trim("-")
+  if ([string]::IsNullOrWhiteSpace($safeMediaName)) {
+    $safeMediaName = "boot-media"
+  }
+  if ($safeMediaName.Length -gt 48) {
+    $safeMediaName = $safeMediaName.Substring(0, 48)
+  }
+
+  $identity = "$safeOwnerId|$([IO.Path]::GetFullPath($IsoPath).ToLowerInvariant())"
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    $hashBytes = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity))
+  } finally {
+    $sha.Dispose()
+  }
+  $shortHash = ([BitConverter]::ToString($hashBytes) -replace "-", "").Substring(0, 16).ToLowerInvariant()
+  $diskDirectory = Join-Path $VmDirectory "disks"
+  New-Item -ItemType Directory -Path $diskDirectory -Force | Out-Null
+  return Join-Path $diskDirectory "$safeMediaName-$shortHash.vhdx"
+}
+
 function Set-LowHostMemoryProfile {
   param(
     [object]$Vm,
@@ -259,12 +293,25 @@ function Start-Emustar {
   if ([string]::IsNullOrWhiteSpace($vmDirectory)) {
     throw "The EMUSTAR VM directory was not supplied."
   }
+  $storageOwnerId = [string]$config.storageOwnerId
+  if ([string]::IsNullOrWhiteSpace($storageOwnerId)) {
+    throw "EMUSTAR requires a private device identity before it can create a virtual disk."
+  }
+  New-Item -ItemType Directory -Path $vmDirectory -Force | Out-Null
+  $vhdPath = Get-IsolatedDiskPath -VmDirectory $vmDirectory -IsoPath $isoPath -OwnerId $storageOwnerId
 
   if ($vm -and $vm.State -eq "Running") {
     $mountedIso = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue |
       Select-Object -First 1 |
       ForEach-Object { [string]$_.Path }
-    if ($mountedIso -and ([IO.Path]::GetFullPath($mountedIso) -eq [IO.Path]::GetFullPath($isoPath))) {
+    $mountedDisk = Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue |
+      Select-Object -First 1 |
+      ForEach-Object { [string]$_.Path }
+    $sameIso = $mountedIso -and
+      ([IO.Path]::GetFullPath($mountedIso) -eq [IO.Path]::GetFullPath($isoPath))
+    $sameDisk = $mountedDisk -and
+      ([IO.Path]::GetFullPath($mountedDisk) -eq [IO.Path]::GetFullPath($vhdPath))
+    if ($sameIso -and $sameDisk) {
       if ([string]$config.displayMode -eq "external") {
         Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
       } else {
@@ -284,8 +331,6 @@ function Start-Emustar {
     }
   }
 
-  New-Item -ItemType Directory -Path $vmDirectory -Force | Out-Null
-  $vhdPath = Join-Path $vmDirectory "nebulavm-emustar.vhdx"
   if (-not $vm) {
     if (-not (Test-Path -LiteralPath $vhdPath)) {
       New-VHD -Path $vhdPath -Dynamic -SizeBytes ($diskSizeGb * 1GB) | Out-Null
@@ -312,6 +357,21 @@ function Start-Emustar {
     $vm = New-VM @newVmParams
   } elseif ($vm.State -ne "Off") {
     $vm = Stop-EmustarForConfiguration -Vm $vm
+  }
+
+  $currentDisk = Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1
+  $currentDiskPath = if ($currentDisk) { [string]$currentDisk.Path } else { "" }
+  $diskChanged = -not $currentDiskPath -or
+    ([IO.Path]::GetFullPath($currentDiskPath) -ne [IO.Path]::GetFullPath($vhdPath))
+  if ($diskChanged) {
+    if (-not (Test-Path -LiteralPath $vhdPath)) {
+      New-VHD -Path $vhdPath -Dynamic -SizeBytes ($diskSizeGb * 1GB) | Out-Null
+    }
+    if ($currentDisk) {
+      Remove-VMHardDiskDrive -VMHardDiskDrive $currentDisk
+    }
+    Add-VMHardDiskDrive -VM $vm -Path $vhdPath | Out-Null
+    $warnings.Add("Attached the private virtual disk for this device and ISO.")
   }
 
   Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown -CheckpointType Disabled
