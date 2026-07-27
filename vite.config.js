@@ -1805,7 +1805,7 @@ const runAndroidStudioFrame = (sessionId) => {
       androidStudioFramePath,
       "-AvdName",
       runtime.avdName,
-      ...(openDeviceManager ? ["-OpenDeviceManager"] : []),
+      ...(openDeviceManager ? ["-AllowLaunch", "-OpenDeviceManager"] : []),
     ],
     60000,
   );

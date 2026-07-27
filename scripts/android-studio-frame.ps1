@@ -1,6 +1,7 @@
 param(
   [string]$OutputPath = "",
   [string]$AvdName = "",
+  [switch]$AllowLaunch,
   [switch]$OpenDeviceManager
 )
 
@@ -211,6 +212,13 @@ function Get-ConsoleProcess {
     return $process
   }
 
+  $availableMemoryMb = [math]::Floor(
+    (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024
+  )
+  if ($availableMemoryMb -lt 1024) {
+    throw "AVD Management needs at least 1 GB of free host memory. Switch to Device mode or close host applications."
+  }
+
   $studioPath = @(
     "$env:ProgramFiles\Android\Android Studio\bin\studio64.exe",
     "${env:ProgramFiles(x86)}\Android\Android Studio\bin\studio64.exe",
@@ -299,9 +307,9 @@ function Capture-ConsoleBitmap {
 
 try {
   Ensure-BridgeAssemblies
-  $process = Get-ConsoleProcess -OpenIfMissing $true
+  $process = Get-ConsoleProcess -OpenIfMissing ([bool]$AllowLaunch)
   if (-not $process) {
-    throw "Android Studio could not be opened."
+    throw "Android Studio is not ready. Switch to Device mode and try AVD Management again."
   }
 
   Open-PersonalAvdManager -Process $process -Name $AvdName

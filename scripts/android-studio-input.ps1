@@ -122,26 +122,7 @@ function Get-ConsoleProcess {
   if ($process) {
     return $process
   }
-
-  $studioPath = @(
-    "$env:ProgramFiles\Android\Android Studio\bin\studio64.exe",
-    "${env:ProgramFiles(x86)}\Android\Android Studio\bin\studio64.exe",
-    "$env:LOCALAPPDATA\Programs\Android Studio\bin\studio64.exe"
-  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
-  if (-not $studioPath) {
-    throw "Android Studio is not installed on this host."
-  }
-
-  Start-Process -FilePath $studioPath | Out-Null
-  $deadline = (Get-Date).AddSeconds(35)
-  do {
-    Start-Sleep -Milliseconds 350
-    $process = Get-TargetConsoleProcesses |
-      Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle -notin @("", "splash") } |
-      Select-Object -First 1
-  } while (-not $process -and (Get-Date) -lt $deadline)
-
-  return $process
+  throw "Android Studio is not ready. Input cannot open another Studio process."
 }
 
 function Focus-Console {
