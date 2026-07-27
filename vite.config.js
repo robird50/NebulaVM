@@ -867,7 +867,7 @@ let activeNativeRuntimeName = null;
 let androidRuntime = null;
 let androidImageCache = { expiresAt: 0, items: [] };
 let lastAndroidEmulatorExit = null;
-const androidSessionLeaseMs = 75_000;
+const androidSessionLeaseMs = 5 * 60_000;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
 const hyperVGuestVncPath = "/api/emustar-hyperv/vnc";
@@ -1297,13 +1297,13 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
   mkdirSync(avdPath, { recursive: true });
   mkdirSync(emulatorHome, { recursive: true });
   const landscape = orientation === "landscape";
-  const lowMemory = specs.memoryMb <= 768;
+  const lowMemory = specs.memoryMb <= 1024;
   const portraitWidth =
-    specs.memoryMb <= 512 ? 360 : specs.memoryMb <= 768 ? 432 : specs.memoryMb <= 1024 ? 540 : 1080;
+    specs.memoryMb <= 512 ? 360 : specs.memoryMb <= 768 ? 432 : specs.memoryMb <= 1536 ? 540 : 1080;
   const portraitHeight =
-    specs.memoryMb <= 512 ? 640 : specs.memoryMb <= 768 ? 768 : specs.memoryMb <= 1024 ? 960 : 1920;
+    specs.memoryMb <= 512 ? 640 : specs.memoryMb <= 768 ? 768 : specs.memoryMb <= 1536 ? 960 : 1920;
   const density =
-    specs.memoryMb <= 512 ? 240 : specs.memoryMb <= 768 ? 280 : specs.memoryMb <= 1024 ? 300 : 420;
+    specs.memoryMb <= 512 ? 240 : specs.memoryMb <= 768 ? 280 : specs.memoryMb <= 1536 ? 300 : 420;
   const width = landscape ? portraitHeight : portraitWidth;
   const height = landscape ? portraitWidth : portraitHeight;
   const heapMb =
@@ -1406,13 +1406,13 @@ const startAndroidEmulator = (sessionId, body = {}) => {
       ? 3072
       : freeMemoryMb >= 3840
         ? 2048
-        : freeMemoryMb >= 2560
+        : freeMemoryMb >= 1800
           ? 1024
           : freeMemoryMb >= 1408
             ? 768
             : 512;
   const modernAndroid = requestedVersion >= 15;
-  if (modernAndroid && freeMemoryMb < 2560) {
+  if (modernAndroid && freeMemoryMb < 1600) {
     const error = new Error(
       `Android ${requestedVersion} needs at least 1024 MB plus Windows breathing room. Only ${freeMemoryMb} MB is currently available on the host. Close a few host apps, then try again.`,
     );
@@ -1425,7 +1425,7 @@ const startAndroidEmulator = (sessionId, body = {}) => {
       : adaptiveCeilingMb;
   const requestedCores = androidInteger(body.cores, 4, 1, Math.min(4, cpus().length));
   const specs = {
-    cores: memoryMb <= 768 ? 1 : Math.min(requestedCores, memoryMb <= 1024 ? 2 : 4),
+    cores: memoryMb <= 768 ? 1 : Math.min(requestedCores, memoryMb <= 1536 ? 2 : 4),
     memoryMb,
     requestedMemoryMb,
     memoryAdapted: requestedMemoryMb === 0 || memoryMb !== requestedMemoryMb,
@@ -1510,11 +1510,13 @@ const startAndroidEmulator = (sessionId, body = {}) => {
   };
   processHandle.stdout.on("data", rememberAndroidOutput);
   processHandle.stderr.on("data", rememberAndroidOutput);
-  processHandle.once("exit", () => {
+  processHandle.once("exit", (code, signal) => {
     const exitedRuntime = androidRuntime?.sessionId === sessionId ? androidRuntime : null;
     if (exitedRuntime) {
       lastAndroidEmulatorExit = {
         at: new Date().toISOString(),
+        code,
+        signal,
         output: exitedRuntime.output.trim().slice(-2000),
       };
       exitedRuntime.wrapperExited = true;
@@ -1552,8 +1554,38 @@ const androidEmulatorFrame = async (sessionId) => {
   }
   if (!runtime.awake && androidProperty(serial, "sys.boot_completed") === "1") {
     try {
-      runAndroidTool("adb", ["-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"]);
-      runAndroidTool("adb", ["-s", serial, "shell", "wm", "dismiss-keyguard"]);
+      const runBootCommand = async (args) => {
+        renewAndroidLease(runtime);
+        await runAndroidToolAsync("adb", ["-s", serial, "shell", ...args], {
+          timeout: 15000,
+        });
+        renewAndroidLease(runtime);
+      };
+      if (runtime.image.version >= 16) {
+        await runBootCommand(["settings", "put", "global", "hide_error_dialogs", "1"]);
+      }
+      if (runtime.specs.memoryMb <= 1536) {
+        await runBootCommand([
+          "settings",
+          "put",
+          "global",
+          "activity_manager_constants",
+          "max_cached_processes=8",
+        ]);
+        for (const packageName of [
+          "com.google.android.googlequicksearchbox",
+          "com.google.android.apps.wellbeing",
+          "com.google.android.apps.photos",
+          "com.google.android.apps.maps",
+          "com.google.android.apps.docs",
+          "com.google.android.apps.youtube.music",
+          "com.google.android.apps.messaging",
+        ]) {
+          await runBootCommand(["am", "force-stop", packageName]);
+        }
+      }
+      await runBootCommand(["input", "keyevent", "KEYCODE_WAKEUP"]);
+      await runBootCommand(["wm", "dismiss-keyguard"]);
     } catch {
       // A frame can still be served if the guest does not support these commands.
     }

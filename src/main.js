@@ -3165,7 +3165,6 @@ const createDemoBootImage = () => {
 const stopEmulator = async () => {
   clearNativeMonitor();
   stopHyperVSetupConsole();
-  if (!state.emulator) return;
 
   if (isAndroidMode()) {
     setAndroidViewportMode("device", { force: true });
@@ -3174,11 +3173,13 @@ const stopEmulator = async () => {
   state.emulator = null;
   updateButtons(true);
 
-  try {
-    await emulator.stop();
-    await emulator.destroy();
-  } catch (error) {
-    log(`Stopped with warning: ${error.message}`);
+  if (emulator) {
+    try {
+      await emulator.stop();
+      await emulator.destroy();
+    } catch (error) {
+      log(`Stopped with warning: ${error.message}`);
+    }
   }
 
   state.running = false;
@@ -4025,6 +4026,27 @@ const refreshNativeAndroidFrame = async (image) => {
   } catch (error) {
     const { data: status } = await fetchAndroidJson("status").catch(() => ({ data: null }));
     const startupMessage = els.androidSurface.querySelector(".android-native-startup span");
+    if (status && !status.running) {
+      const summary = nativeExitSummary(status.lastExit);
+      stopNativeAndroidFrames();
+      stopAndroidLeaseHeartbeat();
+      stopAndroidColdBootCountdown();
+      state.androidNativeActive = false;
+      state.androidNativeInputController?.abort();
+      state.androidNativeInputController = null;
+      state.emulator = null;
+      state.running = false;
+      state.startedAt = null;
+      clearStatsTimer();
+      updateUptime();
+      els.androidDevice.classList.remove("is-native", "is-paused");
+      setPowerState("Android stopped", "off");
+      setViewportSummary("Android stopped during startup");
+      if (startupMessage) startupMessage.textContent = `Android stopped: ${summary}`;
+      log(`Android stopped: ${summary}`);
+      updateButtons();
+      return;
+    }
     if (status?.booted) {
       stopAndroidColdBootCountdown();
       els.androidSurface.querySelector(".android-cold-boot-countdown")?.remove();
