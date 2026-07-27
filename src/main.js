@@ -1514,6 +1514,7 @@ const fetchAndroidStudioFrame = async () => {
         width: Number(response.headers.get("X-NebulaVM-Frame-Width")) || 0,
         height: Number(response.headers.get("X-NebulaVM-Frame-Height")) || 0,
         title: decodeURIComponent(response.headers.get("X-NebulaVM-Frame-Title") || ""),
+        avdName: decodeURIComponent(response.headers.get("X-NebulaVM-AVD-Name") || ""),
       };
     } catch (error) {
       lastError = error instanceof TypeError ? new Error(androidBridgeMessage) : error;
@@ -2789,6 +2790,7 @@ const updateButtons = (busy = false) => {
       control.disabled = androidMode && Boolean(state.emulator);
     },
   );
+  syncAndroidViewportModeButtons();
 };
 
 const updateUptime = () => {
@@ -3132,6 +3134,9 @@ const stopEmulator = async () => {
   stopHyperVSetupConsole();
   if (!state.emulator) return;
 
+  if (isAndroidMode()) {
+    setAndroidViewportMode("device", { force: true });
+  }
   const emulator = state.emulator;
   state.emulator = null;
   updateButtons(true);
@@ -3636,10 +3641,13 @@ const openAndroidView = (view) => {
 };
 
 const syncAndroidViewportModeButtons = () => {
+  const sessionReady = Boolean(isAndroidMode() && state.androidNativeActive && state.emulator);
   for (const button of els.androidViewModeButtons) {
     const active = button.dataset.androidViewportMode === state.androidViewportMode;
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
+    button.disabled = !sessionReady;
+    button.title = sessionReady ? "" : "Start Android before changing the viewport mode";
   }
 };
 
@@ -3671,8 +3679,10 @@ const sendAndroidStudioInput = async (payload) => {
 };
 
 const startAndroidStudioManagement = () => {
+  if (!state.androidNativeActive || !state.emulator) return;
   stopAndroidStudioManagement();
   state.androidStudioActive = true;
+  els.workspace.classList.add("is-avd-management");
   els.screenPlaceholder.hidden = true;
   els.screenContainer.querySelector(".vga-text").hidden = true;
   els.screenContainer.querySelector(".vga-canvas").hidden = true;
@@ -3771,9 +3781,15 @@ const startAndroidStudioManagement = () => {
       image.src = nextFrameUrl;
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
-      status.textContent = "Click and type here to manage AVDs in Android Studio.";
-      els.machineTitle.textContent = frame.title || "Android Studio";
-      setViewportSummary("Android Studio AVD management is live");
+      if (frame.width && frame.height) {
+        const frameRatio = frame.width / frame.height;
+        els.screenShell.style.setProperty("--avd-frame-ratio", String(frameRatio));
+        els.screenShell.style.aspectRatio = `${frame.width} / ${frame.height}`;
+      }
+      const avdLabel = frame.avdName || "your private AVD";
+      status.textContent = `Managing ${avdLabel}. Click and type to control Android Studio.`;
+      els.machineTitle.textContent = frame.avdName ? `${frame.avdName} - Android Studio` : frame.title || "Android Studio";
+      setViewportSummary(`${avdLabel} is open in AVD Management`);
       state.androidStudioTimer = window.setTimeout(pollFrame, 1200);
     } catch (error) {
       status.textContent = `AVD Management waiting: ${error.message}`;
@@ -3784,14 +3800,21 @@ const startAndroidStudioManagement = () => {
   log("Opening Android Studio AVD Management in the browser viewport.");
 };
 
-const setAndroidViewportMode = (mode) => {
+const setAndroidViewportMode = (mode, { force = false } = {}) => {
+  if (!force && (!state.androidNativeActive || !state.emulator)) {
+    syncAndroidViewportModeButtons();
+    return false;
+  }
   state.androidViewportMode = mode === "management" ? "management" : "device";
   syncAndroidViewportModeButtons();
   if (state.androidViewportMode === "management") {
     startAndroidStudioManagement();
-    return;
+    return true;
   }
   stopAndroidStudioManagement();
+  els.workspace.classList.remove("is-avd-management");
+  els.screenShell.style.removeProperty("--avd-frame-ratio");
+  els.screenShell.style.removeProperty("aspect-ratio");
   els.nativeDisplay.hidden = true;
   if (state.emulator && isAndroidMode()) {
     els.screenPlaceholder.hidden = true;
@@ -3806,6 +3829,7 @@ const setAndroidViewportMode = (mode) => {
     els.machineTitle.textContent = `${androidVersionLabel()} ready`;
     setViewportSummary("A private Android device is ready to be created");
   }
+  return true;
 };
 
 const androidBack = () => {
@@ -4042,6 +4066,7 @@ const bootNativeAndroid = async (status) => {
       updateButtons();
     },
     destroy: async () => {
+      setAndroidViewportMode("device", { force: true });
       stopNativeAndroidFrames();
       state.androidNativeActive = false;
       state.androidNativeInputController?.abort();
@@ -4450,7 +4475,7 @@ const updateBackendUi = () => {
   els.androidConfig.hidden = !androidMode;
   els.androidViewSwitch.hidden = !androidMode;
   if (!androidMode && state.androidViewportMode !== "device") {
-    setAndroidViewportMode("device");
+    setAndroidViewportMode("device", { force: true });
   }
   if (androidMode) syncAndroidOrientation();
   els.pcSpecControls.forEach((control) => {

@@ -1,4 +1,7 @@
-param([string]$ConfigBase64 = "")
+param(
+  [string]$ConfigBase64 = "",
+  [string]$AvdName = ""
+)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -21,6 +24,7 @@ function Ensure-BridgeAssemblies {
   if (-not ("NebulaVM.NativeConsoleInput" -as [type])) {
     Add-Type @"
 using System;
+using System.Text;
 using System.Runtime.InteropServices;
 
 namespace NebulaVM {
@@ -32,8 +36,13 @@ namespace NebulaVM {
   }
 
   public static class NativeConsoleInput {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
 
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -46,14 +55,63 @@ namespace NebulaVM {
 
     [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+
+    public static string WindowTitle(IntPtr hWnd) {
+      var text = new StringBuilder(512);
+      GetWindowText(hWnd, text, text.Capacity);
+      return text.ToString();
+    }
+
+    public static IntPtr BestWindowForProcess(int processId) {
+      IntPtr first = IntPtr.Zero;
+      IntPtr deviceManager = IntPtr.Zero;
+      EnumWindows((hWnd, lParam) => {
+        uint owner;
+        GetWindowThreadProcessId(hWnd, out owner);
+        if (owner != processId || !IsWindowVisible(hWnd)) return true;
+        string title = WindowTitle(hWnd);
+        if (String.IsNullOrWhiteSpace(title)) return true;
+        if (first == IntPtr.Zero) first = hWnd;
+        if (title.IndexOf("Device Manager", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            title.IndexOf("Virtual Device", StringComparison.OrdinalIgnoreCase) >= 0) {
+          deviceManager = hWnd;
+        }
+        return true;
+      }, IntPtr.Zero);
+      return deviceManager != IntPtr.Zero ? deviceManager : first;
+    }
   }
 }
 "@
+    [NebulaVM.NativeConsoleInput]::SetProcessDPIAware() | Out-Null
   }
 }
 
 function Get-TargetConsoleProcesses {
-  return @(Get-Process -Name "studio64" -ErrorAction SilentlyContinue)
+  return @(
+    Get-Process -Name "studio64" -ErrorAction SilentlyContinue | ForEach-Object {
+      $handle = [NebulaVM.NativeConsoleInput]::BestWindowForProcess($_.Id)
+      if ($handle -ne [IntPtr]::Zero) {
+        [pscustomobject]@{
+          Id = $_.Id
+          MainWindowHandle = $handle
+          MainWindowTitle = [NebulaVM.NativeConsoleInput]::WindowTitle($handle)
+        }
+      }
+    }
+  )
 }
 
 function Get-ConsoleProcess {

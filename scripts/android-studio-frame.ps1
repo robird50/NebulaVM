@@ -1,16 +1,22 @@
-param([string]$OutputPath = "")
+param(
+  [string]$OutputPath = "",
+  [string]$AvdName = "",
+  [switch]$OpenDeviceManager
+)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 function Ensure-BridgeAssemblies {
   Add-Type -AssemblyName System.Drawing
+  Add-Type -AssemblyName System.Windows.Forms
   Add-Type -AssemblyName UIAutomationClient
   Add-Type -AssemblyName UIAutomationTypes
 
   if (-not ("NebulaVM.NativeConsoleFrame" -as [type])) {
     Add-Type @"
 using System;
+using System.Text;
 using System.Runtime.InteropServices;
 
 namespace NebulaVM {
@@ -22,22 +28,176 @@ namespace NebulaVM {
   }
 
   public static class NativeConsoleFrame {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
 
     [DllImport("user32.dll")]
     public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
 
     [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
+
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+
+    public static string WindowTitle(IntPtr hWnd) {
+      var text = new StringBuilder(512);
+      GetWindowText(hWnd, text, text.Capacity);
+      return text.ToString();
+    }
+
+    public static IntPtr BestWindowForProcess(int processId) {
+      IntPtr first = IntPtr.Zero;
+      IntPtr deviceManager = IntPtr.Zero;
+      EnumWindows((hWnd, lParam) => {
+        uint owner;
+        GetWindowThreadProcessId(hWnd, out owner);
+        if (owner != processId || !IsWindowVisible(hWnd)) return true;
+        string title = WindowTitle(hWnd);
+        if (String.IsNullOrWhiteSpace(title)) return true;
+        if (first == IntPtr.Zero) first = hWnd;
+        if (title.IndexOf("Device Manager", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            title.IndexOf("Virtual Device", StringComparison.OrdinalIgnoreCase) >= 0) {
+          deviceManager = hWnd;
+        }
+        return true;
+      }, IntPtr.Zero);
+      return deviceManager != IntPtr.Zero ? deviceManager : first;
+    }
   }
 }
 "@
+    [NebulaVM.NativeConsoleFrame]::SetProcessDPIAware() | Out-Null
+  }
+}
+
+function Invoke-AutomationElement {
+  param([System.Windows.Automation.AutomationElement]$Element)
+
+  if (-not $Element) { return $false }
+  try {
+    $pattern = $Element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $pattern.Invoke()
+    return $true
+  } catch {}
+  try {
+    $pattern = $Element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    $pattern.Select()
+    return $true
+  } catch {}
+  return $false
+}
+
+function Find-AutomationElementByName {
+  param(
+    [System.Windows.Automation.AutomationElement]$Root,
+    [string[]]$Names
+  )
+
+  if (-not $Root) { return $null }
+  try {
+    $elements = $Root.FindAll(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      [System.Windows.Automation.Condition]::TrueCondition
+    )
+  } catch {
+    return $null
+  }
+  foreach ($element in $elements) {
+    $name = [string]$element.Current.Name
+    if ($Names | Where-Object { $name -like $_ }) {
+      return $element
+    }
+  }
+  return $null
+}
+
+function Open-PersonalAvdManager {
+  param(
+    [object]$Process,
+    [string]$Name
+  )
+
+  if (-not $OpenDeviceManager) { return }
+  [NebulaVM.NativeConsoleFrame]::ShowWindow($Process.MainWindowHandle, 4) | Out-Null
+  Start-Sleep -Milliseconds 250
+  $window = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
+  $moreActions = Find-AutomationElementByName -Root $window -Names @("More Actions", "More actions")
+  if ($moreActions -and (Invoke-AutomationElement -Element $moreActions)) {
+    Start-Sleep -Milliseconds 450
+    $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+    $deviceManager = Find-AutomationElementByName -Root $desktop -Names @("*Virtual Device Manager*", "*Device Manager*")
+    if ($deviceManager) {
+      [void](Invoke-AutomationElement -Element $deviceManager)
+      Start-Sleep -Milliseconds 900
+    }
+  } else {
+    try {
+      # The Android Studio welcome screen is not exposed through UI Automation.
+      # Its More Actions control stays at this stable relative position.
+      $rect = New-Object NebulaVM.RECT
+      if (-not [NebulaVM.NativeConsoleFrame]::GetWindowRect($Process.MainWindowHandle, [ref]$rect)) {
+        throw "The Android Studio welcome screen could not be measured."
+      }
+      [NebulaVM.NativeConsoleFrame]::SetForegroundWindow($Process.MainWindowHandle) | Out-Null
+      $menuX = [int][math]::Round($rect.Left + (($rect.Right - $rect.Left) * 0.55))
+      $menuY = [int][math]::Round($rect.Top + (($rect.Bottom - $rect.Top) * 0.43))
+      [NebulaVM.NativeConsoleFrame]::SetCursorPos($menuX, $menuY) | Out-Null
+      [NebulaVM.NativeConsoleFrame]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 45
+      [NebulaVM.NativeConsoleFrame]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 350
+      [System.Windows.Forms.SendKeys]::SendWait("v")
+      [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+      Start-Sleep -Milliseconds 1400
+    } catch {}
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($Name)) {
+    $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+    $personalAvd = Find-AutomationElementByName -Root $desktop -Names @("*$Name*")
+    if ($personalAvd) {
+      [void](Invoke-AutomationElement -Element $personalAvd)
+    }
   }
 }
 
 function Get-TargetConsoleProcesses {
-  return @(Get-Process -Name "studio64" -ErrorAction SilentlyContinue)
+  return @(
+    Get-Process -Name "studio64" -ErrorAction SilentlyContinue | ForEach-Object {
+      $handle = [NebulaVM.NativeConsoleFrame]::BestWindowForProcess($_.Id)
+      if ($handle -ne [IntPtr]::Zero) {
+        [pscustomobject]@{
+          Id = $_.Id
+          MainWindowHandle = $handle
+          MainWindowTitle = [NebulaVM.NativeConsoleFrame]::WindowTitle($handle)
+        }
+      }
+    }
+  )
 }
 
 function Get-ConsoleProcess {
@@ -144,6 +304,8 @@ try {
     throw "Android Studio could not be opened."
   }
 
+  Open-PersonalAvdManager -Process $process -Name $AvdName
+  $process = Get-ConsoleProcess -OpenIfMissing $false
   $bounds = Get-ConsoleBounds -Process $process
   $bitmap = New-Object System.Drawing.Bitmap $bounds.width, $bounds.height
   try {
@@ -171,6 +333,7 @@ try {
     width = $bounds.width
     height = $bounds.height
     title = $process.MainWindowTitle
+    avdName = $AvdName
   }
 
   if ([string]::IsNullOrWhiteSpace($OutputPath)) {

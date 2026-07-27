@@ -886,6 +886,31 @@ const workspaceUserHome = () => {
   return process.env.USERPROFILE || homedir();
 };
 
+const androidStudioAvdHome = () => join(workspaceUserHome(), ".android", "avd");
+
+const removeAndroidStudioAvdReference = (runtime) => {
+  if (!runtime?.studioAvdIniPath) return;
+  rmSync(runtime.studioAvdIniPath, { force: true });
+  runtime.studioAvdIniPath = "";
+};
+
+const exposeAndroidAvdToStudio = (runtime) => {
+  const studioAvdHome = androidStudioAvdHome();
+  mkdirSync(studioAvdHome, { recursive: true });
+  const studioAvdIniPath = join(studioAvdHome, `${runtime.avdName}.ini`);
+  writeFileSync(
+    studioAvdIniPath,
+    [
+      "avd.ini.encoding=UTF-8",
+      `path=${runtime.avdPath}`,
+      `target=${runtime.image.targetId || `android-${runtime.image.api}`}`,
+      "",
+    ].join("\n"),
+  );
+  runtime.studioAvdIniPath = studioAvdIniPath;
+  return studioAvdIniPath;
+};
+
 const androidSdkRoot = () => {
   const candidates = [
     process.env.ANDROID_SDK_ROOT,
@@ -1392,6 +1417,7 @@ const startAndroidEmulator = (sessionId, body = {}) => {
     ...disposable,
     wrapperExited: false,
   };
+  exposeAndroidAvdToStudio(androidRuntime);
   lastAndroidEmulatorExit = null;
   const rememberAndroidOutput = (chunk) => {
     if (androidRuntime?.sessionId === sessionId) {
@@ -1411,6 +1437,7 @@ const startAndroidEmulator = (sessionId, body = {}) => {
       if (androidRuntime?.sessionId !== sessionId || nebulaAndroidProcessIds().length) return;
       const failedRuntime = androidRuntime;
       androidRuntime = null;
+      removeAndroidStudioAvdReference(failedRuntime);
       void removeAndroidSessionDirectory(failedRuntime.sessionDirectory).catch(() => {});
     }, 2500);
   });
@@ -1547,6 +1574,7 @@ const stopAndroidEmulator = async (sessionId) => {
   killNebulaAndroidProcesses();
   killAndroidPortProcess();
   androidRuntime = null;
+  removeAndroidStudioAvdReference(runtime);
   await removeAndroidSessionDirectory(runtime.sessionDirectory);
   return { ok: true, deleted: true };
 };
@@ -1562,6 +1590,14 @@ const cleanupOrphanedAndroidSessions = () => {
   killAndroidPortProcess();
   if (existsSync(androidSessionsRoot)) {
     rmSync(androidSessionsRoot, { recursive: true, force: true });
+  }
+  const studioAvdHome = androidStudioAvdHome();
+  if (existsSync(studioAvdHome)) {
+    for (const entry of readdirSync(studioAvdHome, { withFileTypes: true })) {
+      if (entry.isFile() && /^NebulaVM_[A-Za-z0-9_-]+\.ini$/i.test(entry.name)) {
+        rmSync(join(studioAvdHome, entry.name), { force: true });
+      }
+    }
   }
 };
 
@@ -1704,8 +1740,12 @@ const runHyperVConsoleInput = (body) =>
     45000,
   );
 
-const runAndroidStudioFrame = () =>
-  runPowerShellJson(
+const runAndroidStudioFrame = (sessionId) => {
+  const runtime = assertAndroidOwner(sessionId);
+  exposeAndroidAvdToStudio(runtime);
+  const openDeviceManager = !runtime.studioManagerOpened;
+  runtime.studioManagerOpened = true;
+  return runPowerShellJson(
     "Android Studio frame",
     [
       "-NoLogo",
@@ -1717,12 +1757,18 @@ const runAndroidStudioFrame = () =>
       androidStudioFrameScriptPath,
       "-OutputPath",
       androidStudioFramePath,
+      "-AvdName",
+      runtime.avdName,
+      ...(openDeviceManager ? ["-OpenDeviceManager"] : []),
     ],
     60000,
   );
+};
 
-const runAndroidStudioInput = (body) =>
-  runPowerShellJson(
+const runAndroidStudioInput = (sessionId, body) => {
+  const runtime = assertAndroidOwner(sessionId);
+  exposeAndroidAvdToStudio(runtime);
+  return runPowerShellJson(
     "Android Studio input",
     [
       "-NoLogo",
@@ -1734,9 +1780,12 @@ const runAndroidStudioInput = (body) =>
       androidStudioInputScriptPath,
       "-ConfigBase64",
       Buffer.from(JSON.stringify(body || {}), "utf8").toString("base64"),
+      "-AvdName",
+      runtime.avdName,
     ],
     45000,
   );
+};
 
 const isPortAvailable = (port) =>
   new Promise((resolvePort) => {
@@ -2447,8 +2496,7 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "GET" && url.pathname === "/api/android-studio/frame") {
           const sessionId = androidSessionId(req);
-          if (androidRuntime) assertAndroidOwner(sessionId);
-          const frame = await runAndroidStudioFrame();
+          const frame = await runAndroidStudioFrame(sessionId);
           if (!frame.outputPath || !existsSync(frame.outputPath)) {
             throw new Error("Android Studio did not write a management frame.");
           }
@@ -2459,15 +2507,15 @@ const nativeQemuPlugin = () => ({
           res.setHeader("X-NebulaVM-Frame-Width", String(frame.width || ""));
           res.setHeader("X-NebulaVM-Frame-Height", String(frame.height || ""));
           res.setHeader("X-NebulaVM-Frame-Title", encodeURIComponent(frame.title || ""));
+          res.setHeader("X-NebulaVM-AVD-Name", encodeURIComponent(frame.avdName || ""));
           res.end(image);
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/android-studio/input") {
           const sessionId = androidSessionId(req);
-          if (androidRuntime) assertAndroidOwner(sessionId);
           const body = await readJsonBody(req);
-          json(res, 200, await runAndroidStudioInput(body));
+          json(res, 200, await runAndroidStudioInput(sessionId, body));
           return;
         }
 
