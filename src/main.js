@@ -588,6 +588,7 @@ app.innerHTML = `
           </div>
           <div class="metric-row">
             <span id="uptimeMetric">00:00</span>
+            <span class="host-memory-pill" id="hostMemoryMetric" hidden>Checking host memory...</span>
             <div class="android-view-switch" id="androidViewSwitch" role="group" aria-label="Android viewport mode" hidden>
               <button class="is-active" type="button" data-android-viewport-mode="device" aria-pressed="true">Device</button>
               <button type="button" data-android-viewport-mode="management" aria-pressed="false">AVD Management</button>
@@ -846,6 +847,7 @@ const els = {
   keepIsoNoButton: document.querySelector("#keepIsoNoButton"),
   keepIsoYesButton: document.querySelector("#keepIsoYesButton"),
   uptimeMetric: document.querySelector("#uptimeMetric"),
+  hostMemoryMetric: document.querySelector("#hostMemoryMetric"),
   viewportSummaryMetric: document.querySelector("#viewportSummaryMetric"),
   ramMetric: document.querySelector("#ramMetric"),
   logOutput: document.querySelector("#logOutput"),
@@ -1400,6 +1402,16 @@ const prepareAndroidBridgeBases = async () => {
   return nativeBridgeBases();
 };
 
+const updateAndroidHostMemory = (hostMemory) => {
+  if (!hostMemory || !els.hostMemoryMetric) return;
+  const bytesPerGigabyte = 1024 ** 3;
+  const availableGb = Math.max(0, Number(hostMemory.availableBytes) || 0) / bytesPerGigabyte;
+  const totalGb = Math.max(0, Number(hostMemory.totalBytes) || 0) / bytesPerGigabyte;
+  const availableLabel = availableGb < 10 ? availableGb.toFixed(1) : Math.round(availableGb).toString();
+  const totalLabel = Math.max(1, Math.round(totalGb));
+  els.hostMemoryMetric.textContent = `${availableLabel} GB/${totalLabel} GB available on host`;
+};
+
 const fetchAndroidJson = async (path, options) => {
   const uniqueBridgeBases = await prepareAndroidBridgeBases();
   let lastError = new Error(androidBridgeMessage);
@@ -1419,6 +1431,7 @@ const fetchAndroidJson = async (path, options) => {
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.toLowerCase().includes("application/json")) continue;
       const data = await response.json();
+      updateAndroidHostMemory(data.hostMemory);
       state.nativeQemuApiBase = base;
       return { response, data, base };
     } catch (error) {
@@ -4501,6 +4514,7 @@ const updateBackendUi = () => {
   els.demoButton.hidden = androidMode;
   els.androidConfig.hidden = !androidMode;
   els.androidViewSwitch.hidden = !androidMode;
+  els.hostMemoryMetric.hidden = !androidMode;
   if (!androidMode && state.androidViewportMode !== "device") {
     setAndroidViewportMode("device", { force: true });
   }
@@ -4608,7 +4622,10 @@ const updateBackendUi = () => {
   if (androidMode && !state.emulator) {
     setViewportSummary("A private Android device is ready to be created");
     void fetchAndroidJson("status")
-      .then(({ data }) => applyAndroidVersionCatalog(data.versions || []))
+      .then(({ data }) => {
+        applyAndroidVersionCatalog(data.versions || []);
+        updateAndroidHostMemory(data.hostMemory);
+      })
       .catch((error) => {
         els.androidImageNote.textContent = error.message;
       });

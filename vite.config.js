@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import dgram from "node:dgram";
 import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import net from "node:net";
-import { cpus, freemem, homedir, networkInterfaces } from "node:os";
+import { cpus, freemem, homedir, networkInterfaces, totalmem } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
@@ -1252,6 +1252,10 @@ const androidEmulatorStatus = (sessionId) => {
     specs: ownsRuntime ? androidRuntime.specs : null,
     output: ownsRuntime ? androidRuntime.output.trim().slice(-1200) : "",
     leaseRemainingMs: ownsRuntime ? Math.max(0, androidRuntime.leaseExpiresAt - Date.now()) : null,
+    hostMemory: {
+      availableBytes: freemem(),
+      totalBytes: totalmem(),
+    },
     lastExit: lastAndroidEmulatorExit,
   };
 };

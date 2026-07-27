@@ -1910,6 +1910,17 @@ input[type="text"] {
   font-weight: 800;
 }
 
+.metric-row > .host-memory-pill {
+  border: 1px solid rgba(167, 232, 79, 0.35);
+  background: rgba(25, 48, 24, 0.82);
+  color: #dfffb8;
+  white-space: nowrap;
+}
+
+.metric-row > .host-memory-pill[hidden] {
+  display: none;
+}
+
 .android-view-switch {
   display: inline-flex;
   min-height: 32px;
