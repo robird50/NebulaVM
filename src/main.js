@@ -3059,7 +3059,7 @@ const nativeExitSummary = (lastExit) => {
     .map((line) => line.trim())
     .filter(Boolean)
     .at(-1);
-  const code = lastExit.code === null ? "" : ` (exit ${lastExit.code})`;
+  const code = Number.isInteger(lastExit.code) ? ` (exit ${lastExit.code})` : "";
   return outputLine ? `${outputLine}${code}` : `The runtime stopped${code}.`;
 };
 

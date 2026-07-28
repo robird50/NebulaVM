@@ -1217,7 +1217,9 @@ const releaseAndroidRuntime = (runtime, reason = "Android session released") => 
   removeAndroidStudioAvdReference(runtime);
   lastAndroidEmulatorExit = {
     at: new Date().toISOString(),
-    output: `${reason}\n${runtime.output || ""}`.trim().slice(-2000),
+    code: Number.isInteger(runtime.exitCode) ? runtime.exitCode : null,
+    signal: runtime.exitSignal || null,
+    output: `${reason}\n${runtime.output || ""}`.trim().slice(-8000),
   };
   return removeAndroidSessionDirectory(runtime.sessionDirectory)
     .catch(() => {})
@@ -1525,6 +1527,8 @@ const startAndroidEmulator = (sessionId, body = {}, { publicMobile = false } = {
     orientation,
     ...disposable,
     wrapperExited: false,
+    exitCode: null,
+    exitSignal: null,
     leaseExpiresAt: 0,
     leaseTimer: null,
     hardStopTimer: null,
@@ -1552,19 +1556,34 @@ const startAndroidEmulator = (sessionId, body = {}, { publicMobile = false } = {
   processHandle.once("exit", (code, signal) => {
     const exitedRuntime = androidRuntime?.sessionId === sessionId ? androidRuntime : null;
     if (exitedRuntime) {
+      exitedRuntime.exitCode = Number.isInteger(code) ? code : null;
+      exitedRuntime.exitSignal = signal || null;
       lastAndroidEmulatorExit = {
         at: new Date().toISOString(),
-        code,
-        signal,
-        output: exitedRuntime.output.trim().slice(-2000),
+        code: exitedRuntime.exitCode,
+        signal: exitedRuntime.exitSignal,
+        output: exitedRuntime.output.trim().slice(-8000),
       };
       exitedRuntime.wrapperExited = true;
     }
-    setTimeout(() => {
-      if (androidRuntime?.sessionId !== sessionId || nebulaAndroidProcessIds().length) return;
+    let checksRemaining = 8;
+    const verifyChildRuntime = () => {
+      if (androidRuntime?.sessionId !== sessionId) return;
+      if (androidPortProcessId() || nebulaAndroidProcessIds().length) {
+        androidRuntime.output = `${androidRuntime.output}\nAndroid launcher handed off to its emulator child.`.slice(
+          -12000,
+        );
+        return;
+      }
+      checksRemaining -= 1;
+      if (checksRemaining > 0) {
+        setTimeout(verifyChildRuntime, 2000);
+        return;
+      }
       const failedRuntime = androidRuntime;
-      void releaseAndroidRuntime(failedRuntime, "Android emulator exited.");
-    }, 2500);
+      void releaseAndroidRuntime(failedRuntime, "Android emulator and its child process exited.");
+    };
+    setTimeout(verifyChildRuntime, 2000);
   });
   processHandle.once("error", (error) => {
     rememberAndroidOutput(error.message);
