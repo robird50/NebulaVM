@@ -4946,12 +4946,21 @@ const updateProblemReportCharacterCount = () => {
   els.problemReportCharacterCount.textContent = String(els.problemReportDescription.value.length);
 };
 const problemReportingIsLocked = () => problemReportLockedUntil > Date.now();
+const problemReportLockLabel = () => {
+  const remainingSeconds = Math.max(
+    0,
+    Math.ceil((problemReportLockedUntil - Date.now()) / 1000),
+  );
+  const minutes = String(Math.floor(remainingSeconds / 60)).padStart(2, "0");
+  const seconds = String(remainingSeconds % 60).padStart(2, "0");
+  return `${problemReportLockedLabel} ${minutes}:${seconds} remaining.`;
+};
 const renderProblemReportPrivilege = () => {
   const locked = problemReportingIsLocked();
   els.problemReportLinks.forEach((link) => {
     link.dataset.reportLabel ||= link.textContent;
     link.dataset.reportHref ||= link.getAttribute("href") || "#report-problem";
-    link.textContent = locked ? problemReportLockedLabel : link.dataset.reportLabel;
+    link.textContent = locked ? problemReportLockLabel() : link.dataset.reportLabel;
     link.classList.toggle("is-disabled", locked);
     link.setAttribute("aria-disabled", String(locked));
     if (locked) {
@@ -4968,10 +4977,14 @@ const renderProblemReportPrivilege = () => {
   problemReportLockTimer = null;
   if (locked) {
     problemReportLockTimer = window.setTimeout(() => {
+      if (problemReportingIsLocked()) {
+        renderProblemReportPrivilege();
+        return;
+      }
       problemReportLockedUntil = 0;
       renderProblemReportPrivilege();
       void refreshProblemReportPrivilege();
-    }, Math.min(problemReportLockedUntil - Date.now() + 100, 2_147_483_647));
+    }, Math.min(1000, problemReportLockedUntil - Date.now() + 100));
   }
 };
 const applyProblemReportPrivilege = (data = {}) => {
