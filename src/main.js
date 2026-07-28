@@ -20,7 +20,8 @@ const MOBILE_DEV_ATTEMPTS_KEY = "nebulavm.mobile.devAttempts";
 const MOBILE_DEV_LOCK_KEY = "nebulavm.mobile.devLockUntil";
 const MOBILE_DEV_MAX_ATTEMPTS = 5;
 const MOBILE_DEV_LOCK_MS = 5 * 60 * 1000;
-const MOBILE_DEV_GATE_ENABLED = true;
+const MOBILE_PUBLIC_RELEASE = true;
+const MOBILE_DEV_GATE_ENABLED = !MOBILE_PUBLIC_RELEASE;
 const hostedLauncherHostnames = new Set(["nebulavm.online", "www.nebulavm.online"]);
 const isNetlifyLauncher =
   /\.netlify\.app$/i.test(window.location.hostname) || hostedLauncherHostnames.has(window.location.hostname);
@@ -46,10 +47,12 @@ const isMobileOrTabletDevice = () => {
   return mobileOrTabletUserAgent || iPadDesktopMode || coarsePortableScreen;
 };
 
+const isPublicMobileClient = MOBILE_PUBLIC_RELEASE && isMobileOrTabletDevice();
+
 if (isMobileOrTabletDevice()) {
   document.documentElement.classList.add("is-mobile-device");
-  if (!MOBILE_DEV_GATE_ENABLED) {
-    document.documentElement.classList.add("mobile-dev-bypass");
+  if (isPublicMobileClient) {
+    document.documentElement.classList.add("mobile-dev-bypass", "mobile-public");
   }
 }
 
@@ -306,6 +309,10 @@ app.innerHTML = `
           </div>
 
           <section class="android-config full-span" id="androidConfig" hidden>
+            <p class="android-public-limits">
+              Public mobile mode: Android only, adaptive RAM, up to 2 CPU cores, 4 GB storage,
+              portrait display, Device view, and a 20-minute session limit.
+            </p>
             <label class="field full-span">
               <span>Genuine Android system image</span>
               <select id="androidVersion">
@@ -715,7 +722,7 @@ app.innerHTML = `
           <h3>Compatibility</h3>
           <details><summary>Does NebulaVM work on Chromebooks?</summary><p>Yes, a Chromebook can act as the browser client. Host-backed emulators still run on the connected Windows host, which must remain powered on, online, and running NebulaVM Host.</p></details>
           <details><summary>Can I use NebulaVM on Windows, macOS, or Linux?</summary><p>The web interface works in supported browsers on all three. Native host features currently depend on the runtimes available and configured on the host; EMUSTAR and the current Android host are Windows-focused.</p></details>
-          <details><summary>Does it work on mobile devices?</summary><p>Mobile and tablet support is experimental and under development. Approved testing devices may access the mobile build, but desktop and laptop browsers remain the supported experience.</p></details>
+          <details><summary>Does it work on mobile devices?</summary><p>Yes, the public mobile build provides a restricted Android-only experience for modern phones and tablets. It remains experimental, uses lower host resource limits, and does not include ISO, EMUSTAR, QEMU, or AVD Management controls.</p></details>
           <details><summary>Which browsers are supported?</summary><p>Current Chromium-based browsers such as Chrome and Edge provide the best-tested experience. Other modern browsers may work, but fullscreen, large-file handling, keyboard capture, and streamed input can behave differently.</p></details>
         </section>
 
@@ -1229,8 +1236,15 @@ const openMobileBypassDialog = () => {
 
 const applyMobileDevMode = () => {
   document.documentElement.classList.add("mobile-dev-bypass");
+  document.documentElement.classList.toggle("mobile-public", isPublicMobileClient);
   if (isMobileOrTabletDevice() && !state.running) {
-    els.emulatorMode.value = "v86";
+    els.emulatorMode.value = isPublicMobileClient ? "android" : "v86";
+    els.androidCores.value = "2";
+    els.androidMemory.value = "0";
+    els.androidStorage.value = "4";
+    els.androidOrientation.forEach((option) => {
+      option.checked = option.value === "portrait";
+    });
     els.memorySize.value = "134217728";
     els.networking.checked = false;
     els.autostart.checked = false;
@@ -1592,6 +1606,9 @@ const requestAndroidJsonFromBases = async (path, options, bridgeBases) => {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
       headers.set("X-NebulaVM-Session", state.nativeSessionId);
+      if (isPublicMobileClient) {
+        headers.set("X-NebulaVM-Client-Class", "public-mobile");
+      }
       const response = await fetch(`${base}/api/android-emulator/${path}`, {
         cache: "no-store",
         ...options,
@@ -1640,6 +1657,9 @@ const fetchAndroidFrame = async () => {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
       headers.set("X-NebulaVM-Session", state.nativeSessionId);
+      if (isPublicMobileClient) {
+        headers.set("X-NebulaVM-Client-Class", "public-mobile");
+      }
       const response = await fetch(`${base}/api/android-emulator/frame?t=${Date.now()}`, {
         cache: "no-store",
         headers,
@@ -1674,6 +1694,9 @@ const fetchAndroidStudioJson = async (path, options) => {
       const headers = new Headers(options?.headers || {});
       if (state.nativeHostToken) headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       headers.set("X-NebulaVM-Session", state.nativeSessionId);
+      if (isPublicMobileClient) {
+        headers.set("X-NebulaVM-Client-Class", "public-mobile");
+      }
       const response = await fetch(`${base}/api/android-studio/${path}`, {
         cache: "no-store",
         ...options,
@@ -1700,6 +1723,9 @@ const fetchAndroidStudioFrame = async () => {
       const headers = new Headers();
       if (state.nativeHostToken) headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       headers.set("X-NebulaVM-Session", state.nativeSessionId);
+      if (isPublicMobileClient) {
+        headers.set("X-NebulaVM-Client-Class", "public-mobile");
+      }
       const response = await fetch(`${base}/api/android-studio/frame?t=${Date.now()}`, {
         cache: "no-store",
         headers,
@@ -2402,6 +2428,13 @@ const connectNetlifyHostRegistry = async () => {
     return null;
   }
 
+  if (isPublicMobileClient) {
+    state.nativeQemuApiAvailable = true;
+    state.nativeQemuReady = true;
+    updateButtons();
+    return host;
+  }
+
   if (!isHyperVMode()) {
     els.emulatorMode.value = "emustar-hyperv";
     syncEmulatorDropdown();
@@ -2982,9 +3015,10 @@ const updateButtons = (busy = false) => {
   els.bootButton.textContent = androidMode ? "Start Android" : emustarMode ? "Launch EMUSTAR" : "Boot VM";
   els.stopButton.textContent = emustarMode ? "End session" : androidMode ? "Stop Android" : "Stop";
   els.pauseButton.textContent = state.running ? "Pause" : "Resume";
-  [els.androidVersion, els.androidCores, els.androidMemory, els.androidStorage, ...els.androidOrientation].forEach(
+  els.androidVersion.disabled = androidMode && Boolean(state.emulator);
+  [els.androidCores, els.androidMemory, els.androidStorage, ...els.androidOrientation].forEach(
     (control) => {
-      control.disabled = androidMode && Boolean(state.emulator);
+      control.disabled = androidMode && (Boolean(state.emulator) || isPublicMobileClient);
     },
   );
   syncAndroidViewportModeButtons();
@@ -4139,6 +4173,9 @@ const bootNativeAndroid = async (status) => {
   if (data.specs?.memoryAdapted) {
     log(`Adaptive Android mode selected ${data.specs.memoryMb} MB RAM for the host's current capacity.`);
   }
+  if (data.specs?.publicMobileRestricted) {
+    log("Public mobile limits are active. This private Android session ends automatically after 20 minutes.");
+  }
   scheduleNativeAndroidFrame(image, 0);
   updateButtons();
 };
@@ -4200,6 +4237,12 @@ const bootAndroid = async () => {
 };
 
 const bootEmulator = async () => {
+  if (isPublicMobileClient && !isAndroidMode()) {
+    els.emulatorMode.value = "android";
+    updateBackendUi();
+    log("Public mobile mode supports Android only.");
+    return;
+  }
   if (!isAndroidMode() && !isNativeMode() && !isRemoteMode() && !state.isoFile) return;
   if (isNativeMode() && !isHyperVMode() && !els.nativeIsoPath.value.trim()) {
     log(`Boot blocked: enter a local ISO path for ${nativeModeLabel()}.`);
@@ -4501,6 +4544,9 @@ const updateBrowserQemuCapabilities = async () => {
 };
 
 const updateBackendUi = () => {
+  if (isPublicMobileClient && els.emulatorMode.value !== "android") {
+    els.emulatorMode.value = "android";
+  }
   const qemuMode = isQemuMode();
   const nativeMode = isNativeMode();
   const nativeArm64Mode = isNativeArm64Mode();
@@ -4521,7 +4567,7 @@ const updateBackendUi = () => {
   els.mediaWarning.hidden = androidMode;
   els.demoButton.hidden = androidMode;
   els.androidConfig.hidden = !androidMode;
-  els.androidViewSwitch.hidden = !androidMode;
+  els.androidViewSwitch.hidden = !androidMode || isPublicMobileClient;
   els.hostMemoryMetric.hidden = !androidMode;
   if (!androidMode && state.androidViewportMode !== "device") {
     setAndroidViewportMode("device", { force: true });
@@ -5093,6 +5139,7 @@ window.addEventListener("pagehide", () => {
     const headers = {
       "X-NebulaVM-Session": state.nativeSessionId,
       ...(state.nativeHostToken ? { Authorization: `Bearer ${state.nativeHostToken}` } : {}),
+      ...(isPublicMobileClient ? { "X-NebulaVM-Client-Class": "public-mobile" } : {}),
     };
     void fetch(`${state.nativeQemuApiBase}/api/android-emulator/stop`, {
       method: "POST",

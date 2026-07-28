@@ -233,6 +233,7 @@ const setNativeQemuCors = (req, res) => {
       "Content-Type",
       "X-NebulaVM-Chunk-End",
       "X-NebulaVM-Chunk-Start",
+      "X-NebulaVM-Client-Class",
       "X-NebulaVM-Filename",
       "X-NebulaVM-Device",
       "X-NebulaVM-Session",
@@ -1082,6 +1083,14 @@ const androidSessionId = (req) => {
   return safe;
 };
 
+const isPublicMobileRequest = (req) => {
+  if (String(req.headers["x-nebulavm-client-class"] || "") === "public-mobile") return true;
+  if (String(req.headers["sec-ch-ua-mobile"] || "").trim() === "?1") return true;
+  return /Android|iPhone|iPad|iPod|Mobile|Tablet|Kindle|Silk/i.test(
+    String(req.headers["user-agent"] || ""),
+  );
+};
+
 const androidSessionDirectory = (sessionId) => {
   const safeSessionId = sanitizeSessionId(sessionId);
   const sessionDirectory = resolve(androidSessionsRoot, safeSessionId);
@@ -1192,6 +1201,10 @@ const releaseAndroidRuntime = (runtime, reason = "Android session released") => 
   if (runtime.leaseTimer) {
     clearTimeout(runtime.leaseTimer);
     runtime.leaseTimer = null;
+  }
+  if (runtime.hardStopTimer) {
+    clearTimeout(runtime.hardStopTimer);
+    runtime.hardStopTimer = null;
   }
   androidRuntime = null;
   try {
@@ -1379,7 +1392,7 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
   };
 };
 
-const startAndroidEmulator = (sessionId, body = {}) => {
+const startAndroidEmulator = (sessionId, body = {}, { publicMobile = false } = {}) => {
   const status = androidEmulatorStatus(sessionId);
   if (!status.available) {
     throw new Error("Install a genuine Android system image in Android Studio first.");
@@ -1403,7 +1416,7 @@ const startAndroidEmulator = (sessionId, body = {}) => {
     throw error;
   }
   const freeMemoryMb = Math.floor(freemem() / 1024 / 1024);
-  const requestedMemoryMb = Number(body.memoryMb) || 0;
+  const requestedMemoryMb = publicMobile ? 0 : Number(body.memoryMb) || 0;
   const adaptiveCeilingMb =
     freeMemoryMb >= 5120
       ? 3072
@@ -1427,17 +1440,24 @@ const startAndroidEmulator = (sessionId, body = {}) => {
   const selectedMemoryMb =
     requestedMemoryMb > 0
       ? Math.min(androidInteger(requestedMemoryMb, 1024, modernAndroid ? 1024 : 512, 4096), adaptiveCeilingMb)
-      : adaptiveCeilingMb;
+      : Math.min(adaptiveCeilingMb, publicMobile ? 1280 : 4096);
   const memoryMb = modernAndroid ? Math.max(1280, selectedMemoryMb) : selectedMemoryMb;
-  const requestedCores = androidInteger(body.cores, 4, 1, Math.min(4, cpus().length));
+  const requestedCores = publicMobile
+    ? Math.min(2, cpus().length)
+    : androidInteger(body.cores, 4, 1, Math.min(4, cpus().length));
   const specs = {
     cores: memoryMb <= 768 ? 1 : Math.min(requestedCores, memoryMb <= 1536 ? 2 : 4),
     memoryMb,
     requestedMemoryMb,
     memoryAdapted: requestedMemoryMb === 0 || memoryMb !== requestedMemoryMb,
-    storageGb: androidInteger(body.storageGb, 8, 4, 32),
+    storageGb: publicMobile ? 4 : androidInteger(body.storageGb, 8, 4, 32),
+    publicMobileRestricted: publicMobile,
   };
-  const orientation = body.orientation === "landscape" ? "landscape" : "portrait";
+  const orientation = publicMobile
+    ? "portrait"
+    : body.orientation === "landscape"
+      ? "landscape"
+      : "portrait";
   const disposable = createDisposableAndroidAvd(sessionId, image, specs, orientation);
 
   const emulatorPath = androidToolPath("emulator");
@@ -1507,8 +1527,19 @@ const startAndroidEmulator = (sessionId, body = {}) => {
     wrapperExited: false,
     leaseExpiresAt: 0,
     leaseTimer: null,
+    hardStopTimer: null,
   };
   renewAndroidLease(androidRuntime);
+  if (publicMobile) {
+    androidRuntime.hardStopTimer = setTimeout(() => {
+      if (androidRuntime?.sessionId !== sessionId) return;
+      void releaseAndroidRuntime(
+        androidRuntime,
+        "Public mobile Android session reached its 20-minute limit.",
+      );
+    }, 20 * 60_000);
+    androidRuntime.hardStopTimer.unref?.();
+  }
   exposeAndroidAvdToStudio(androidRuntime);
   lastAndroidEmulatorExit = null;
   const rememberAndroidOutput = (chunk) => {
@@ -2452,6 +2483,8 @@ const nativeQemuPlugin = () => ({
         return;
       }
 
+      const publicMobileRequest = isPublicMobileRequest(req);
+
       if (isMobileDevUnlockApi) {
         try {
           const body = await readJsonBody(req);
@@ -2532,6 +2565,20 @@ const nativeQemuPlugin = () => ({
 
       if (!isAuthorizedHostRequest(req, url)) {
         json(res, 401, { error: "This EMUSTAR host link is missing a valid access token." });
+        return;
+      }
+
+      if (
+        publicMobileRequest &&
+        (isNativeQemuApi ||
+          isHyperVApi ||
+          isAndroidStudioApi ||
+          (isHostApi && url.pathname !== "/api/emustar-host/info"))
+      ) {
+        json(res, 403, {
+          ok: false,
+          error: "Public mobile mode allows only the restricted Android runtime.",
+        });
         return;
       }
 
@@ -2687,7 +2734,11 @@ const nativeQemuPlugin = () => ({
         if (req.method === "POST" && url.pathname === "/api/android-emulator/start") {
           const sessionId = androidSessionId(req);
           const body = await readJsonBody(req);
-          json(res, 200, startAndroidEmulator(sessionId, body));
+          json(
+            res,
+            200,
+            startAndroidEmulator(sessionId, body, { publicMobile: publicMobileRequest }),
+          );
           return;
         }
 
