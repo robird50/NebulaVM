@@ -282,6 +282,22 @@ const mobileDevAttempts = new Map();
 const mobileDevMaxAttempts = 5;
 const mobileDevLockMs = 5 * 60 * 1000;
 let mobileDevApprovedDevice = null;
+const localProblemReportLimits = new Map();
+const localProblemReportMaxPerHour = 5;
+const localProblemReportHourMs = 60 * 60 * 1000;
+const localProblemReportProfanityLockMs = 20 * 60 * 1000;
+
+const localProblemReportLimit = (req) => {
+  const key = String(req.socket?.remoteAddress || "local");
+  const now = Date.now();
+  const saved = localProblemReportLimits.get(key);
+  const limit =
+    saved && now - Number(saved.startedAt || 0) < localProblemReportHourMs
+      ? saved
+      : { startedAt: now, count: 0 };
+  localProblemReportLimits.set(key, limit);
+  return { key, limit };
+};
 
 const configuredMobileDevCodeHash = () => {
   const directHash = String(localEnvValue("NEBULAVM_MOBILE_DEV_CODE_HASH") || "").trim().toLowerCase();
@@ -2542,11 +2558,35 @@ const nativeQemuPlugin = () => ({
       }
 
       if (isReportProblemApi) {
-        if (req.method !== "POST") {
+        if (!["GET", "POST"].includes(req.method)) {
           json(res, 405, { ok: false, error: "Method not allowed." });
           return;
         }
+        let moderationLockoutUntil = null;
         try {
+          const { key, limit } = localProblemReportLimit(req);
+          const lockedUntil = Number(limit.lockedUntil || 0);
+          if (req.method === "GET") {
+            const locked = lockedUntil > Date.now();
+            json(res, 200, {
+              ok: true,
+              canReport: !locked,
+              lockoutUntil: locked ? new Date(lockedUntil).toISOString() : null,
+              reason: locked ? "profane language" : null,
+            });
+            return;
+          }
+          if (lockedUntil > Date.now()) {
+            const error = new Error("Can't report now. Reason: profane language.");
+            error.statusCode = 429;
+            error.lockoutUntil = new Date(lockedUntil).toISOString();
+            throw error;
+          }
+          if (Number(limit.count || 0) >= localProblemReportMaxPerHour) {
+            const error = new Error("Too many reports were sent. Please try again later.");
+            error.statusCode = 429;
+            throw error;
+          }
           const gmailUser = String(localEnvValue("NEBULAVM_REPORT_GMAIL_USER") || "").trim();
           const gmailAppPassword = String(
             localEnvValue("NEBULAVM_REPORT_GMAIL_APP_PASSWORD") || "",
@@ -2568,6 +2608,16 @@ const nativeQemuPlugin = () => ({
             service: "gmail",
             auth: { user: gmailUser, pass: gmailAppPassword },
           });
+          if (moderated) {
+            moderationLockoutUntil = new Date(
+              Date.now() + localProblemReportProfanityLockMs,
+            ).toISOString();
+            localProblemReportLimits.set(key, {
+              startedAt: limit.startedAt,
+              count: Number(limit.count || 0) + 1,
+              lockedUntil: Date.parse(moderationLockoutUntil),
+            });
+          }
           await transport.sendMail({
             from: `"NebulaVM Problem Reports" <${gmailUser}>`,
             to: moderated ? report.email : destination,
@@ -2576,9 +2626,18 @@ const nativeQemuPlugin = () => ({
             text: message.text,
             html: message.html,
           });
+          if (!moderated) {
+            localProblemReportLimits.set(key, {
+              startedAt: limit.startedAt,
+              count: Number(limit.count || 0) + 1,
+            });
+          }
           json(res, 200, {
             ok: true,
             moderated,
+            canReport: !moderated,
+            lockoutUntil: moderationLockoutUntil,
+            reason: moderated ? "profane language" : null,
             message: moderated
               ? "Your report was not submitted because it contained inappropriate language. Check your email."
               : "Your report was sent. Thank you.",
@@ -2586,6 +2645,13 @@ const nativeQemuPlugin = () => ({
         } catch (error) {
           json(res, Number(error.statusCode) || 500, {
             ok: false,
+            ...(error?.lockoutUntil || moderationLockoutUntil
+              ? {
+                  canReport: false,
+                  lockoutUntil: error?.lockoutUntil || moderationLockoutUntil,
+                  reason: "profane language",
+                }
+              : {}),
             error:
               error.statusCode
                 ? error.message

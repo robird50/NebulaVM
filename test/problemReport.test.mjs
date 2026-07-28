@@ -38,6 +38,7 @@ test("builds the automated moderation email", () => {
 
   assert.match(message.subject, /moderation notice/i);
   assert.match(message.text, /contained profanity and inappropriate language/);
+  assert.match(message.text, /suspended for 20 minutes/);
   assert.match(message.text, /Do not reply/);
   assert.match(message.html, /NebulaVM Automated Moderation/);
 });

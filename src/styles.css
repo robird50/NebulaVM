@@ -111,6 +111,14 @@ button:disabled {
   color: #ff737b;
 }
 
+.commit-id a.report-problem-link.is-disabled,
+.commit-id a.report-problem-link.is-disabled:hover,
+.commit-id a.report-problem-link.is-disabled:focus-visible {
+  color: #77818b;
+  cursor: not-allowed;
+  text-decoration-color: rgba(119, 129, 139, 0.55);
+}
+
 .mobile-unsupported {
   display: none;
   width: min(1080px, 100%);

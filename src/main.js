@@ -4934,16 +4934,71 @@ els.commitHistoryDialog.addEventListener("click", (event) => {
 const problemReportEndpoint = isNetlifyLauncher
   ? "/.netlify/functions/report-problem"
   : "/api/report-problem";
+const problemReportLockedLabel = "Can\u2019t report now. Reason: profane language.";
 let problemReportTrigger = null;
+let problemReportLockedUntil = 0;
+let problemReportLockTimer = null;
+let problemReportSending = false;
 const closeProblemReportDialog = () => {
   closePopupTo(els.problemReportDialog, problemReportTrigger);
 };
 const updateProblemReportCharacterCount = () => {
   els.problemReportCharacterCount.textContent = String(els.problemReportDescription.value.length);
 };
+const problemReportingIsLocked = () => problemReportLockedUntil > Date.now();
+const renderProblemReportPrivilege = () => {
+  const locked = problemReportingIsLocked();
+  els.problemReportLinks.forEach((link) => {
+    link.dataset.reportLabel ||= link.textContent;
+    link.dataset.reportHref ||= link.getAttribute("href") || "#report-problem";
+    link.textContent = locked ? problemReportLockedLabel : link.dataset.reportLabel;
+    link.classList.toggle("is-disabled", locked);
+    link.setAttribute("aria-disabled", String(locked));
+    if (locked) {
+      link.removeAttribute("href");
+      link.tabIndex = -1;
+    } else {
+      link.setAttribute("href", link.dataset.reportHref);
+      link.removeAttribute("tabindex");
+    }
+  });
+  els.problemReportSubmitButton.disabled = locked || problemReportSending;
+
+  window.clearTimeout(problemReportLockTimer);
+  problemReportLockTimer = null;
+  if (locked) {
+    problemReportLockTimer = window.setTimeout(() => {
+      problemReportLockedUntil = 0;
+      renderProblemReportPrivilege();
+      void refreshProblemReportPrivilege();
+    }, Math.min(problemReportLockedUntil - Date.now() + 100, 2_147_483_647));
+  }
+};
+const applyProblemReportPrivilege = (data = {}) => {
+  const lockoutUntil = Date.parse(data.lockoutUntil || "");
+  problemReportLockedUntil =
+    data.canReport === false && Number.isFinite(lockoutUntil) && lockoutUntil > Date.now()
+      ? lockoutUntil
+      : 0;
+  renderProblemReportPrivilege();
+};
+const refreshProblemReportPrivilege = async () => {
+  try {
+    const response = await fetch(problemReportEndpoint, {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.ok) applyProblemReportPrivilege(data);
+  } catch {
+    // A temporary status failure should not prevent the rest of NebulaVM from loading.
+  }
+};
 els.problemReportLinks.forEach((link) => {
   link.addEventListener("click", (event) => {
     event.preventDefault();
+    if (problemReportingIsLocked()) return;
     problemReportTrigger = link;
     els.problemReportFeedback.textContent = "";
     els.problemReportFeedback.className = "problem-report-feedback";
@@ -4964,13 +5019,19 @@ els.problemReportDialog.addEventListener("click", (event) => {
 });
 els.problemReportForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (problemReportingIsLocked()) {
+    els.problemReportFeedback.className = "problem-report-feedback is-error";
+    els.problemReportFeedback.textContent = problemReportLockedLabel;
+    return;
+  }
   const description = els.problemReportDescription.value.trim();
   els.problemReportDescription.setCustomValidity(
     description.length < 20 ? "Please enter at least 20 characters." : "",
   );
   if (!els.problemReportForm.reportValidity()) return;
 
-  els.problemReportSubmitButton.disabled = true;
+  problemReportSending = true;
+  renderProblemReportPrivilege();
   els.problemReportSubmitButton.textContent = "Sending...";
   els.problemReportFeedback.className = "problem-report-feedback";
   els.problemReportFeedback.textContent = "Sending your report...";
@@ -4990,6 +5051,9 @@ els.problemReportForm.addEventListener("submit", async (event) => {
       }),
     });
     const data = await response.json().catch(() => ({}));
+    if ("canReport" in data || data.lockoutUntil) {
+      applyProblemReportPrivilege(data);
+    }
     if (!response.ok || !data.ok) {
       throw new Error(data.error || "The report could not be sent.");
     }
@@ -5001,10 +5065,13 @@ els.problemReportForm.addEventListener("submit", async (event) => {
     els.problemReportFeedback.className = "problem-report-feedback is-error";
     els.problemReportFeedback.textContent = error.message;
   } finally {
-    els.problemReportSubmitButton.disabled = false;
+    problemReportSending = false;
+    renderProblemReportPrivilege();
     els.problemReportSubmitButton.textContent = "Submit";
   }
 });
+renderProblemReportPrivilege();
+void refreshProblemReportPrivilege();
 els.emustarCopyShareButton.addEventListener("click", async () => {
   const shareUrl = els.emustarShareUrl.value;
   if (!shareUrl) return;
