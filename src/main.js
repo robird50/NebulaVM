@@ -140,7 +140,7 @@ app.innerHTML = `
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
       <button class="mobile-bypass-link" id="mobileBypassButton" type="button">Bypass (devs only)</button>
     </section>
-    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
+    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#other-commits" data-commit-history-link>Other commits</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
   </main>
 
   <div class="mobile-bypass-overlay popup-motion-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
@@ -648,7 +648,7 @@ app.innerHTML = `
         </div>
       </section>
     </section>
-    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
+    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#other-commits" data-commit-history-link>Other commits</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
   </main>
 
   <div class="display-choice-overlay popup-motion-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>
@@ -779,6 +779,26 @@ app.innerHTML = `
     </section>
   </div>
 
+  <div class="display-choice-overlay popup-motion-overlay" id="commitHistoryDialog" role="dialog" aria-modal="true" aria-labelledby="commitHistoryTitle" hidden>
+    <section class="display-choice-panel commit-history-panel popup-motion-panel" id="commitHistoryPanel" tabindex="-1">
+      <header class="commit-history-heading">
+        <p class="kicker">NEBULAVM TIME MACHINE</p>
+        <h2 id="commitHistoryTitle">Other commits</h2>
+        <p>Open a frozen historical deployment. Older versions may contain bugs or retired features.</p>
+      </header>
+      <label class="commit-history-search">
+        <span>Find a commit</span>
+        <input id="commitHistorySearch" type="search" placeholder="Search message or commit ID" autocomplete="off" />
+      </label>
+      <p class="commit-history-status" id="commitHistoryStatus" role="status" aria-live="polite">Loading commit history...</p>
+      <div class="commit-history-list" id="commitHistoryList"></div>
+      <div class="commit-history-actions">
+        <a class="secondary" href="https://nebulavm.online/">Latest version</a>
+        <button class="primary" id="commitHistoryCloseButton" type="button">Close</button>
+      </div>
+    </section>
+  </div>
+
   <div class="display-choice-overlay popup-motion-overlay" id="problemReportDialog" role="dialog" aria-modal="true" aria-labelledby="problemReportTitle" hidden>
     <section class="display-choice-panel problem-report-panel popup-motion-panel" id="problemReportPanel" tabindex="-1">
       <div class="problem-report-heading">
@@ -900,6 +920,13 @@ const els = {
   faqDialog: document.querySelector("#faqDialog"),
   faqPanel: document.querySelector("#faqPanel"),
   faqOkButton: document.querySelector("#faqOkButton"),
+  commitHistoryLinks: [...document.querySelectorAll("[data-commit-history-link]")],
+  commitHistoryDialog: document.querySelector("#commitHistoryDialog"),
+  commitHistoryPanel: document.querySelector("#commitHistoryPanel"),
+  commitHistorySearch: document.querySelector("#commitHistorySearch"),
+  commitHistoryStatus: document.querySelector("#commitHistoryStatus"),
+  commitHistoryList: document.querySelector("#commitHistoryList"),
+  commitHistoryCloseButton: document.querySelector("#commitHistoryCloseButton"),
   problemReportLinks: [...document.querySelectorAll("[data-report-problem-link]")],
   problemReportDialog: document.querySelector("#problemReportDialog"),
   problemReportPanel: document.querySelector("#problemReportPanel"),
@@ -4733,6 +4760,131 @@ els.faqDialog.addEventListener("click", (event) => {
     closeFaqDialog();
   }
 });
+const commitHistoryEndpoint = isNetlifyLauncher
+  ? "/.netlify/functions/commit-history"
+  : "/api/commit-history";
+let commitHistoryTrigger = null;
+let commitHistoryRecords = [];
+let commitHistoryLoaded = false;
+const closeCommitHistoryDialog = () => {
+  closePopupTo(els.commitHistoryDialog, commitHistoryTrigger);
+};
+const commitHistoryDate = (value) => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "Date unavailable"
+    : parsed.toLocaleString([], {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+};
+const renderCommitHistory = () => {
+  const query = els.commitHistorySearch.value.trim().toLowerCase();
+  const visible = commitHistoryRecords.filter(
+    (commit) =>
+      !query ||
+      commit.message.toLowerCase().includes(query) ||
+      commit.sha.toLowerCase().includes(query),
+  );
+  els.commitHistoryList.replaceChildren();
+  visible.forEach((commit) => {
+    const button = document.createElement("button");
+    button.className = "commit-history-item";
+    button.type = "button";
+    button.disabled = !commit.available;
+    button.setAttribute(
+      "aria-label",
+      commit.available
+        ? `Run commit ${commit.shortSha}: ${commit.message}`
+        : `Commit ${commit.shortSha} has no working deployment`,
+    );
+
+    const title = document.createElement("span");
+    title.className = "commit-history-item-title";
+    title.textContent = commit.message;
+
+    const metadata = document.createElement("span");
+    metadata.className = "commit-history-item-meta";
+    const sha = document.createElement("code");
+    sha.textContent = commit.shortSha;
+    const date = document.createElement("span");
+    date.textContent = commitHistoryDate(commit.authoredAt);
+    metadata.append(sha, date);
+
+    const badges = document.createElement("span");
+    badges.className = "commit-history-item-badges";
+    if (commit.latestWorking) {
+      const latest = document.createElement("strong");
+      latest.textContent = "Latest working";
+      badges.append(latest);
+    }
+    if (commit.shortSha === COMMIT_ID) {
+      const current = document.createElement("strong");
+      current.textContent = "Current";
+      badges.append(current);
+    }
+    if (!commit.available) {
+      const unavailable = document.createElement("em");
+      unavailable.textContent = "No working deploy";
+      badges.append(unavailable);
+    }
+
+    button.append(title, metadata, badges);
+    if (commit.available) {
+      button.addEventListener("click", () => {
+        window.location.assign(commit.deployUrl);
+      });
+    }
+    els.commitHistoryList.append(button);
+  });
+  els.commitHistoryStatus.textContent = visible.length
+    ? `${visible.length} of ${commitHistoryRecords.length} commits`
+    : "No commits match that search.";
+};
+const loadCommitHistory = async () => {
+  if (commitHistoryLoaded) {
+    renderCommitHistory();
+    return;
+  }
+  els.commitHistoryStatus.textContent = "Loading commit history...";
+  els.commitHistoryList.replaceChildren();
+  try {
+    const response = await fetch(commitHistoryEndpoint, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok || !Array.isArray(data.commits)) {
+      throw new Error(data.error || "Commit history could not be loaded.");
+    }
+    commitHistoryRecords = data.commits;
+    commitHistoryLoaded = true;
+    renderCommitHistory();
+  } catch (error) {
+    els.commitHistoryStatus.textContent = error.message;
+  }
+};
+els.commitHistoryLinks.forEach((link) => {
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    commitHistoryTrigger = link;
+    els.commitHistoryPanel.scrollTop = 0;
+    els.commitHistorySearch.value = "";
+    openPopupFrom(els.commitHistoryDialog, link, els.commitHistorySearch);
+    void loadCommitHistory();
+  });
+});
+els.commitHistorySearch.addEventListener("input", renderCommitHistory);
+els.commitHistoryCloseButton.addEventListener("click", closeCommitHistoryDialog);
+els.commitHistoryDialog.addEventListener("click", (event) => {
+  if (event.target === els.commitHistoryDialog) {
+    closeCommitHistoryDialog();
+  }
+});
 const problemReportEndpoint = isNetlifyLauncher
   ? "/.netlify/functions/report-problem"
   : "/api/report-problem";
@@ -4865,6 +5017,9 @@ document.addEventListener("keydown", (event) => {
     }
     if (!els.faqDialog.hidden) {
       closeFaqDialog();
+    }
+    if (!els.commitHistoryDialog.hidden) {
+      closeCommitHistoryDialog();
     }
     if (!els.problemReportDialog.hidden) {
       closeProblemReportDialog();

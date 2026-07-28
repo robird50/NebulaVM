@@ -28,6 +28,7 @@ import {
 } from "./lib/mobileDevAccess.mjs";
 import { normalizeStoredIsoOwnerId, storedIsosForOwner } from "./lib/storedIsoOwnership.mjs";
 import { buildProblemReportEmail, validateProblemReport } from "./lib/problemReport.mjs";
+import { getCommitHistory } from "./lib/commitHistory.mjs";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
@@ -2427,6 +2428,8 @@ const nativeQemuPlugin = () => ({
         url.pathname === "/api/mobile-dev-unlock" || url.pathname === "/.netlify/functions/mobile-dev-unlock";
       const isReportProblemApi =
         url.pathname === "/api/report-problem" || url.pathname === "/.netlify/functions/report-problem";
+      const isCommitHistoryApi =
+        url.pathname === "/api/commit-history" || url.pathname === "/.netlify/functions/commit-history";
       if (
         !isNativeQemuApi &&
         !isHyperVApi &&
@@ -2434,7 +2437,8 @@ const nativeQemuPlugin = () => ({
         !isAndroidStudioApi &&
         !isHostApi &&
         !isMobileDevUnlockApi &&
-        !isReportProblemApi
+        !isReportProblemApi &&
+        !isCommitHistoryApi
       ) {
         next();
         return;
@@ -2499,6 +2503,28 @@ const nativeQemuPlugin = () => ({
               error.statusCode
                 ? error.message
                 : "The report could not be sent. Please try again later.",
+          });
+        }
+        return;
+      }
+
+      if (isCommitHistoryApi) {
+        if (req.method !== "GET") {
+          json(res, 405, { ok: false, error: "Method not allowed." });
+          return;
+        }
+        try {
+          const commits = await getCommitHistory();
+          json(res, 200, {
+            ok: true,
+            commits,
+            total: commits.length,
+            generatedAt: new Date().toISOString(),
+          });
+        } catch {
+          json(res, 502, {
+            ok: false,
+            error: "Commit history could not be loaded. Please try again.",
           });
         }
         return;
