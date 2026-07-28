@@ -104,6 +104,11 @@ const state = {
   guestResizeTimer: null,
   lastGuestResize: "",
   viewportSummaryTimer: null,
+  viewportSummaryAnimationTimer: null,
+  viewportAiBusy: false,
+  viewportAiLastFrameHash: "",
+  viewportAiHistory: [],
+  viewportAiRetryAt: 0,
   hostStagedIsoBase: "",
   hostStagedIsoFileKey: "",
   hostStagedIsoPath: "",
@@ -595,7 +600,7 @@ app.innerHTML = `
               <button class="is-active" type="button" data-android-viewport-mode="device" aria-pressed="true">Device</button>
               <button type="button" data-android-viewport-mode="management" aria-pressed="false">AVD Management</button>
             </div>
-            <span class="ai-summary-pill" id="viewportSummaryMetric" aria-live="polite">
+            <span class="ai-summary-pill" id="viewportSummaryMetric" aria-live="polite" title="AI analysis of the visible VM screen">
               <span class="ai-summary-stage">
                 <span class="ai-summary-text is-current">Waiting for boot media to start</span>
               </span>
@@ -2492,7 +2497,6 @@ const startHyperVSetupConsole = (base) => {
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
       status.textContent = "Use Tab, arrows, Enter, and paste text here to control setup.";
-      setViewportSummary("EMUSTAR setup is live in this browser");
       state.hyperVConsoleTimer = window.setTimeout(pollFrame, 1100);
     } catch (error) {
       status.textContent = `Hyper-V setup mirror waiting: ${error.message}`;
@@ -2854,16 +2858,26 @@ const setViewportSummary = (summary) => {
   const stage = els.viewportSummaryMetric.querySelector(".ai-summary-stage");
   if (!stage) return;
 
-  const outgoing = stage.querySelector(".ai-summary-text.is-current") || stage.querySelector(".ai-summary-text");
-  const outgoingWidth = outgoing?.textContent ? measureSummaryText(outgoing.textContent) : 0;
-  const incomingWidth = measureSummaryText(summary);
-  stage.style.setProperty("--summary-text-width", `${Math.max(outgoingWidth, incomingWidth)}px`);
+  const cleanSummary = String(summary || "").replace(/\s+/g, " ").trim();
+  if (!cleanSummary) return;
 
-  if (outgoing?.textContent === summary) return;
+  window.clearTimeout(state.viewportSummaryAnimationTimer);
+  const outgoing =
+    stage.querySelector(".ai-summary-text.is-current") ||
+    [...stage.querySelectorAll(".ai-summary-text")].at(-1);
+  stage
+    .querySelectorAll(".ai-summary-text")
+    .forEach((text) => text !== outgoing && text.remove());
+  stage.style.setProperty("--summary-text-width", `${measureSummaryText(cleanSummary)}px`);
+
+  if (outgoing?.textContent === cleanSummary) {
+    outgoing.className = "ai-summary-text is-current";
+    return;
+  }
 
   const incoming = document.createElement("span");
   incoming.className = "ai-summary-text is-entering";
-  incoming.textContent = summary;
+  incoming.textContent = cleanSummary;
 
   if (!outgoing) {
     incoming.classList.remove("is-entering");
@@ -2877,34 +2891,19 @@ const setViewportSummary = (summary) => {
 
   stage.append(incoming);
   requestAnimationFrame(() => {
-    incoming.classList.remove("is-entering");
-    incoming.classList.add("is-current");
+    requestAnimationFrame(() => {
+      incoming.classList.remove("is-entering");
+      incoming.classList.add("is-current");
+    });
   });
 
-  window.setTimeout(() => {
-    stage.querySelectorAll(".ai-summary-text.is-leaving").forEach((text) => text.remove());
+  state.viewportSummaryAnimationTimer = window.setTimeout(() => {
+    stage
+      .querySelectorAll(".ai-summary-text")
+      .forEach((text) => text !== incoming && text.remove());
+    incoming.className = "ai-summary-text is-current";
+    state.viewportSummaryAnimationTimer = null;
   }, 420);
-};
-
-const summarizeViewportText = (text) => {
-  const value = text.replace(/\s+/g, " ").trim().toLowerCase();
-  if (!value) return null;
-  if (value.includes("connecting to emustar display")) return "Connecting to EMUSTAR display";
-  if (/press any key.*(cd|dvd)/i.test(value)) return "CD boot prompt is waiting";
-  if (value.includes("installing windows") || value.includes("windows setup")) {
-    return "Windows setup is active on screen";
-  }
-  if (value.includes("getting ready") || value.includes("getting devices ready")) {
-    return "Windows setup is preparing devices";
-  }
-  if (value.includes("boot manager") || value.includes("uefi") || value.includes("tianocore")) {
-    return "UEFI firmware screen is showing";
-  }
-  if (value.includes("no bootable") || value.includes("boot failed") || value.includes("missing operating system")) {
-    return "Boot media problem needs attention";
-  }
-  if (value.includes("nebulavm demo booted")) return "Nebula demo boot image is running";
-  return null;
 };
 
 const getViewportText = () => {
@@ -2916,125 +2915,173 @@ const getViewportText = () => {
   ].join("\n");
 };
 
-const getVisibleViewportCanvas = () => {
-  const canvases = !els.nativeDisplay.hidden
-    ? [...els.nativeDisplay.querySelectorAll("canvas")]
-    : [...els.screenContainer.querySelectorAll("canvas")];
-  return canvases.find((canvas) => {
-    const rect = canvas.getBoundingClientRect();
-    return rect.width > 8 && rect.height > 8 && canvas.width > 8 && canvas.height > 8;
-  });
+const visibleViewportElement = (element) => {
+  if (!element || element.hidden) return false;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 8 && rect.height > 8;
 };
 
-const summarizeViewportCanvas = (canvas) => {
-  if (!canvas) return null;
-
-  const width = 64;
-  const height = 36;
-  const sample = document.createElement("canvas");
-  sample.width = width;
-  sample.height = height;
-  const context = sample.getContext("2d", { willReadFrequently: true });
-  if (!context) return null;
-
-  try {
-    context.drawImage(canvas, 0, 0, width, height);
-  } catch {
-    return "Display is visible but protected";
-  }
-
-  let pixels;
-  try {
-    pixels = context.getImageData(0, 0, width, height).data;
-  } catch {
-    return "Display is visible but protected";
-  }
-  let total = 0;
-  let red = 0;
-  let green = 0;
-  let blue = 0;
-  let avgRed = 0;
-  let avgGreen = 0;
-  let avgBlue = 0;
-  let dark = 0;
-  let white = 0;
-  let purple = 0;
-  let gray = 0;
-
-  for (let index = 0; index < pixels.length; index += 4) {
-    const alpha = pixels[index + 3];
-    if (alpha < 16) continue;
-
-    const r = pixels[index];
-    const g = pixels[index + 1];
-    const b = pixels[index + 2];
-    const brightness = (r + g + b) / 3;
-    const spread = Math.max(r, g, b) - Math.min(r, g, b);
-    total += 1;
-    avgRed += r;
-    avgGreen += g;
-    avgBlue += b;
-
-    if (brightness < 30) dark += 1;
-    if (brightness > 210 && spread < 56) white += 1;
-    if (r > 140 && r > g + 40 && r > b + 40) red += 1;
-    if (g > 120 && g > r + 30 && g > b + 20) green += 1;
-    if (b > 90 && b > r + 35 && b > g + 10) blue += 1;
-    if (b > 70 && r > 35 && b > g + 24) purple += 1;
-    if (brightness > 50 && brightness < 190 && spread < 28) gray += 1;
-  }
-
-  if (!total) return "Waiting for visible display pixels";
-
-  const ratios = {
-    red: red / total,
-    green: green / total,
-    blue: blue / total,
-    dark: dark / total,
-    white: white / total,
-    purple: purple / total,
-    gray: gray / total,
-  };
-  avgRed /= total;
-  avgGreen /= total;
-  avgBlue /= total;
-
-  if (ratios.dark > 0.92) return "Black boot screen is waiting";
-  if (ratios.blue > 0.42 && avgBlue > avgRed + 40) return "Windows setup is active on screen";
-  if (ratios.purple > 0.28 || (avgBlue > avgGreen + 24 && avgRed > avgGreen + 8)) {
-    return "UEFI firmware screen is showing";
-  }
-  if (ratios.white > 0.05 && ratios.dark > 0.5) return "Boot console text is visible";
-  if (ratios.red > 0.08) return "Warning or error screen is visible";
-  if (ratios.green > 0.14 && ratios.dark < 0.55) return "Desktop environment appears to be running";
-  if (ratios.gray > 0.55 && ratios.white > 0.01) return "Setup screen is waiting for input";
-  return "VM display is active and changing";
-};
-
-const updateViewportSummary = () => {
-  if (isAndroidMode()) {
-    setViewportSummary(
-      state.running
-        ? `${androidVersionLabel()} ${state.androidView} screen is active`
-        : "Android simulator is ready to start",
+const getVisibleViewportVisual = () => {
+  const roots = [els.androidSurface, els.nativeDisplay, els.screenContainer];
+  for (const root of roots) {
+    if (!root || root.hidden) continue;
+    const images = [...root.querySelectorAll("img")];
+    const image = images.find(
+      (candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return (
+          visibleViewportElement(candidate) &&
+          rect.width * rect.height > 24_000 &&
+          candidate.complete &&
+          candidate.naturalWidth > 8 &&
+          candidate.naturalHeight > 8
+        );
+      },
     );
-    return;
+    if (image) return image;
+
+    const canvas = [...root.querySelectorAll("canvas")].find(
+      (candidate) =>
+        visibleViewportElement(candidate) && candidate.width > 8 && candidate.height > 8,
+    );
+    if (canvas) return canvas;
   }
+  return null;
+};
+
+const textViewportCanvas = (text) => {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .slice(-18);
+  if (!lines.length) return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 640;
+  canvas.height = 360;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.fillStyle = "#05090e";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#d9f7ff";
+  context.font = "16px Consolas, monospace";
+  lines.forEach((line, index) => context.fillText(line.slice(0, 74), 16, 26 + index * 18));
+  return canvas;
+};
+
+const hashViewportPixels = (canvas) => {
+  const sample = document.createElement("canvas");
+  sample.width = 48;
+  sample.height = 30;
+  const context = sample.getContext("2d", { willReadFrequently: true });
+  if (!context) return "";
+  context.drawImage(canvas, 0, 0, sample.width, sample.height);
+  const pixels = context.getImageData(0, 0, sample.width, sample.height).data;
+  let hash = 2166136261;
+  for (let index = 0; index < pixels.length; index += 4) {
+    hash ^= pixels[index] >> 4;
+    hash = Math.imul(hash, 16777619);
+    hash ^= pixels[index + 1] >> 4;
+    hash = Math.imul(hash, 16777619);
+    hash ^= pixels[index + 2] >> 4;
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+};
+
+const captureViewportForAi = () => {
+  const source = getVisibleViewportVisual() || textViewportCanvas(getViewportText());
+  if (!source) return null;
+
+  const sourceWidth = source.naturalWidth || source.width;
+  const sourceHeight = source.naturalHeight || source.height;
+  if (!sourceWidth || !sourceHeight) return null;
+
+  const scale = Math.min(1, 560 / Math.max(sourceWidth, sourceHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) return null;
+  context.fillStyle = "#000";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  try {
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    const hash = hashViewportPixels(canvas);
+    const image = canvas.toDataURL("image/jpeg", 0.72);
+    return { hash, image };
+  } catch {
+    return null;
+  }
+};
+
+const viewportAiEndpoint = isNetlifyLauncher
+  ? "/.netlify/functions/viewport-ai"
+  : "/api/viewport-ai";
+
+const updateViewportSummary = async () => {
   if (!els.screenPlaceholder.hidden) {
     setViewportSummary("Waiting for boot media to start");
+    state.viewportAiLastFrameHash = "";
     return;
   }
 
-  const textSummary = summarizeViewportText(getViewportText());
-  if (textSummary) {
-    setViewportSummary(textSummary);
+  if (state.viewportAiBusy || Date.now() < state.viewportAiRetryAt) {
     return;
   }
 
-  setViewportSummary(
-    summarizeViewportCanvas(getVisibleViewportCanvas()) ||
-      (state.emulator ? "VM display is starting up" : "Waiting for boot media to start"),
-  );
+  const capture = captureViewportForAi();
+  if (!capture) {
+    setViewportSummary("AI is waiting for a capturable screen");
+    return;
+  }
+  if (capture.hash === state.viewportAiLastFrameHash) return;
+
+  state.viewportAiBusy = true;
+  try {
+    const context = [
+      els.displayKicker?.textContent,
+      els.machineTitle?.textContent,
+      isAndroidMode() ? `Android viewport mode: ${state.androidViewportMode}` : "",
+      getViewportText(),
+    ]
+      .filter(Boolean)
+      .join(" | ")
+      .slice(0, 1500);
+    const response = await fetch(viewportAiEndpoint, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image: capture.image,
+        context,
+        previous: state.viewportAiHistory,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      const error = new Error(data.error || "AI screen analysis failed.");
+      error.status = response.status;
+      throw error;
+    }
+
+    state.viewportAiLastFrameHash = capture.hash;
+    state.viewportAiRetryAt = 0;
+    if (!data.repeated && data.summary) {
+      state.viewportAiHistory = [...state.viewportAiHistory, data.summary].slice(-5);
+      setViewportSummary(data.summary);
+    }
+  } catch (error) {
+    state.viewportAiRetryAt = Date.now() + (error.status === 429 ? 4_000 : 15_000);
+    setViewportSummary(
+      error.status === 503
+        ? "AI needs backend API configuration"
+        : "AI screen analysis is temporarily unavailable",
+    );
+  } finally {
+    state.viewportAiBusy = false;
+  }
 };
 
 const clearStatsTimer = () => {
@@ -3981,7 +4028,6 @@ const refreshNativeAndroidFrame = async (image) => {
     image.hidden = false;
     stopAndroidColdBootCountdown();
     els.androidSurface.querySelector(".android-native-startup")?.remove();
-    setViewportSummary(`${androidVersionLabel()} is live from the Android Emulator`);
     scheduleNativeAndroidFrame(image);
   } catch (error) {
     const { data: status } = await fetchAndroidJson("status").catch(() => ({ data: null }));
@@ -4010,10 +4056,8 @@ const refreshNativeAndroidFrame = async (image) => {
     if (status?.booted) {
       stopAndroidColdBootCountdown();
       els.androidSurface.querySelector(".android-cold-boot-countdown")?.remove();
-      setViewportSummary("Android is running; waiting for the next display frame");
       if (startupMessage) startupMessage.textContent = "Android is running. Connecting the live display...";
     } else {
-      setViewportSummary("Android Emulator is starting on the host");
       if (startupMessage) startupMessage.textContent = "Cold boot in progress on the Windows host...";
     }
     scheduleNativeAndroidFrame(image, 900);

@@ -3400,6 +3400,20 @@ pre {
     max-width: 100%;
   }
 
+  .mobile-dev-bypass .ai-summary-stage {
+    width: min(var(--summary-text-width, 240px), calc(100vw - 116px));
+    min-width: 0;
+    max-width: calc(100vw - 116px);
+    height: 34px;
+  }
+
+  .mobile-dev-bypass .ai-summary-text {
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+    line-height: 16px;
+  }
+
   .mobile-dev-bypass .screen-shell {
     min-height: min(62dvh, 520px);
     background-size: 20px 20px;
