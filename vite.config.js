@@ -1492,6 +1492,8 @@ const startAndroidEmulator = (sessionId, body = {}) => {
     output: "",
     configured: false,
     awake: false,
+    blankFrameCount: 0,
+    lastDisplayRecoveryAt: 0,
     image,
     specs,
     orientation,
@@ -1618,6 +1620,28 @@ const androidEmulatorFrame = async (sessionId) => {
     }).catch(() => {});
   }
   if (!image?.length) throw new Error("The Android Emulator returned an empty frame.");
+  const booted = androidProperty(serial, "sys.boot_completed") === "1";
+  runtime.blankFrameCount = booted && image.length < 12_000 ? runtime.blankFrameCount + 1 : 0;
+  if (runtime.blankFrameCount >= 4 && Date.now() - runtime.lastDisplayRecoveryAt > 60_000) {
+    runtime.lastDisplayRecoveryAt = Date.now();
+    runtime.blankFrameCount = 0;
+    const recover = (args) =>
+      runAndroidToolAsync("adb", ["-s", serial, "shell", ...args], { timeout: 15000 }).catch(() => {});
+    await recover(["am", "force-stop", "com.google.android.apps.nexuslauncher"]);
+    await recover(["pkill", "com.android.systemui"]);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 2500));
+    await recover(["input", "keyevent", "KEYCODE_WAKEUP"]);
+    await recover(["wm", "dismiss-keyguard"]);
+    await recover([
+      "am",
+      "start",
+      "-a",
+      "android.intent.action.MAIN",
+      "-c",
+      "android.intent.category.HOME",
+    ]);
+    runtime.output = `${runtime.output}\nNebulaVM recovered a blank Android display.`.slice(-12000);
+  }
   return image;
 };
 
