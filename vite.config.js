@@ -30,7 +30,9 @@ import { normalizeStoredIsoOwnerId, storedIsosForOwner } from "./lib/storedIsoOw
 import {
   buildProblemReportEmail,
   buildProfanityModerationEmail,
-  containsProfanity,
+  containsStrongProfanity,
+  nextProfanityConsequence,
+  redactStrongProfanity,
   validateProblemReport,
 } from "./lib/problemReport.mjs";
 import { getCommitHistory } from "./lib/commitHistory.mjs";
@@ -285,7 +287,6 @@ let mobileDevApprovedDevice = null;
 const localProblemReportLimits = new Map();
 const localProblemReportMaxPerHour = 5;
 const localProblemReportHourMs = 60 * 60 * 1000;
-const localProblemReportProfanityLockMs = 20 * 60 * 1000;
 
 const localProblemReportLimit = (req) => {
   const key = String(req.socket?.remoteAddress || "local");
@@ -294,7 +295,7 @@ const localProblemReportLimit = (req) => {
   const limit =
     saved && now - Number(saved.startedAt || 0) < localProblemReportHourMs
       ? saved
-      : { startedAt: now, count: 0 };
+      : { ...saved, startedAt: now, count: 0 };
   localProblemReportLimits.set(key, limit);
   return { key, limit };
 };
@@ -2600,34 +2601,55 @@ const nativeQemuPlugin = () => ({
             throw error;
           }
           const report = validateProblemReport(await readJsonBody(req));
-          const moderated = containsProfanity(report.description);
-          const message = moderated
-            ? buildProfanityModerationEmail()
-            : buildProblemReportEmail(report);
+          const moderated = containsStrongProfanity(report.description);
+          const consequence = moderated ? nextProfanityConsequence(limit) : null;
+          const moderationCooldownMinutes = consequence?.cooldownMinutes || 0;
+          const submittedReport = moderated
+            ? { ...report, description: redactStrongProfanity(report.description) }
+            : report;
+          const message = buildProblemReportEmail(submittedReport);
           const transport = nodemailer.createTransport({
             service: "gmail",
             auth: { user: gmailUser, pass: gmailAppPassword },
           });
           if (moderated) {
-            moderationLockoutUntil = new Date(
-              Date.now() + localProblemReportProfanityLockMs,
-            ).toISOString();
+            moderationLockoutUntil = moderationCooldownMinutes
+              ? new Date(Date.now() + moderationCooldownMinutes * 60 * 1000).toISOString()
+              : null;
             localProblemReportLimits.set(key, {
+              ...limit,
               startedAt: limit.startedAt,
               count: Number(limit.count || 0) + 1,
-              lockedUntil: Date.parse(moderationLockoutUntil),
+              profanityStrikeStartedAt: consequence.strikeStartedAt,
+              profanityStrikes: consequence.strikes,
+              ...(moderationLockoutUntil
+                ? { lockedUntil: Date.parse(moderationLockoutUntil) }
+                : {}),
             });
           }
           await transport.sendMail({
             from: `"NebulaVM Problem Reports" <${gmailUser}>`,
-            to: moderated ? report.email : destination,
-            ...(moderated ? {} : { replyTo: report.email }),
+            to: destination,
+            replyTo: report.email,
             subject: message.subject,
             text: message.text,
             html: message.html,
           });
+          if (moderationCooldownMinutes) {
+            const moderationMessage = buildProfanityModerationEmail({
+              cooldownMinutes: moderationCooldownMinutes,
+            });
+            await transport.sendMail({
+              from: `"NebulaVM Automated Moderation" <${gmailUser}>`,
+              to: report.email,
+              subject: moderationMessage.subject,
+              text: moderationMessage.text,
+              html: moderationMessage.html,
+            });
+          }
           if (!moderated) {
             localProblemReportLimits.set(key, {
+              ...limit,
               startedAt: limit.startedAt,
               count: Number(limit.count || 0) + 1,
             });
@@ -2635,11 +2657,13 @@ const nativeQemuPlugin = () => ({
           json(res, 200, {
             ok: true,
             moderated,
-            canReport: !moderated,
+            canReport: !moderationLockoutUntil,
             lockoutUntil: moderationLockoutUntil,
-            reason: moderated ? "profane language" : null,
+            reason: moderationLockoutUntil ? "profane language" : null,
             message: moderated
-              ? "Your report was not submitted because it contained inappropriate language. Check your email."
+              ? moderationCooldownMinutes
+                ? `Your report was submitted with strong language redacted. Reporting is paused for ${moderationCooldownMinutes} minutes.`
+                : "We noticed strong language. Your report was submitted with that language automatically redacted."
               : "Your report was sent. Thank you.",
           });
         } catch (error) {

@@ -6,6 +6,9 @@ import {
   buildProblemReportEmail,
   buildProfanityModerationEmail,
   containsProfanity,
+  containsStrongProfanity,
+  nextProfanityConsequence,
+  redactStrongProfanity,
   validateProblemReport,
 } from "../lib/problemReport.mjs";
 
@@ -33,12 +36,52 @@ test("detects listed profanity as whole words", () => {
   assert.equal(containsProfanity("Hello, the emulator is still loading."), false);
 });
 
+test("allows mild frustration and redacts stronger language", () => {
+  assert.equal(containsProfanity("The damn emulator is stuck."), true);
+  assert.equal(containsStrongProfanity("The damn emulator is stuck."), false);
+  assert.equal(containsStrongProfanity("The fucking emulator is stuck."), true);
+  assert.equal(
+    redactStrongProfanity("The fucking emulator is still shit."),
+    "The [redacted] emulator is still [redacted].",
+  );
+});
+
+test("uses progressive profanity cooldowns within 24 hours", () => {
+  const now = Date.now();
+  const first = nextProfanityConsequence({}, now);
+  const second = nextProfanityConsequence(
+    {
+      profanityStrikeStartedAt: first.strikeStartedAt,
+      profanityStrikes: first.strikes,
+    },
+    now + 1000,
+  );
+  const third = nextProfanityConsequence(
+    {
+      profanityStrikeStartedAt: second.strikeStartedAt,
+      profanityStrikes: second.strikes,
+    },
+    now + 2000,
+  );
+
+  assert.equal(first.cooldownMinutes, 0);
+  assert.equal(second.cooldownMinutes, 5);
+  assert.equal(third.cooldownMinutes, 20);
+  assert.equal(
+    nextProfanityConsequence(
+      { profanityStrikeStartedAt: now, profanityStrikes: 3 },
+      now + 25 * 60 * 60 * 1000,
+    ).cooldownMinutes,
+    0,
+  );
+});
+
 test("builds the automated moderation email", () => {
-  const message = buildProfanityModerationEmail();
+  const message = buildProfanityModerationEmail({ cooldownMinutes: 5 });
 
   assert.match(message.subject, /moderation notice/i);
   assert.match(message.text, /contained profanity and inappropriate language/);
-  assert.match(message.text, /suspended for 20 minutes/);
+  assert.match(message.text, /suspended for 5 minutes/);
   assert.match(message.text, /Do not reply/);
   assert.match(message.html, /NebulaVM Automated Moderation/);
 });

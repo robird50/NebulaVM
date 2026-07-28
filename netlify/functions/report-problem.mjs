@@ -4,14 +4,15 @@ import nodemailer from "nodemailer";
 import {
   buildProblemReportEmail,
   buildProfanityModerationEmail,
-  containsProfanity,
+  containsStrongProfanity,
+  nextProfanityConsequence,
+  redactStrongProfanity,
   validateProblemReport,
 } from "../../lib/problemReport.mjs";
 
 const STORE_NAME = "nebulavm-problem-report-limits";
 const MAX_REPORTS_PER_HOUR = 5;
 const HOUR_MS = 60 * 60 * 1000;
-const PROFANITY_LOCK_MS = 20 * 60 * 1000;
 const PROFANITY_LOCK_REASON = "profane language";
 
 const json = (status, payload) =>
@@ -44,7 +45,7 @@ const readRateLimit = async (store, key) => {
   };
   return now - Number(saved.startedAt || 0) < HOUR_MS
     ? saved
-    : { startedAt: now, count: 0 };
+    : { ...saved, startedAt: now, count: 0 };
 };
 
 const checkRateLimit = async (store, key) => {
@@ -76,6 +77,7 @@ export default async (request, context = {}) => {
   }
 
   let moderationLockoutUntil = null;
+  let moderationCooldownMinutes = 0;
   try {
     const store = getStore(STORE_NAME);
     const key = rateLimitKey(request, context);
@@ -105,10 +107,13 @@ export default async (request, context = {}) => {
 
     const report = validateProblemReport(await request.json());
     const limit = await checkRateLimit(store, key);
-    const moderated = containsProfanity(report.description);
-    const message = moderated
-      ? buildProfanityModerationEmail()
-      : buildProblemReportEmail(report);
+    const moderated = containsStrongProfanity(report.description);
+    const consequence = moderated ? nextProfanityConsequence(limit) : null;
+    moderationCooldownMinutes = consequence?.cooldownMinutes || 0;
+    const submittedReport = moderated
+      ? { ...report, description: redactStrongProfanity(report.description) }
+      : report;
+    const message = buildProblemReportEmail(submittedReport);
     const transport = nodemailer.createTransport({
       service: "gmail",
       auth: {
@@ -117,24 +122,46 @@ export default async (request, context = {}) => {
       },
     });
     if (moderated) {
-      moderationLockoutUntil = new Date(Date.now() + PROFANITY_LOCK_MS).toISOString();
+      moderationLockoutUntil = moderationCooldownMinutes
+        ? new Date(Date.now() + moderationCooldownMinutes * 60 * 1000).toISOString()
+        : null;
       await store.setJSON(key, {
+        ...limit,
         startedAt: limit.startedAt,
         count: Number(limit.count || 0) + 1,
-        lockedUntil: Date.parse(moderationLockoutUntil),
-        lockReason: PROFANITY_LOCK_REASON,
+        profanityStrikeStartedAt: consequence.strikeStartedAt,
+        profanityStrikes: consequence.strikes,
+        ...(moderationLockoutUntil
+          ? {
+              lockedUntil: Date.parse(moderationLockoutUntil),
+              lockReason: PROFANITY_LOCK_REASON,
+            }
+          : {}),
       });
     }
     await transport.sendMail({
       from: `"NebulaVM Problem Reports" <${gmailUser}>`,
-      to: moderated ? report.email : destination,
-      ...(moderated ? {} : { replyTo: report.email }),
+      to: destination,
+      replyTo: report.email,
       subject: message.subject,
       text: message.text,
       html: message.html,
     });
+    if (moderationCooldownMinutes) {
+      const moderationMessage = buildProfanityModerationEmail({
+        cooldownMinutes: moderationCooldownMinutes,
+      });
+      await transport.sendMail({
+        from: `"NebulaVM Automated Moderation" <${gmailUser}>`,
+        to: report.email,
+        subject: moderationMessage.subject,
+        text: moderationMessage.text,
+        html: moderationMessage.html,
+      });
+    }
     if (!moderated) {
       await store.setJSON(key, {
+        ...limit,
         startedAt: limit.startedAt,
         count: Number(limit.count || 0) + 1,
       });
@@ -142,11 +169,13 @@ export default async (request, context = {}) => {
     return json(200, {
       ok: true,
       moderated,
-      canReport: !moderated,
+      canReport: !moderationLockoutUntil,
       lockoutUntil: moderationLockoutUntil,
-      reason: moderated ? PROFANITY_LOCK_REASON : null,
+      reason: moderationLockoutUntil ? PROFANITY_LOCK_REASON : null,
       message: moderated
-        ? "Your report was not submitted because it contained inappropriate language. Check your email."
+        ? moderationCooldownMinutes
+          ? `Your report was submitted with strong language redacted. Reporting is paused for ${moderationCooldownMinutes} minutes.`
+          : "We noticed strong language. Your report was submitted with that language automatically redacted."
         : "Your report was sent. Thank you.",
     });
   } catch (error) {
