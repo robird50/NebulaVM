@@ -2571,7 +2571,8 @@ const nativeQemuPlugin = () => ({
       if (
         publicMobileRequest &&
         (isNativeQemuApi ||
-          isHyperVApi ||
+          (isHyperVApi &&
+            !(req.method === "GET" && url.pathname === "/api/emustar-hyperv/status")) ||
           isAndroidStudioApi ||
           (isHostApi && url.pathname !== "/api/emustar-host/info"))
       ) {
@@ -2849,6 +2850,14 @@ const nativeQemuPlugin = () => ({
 
 export default defineConfig({
   plugins: [nativeQemuPlugin()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(workspaceDir, "index.html"),
+        remote: resolve(workspaceDir, "remote.html"),
+      },
+    },
+  },
   define: {
     __NEBULAVM_COMMIT__: JSON.stringify(commitId),
   },

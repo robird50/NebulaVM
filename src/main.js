@@ -552,10 +552,10 @@ app.innerHTML = `
             <div class="native-panel" id="remotePanel" hidden>
               <label class="field full-span">
                 <span>Remote VM URL</span>
-                <input id="remoteVmUrl" type="text" placeholder="https://your-vm-host/vnc.html" />
+                <input id="remoteVmUrl" type="text" value="https://nebulavm.online/remote.html" />
               </label>
               <p class="native-status" id="remoteStatus">
-                Use a noVNC, Guacamole, cloud console, or remote desktop web URL.
+                NebulaVM Remote Console connects to the Windows VM already running on your active host.
               </p>
             </div>
 

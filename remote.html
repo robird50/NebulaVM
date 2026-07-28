@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#071019" />
+    <title>NebulaVM Remote Console</title>
+    <link rel="icon" type="image/png" href="/assets/nebulavm-logo.png" />
+  </head>
+  <body>
+    <main class="remote-console">
+      <header>
+        <img src="/assets/remote-vm-icon.png" alt="" />
+        <div>
+          <p>NEBULAVM REMOTE</p>
+          <h1>Windows console</h1>
+        </div>
+        <span id="remoteState">Connecting</span>
+      </header>
+      <section id="remoteViewport" aria-label="Remote virtual machine display">
+        <div id="remoteMessage">
+          <img src="/assets/nebulavm-logo.png" alt="" />
+          <strong>Finding your Windows VM…</strong>
+          <small>Keep NebulaVM Host and the Windows guest running.</small>
+        </div>
+      </section>
+      <footer>
+        <button id="reconnectButton" type="button">Reconnect</button>
+        <button id="fullscreenButton" type="button">Fullscreen</button>
+        <a href="/">Back to NebulaVM</a>
+      </footer>
+    </main>
+    <script type="module" src="/src/remote.js"></script>
+  </body>
+</html>
