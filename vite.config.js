@@ -1299,11 +1299,11 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
   const landscape = orientation === "landscape";
   const lowMemory = specs.memoryMb <= 1024;
   const portraitWidth =
-    specs.memoryMb <= 512 ? 360 : specs.memoryMb <= 768 ? 432 : specs.memoryMb <= 1536 ? 540 : 1080;
+    specs.memoryMb <= 512 ? 360 : specs.memoryMb <= 1280 ? 432 : specs.memoryMb <= 1536 ? 540 : 1080;
   const portraitHeight =
-    specs.memoryMb <= 512 ? 640 : specs.memoryMb <= 768 ? 768 : specs.memoryMb <= 1536 ? 960 : 1920;
+    specs.memoryMb <= 512 ? 640 : specs.memoryMb <= 1280 ? 768 : specs.memoryMb <= 1536 ? 960 : 1920;
   const density =
-    specs.memoryMb <= 512 ? 240 : specs.memoryMb <= 768 ? 280 : specs.memoryMb <= 1536 ? 300 : 420;
+    specs.memoryMb <= 512 ? 240 : specs.memoryMb <= 1280 ? 280 : specs.memoryMb <= 1536 ? 300 : 420;
   const width = landscape ? portraitHeight : portraitWidth;
   const height = landscape ? portraitWidth : portraitHeight;
   const heapMb =
@@ -1406,23 +1406,26 @@ const startAndroidEmulator = (sessionId, body = {}) => {
       ? 3072
       : freeMemoryMb >= 3840
         ? 2048
-        : freeMemoryMb >= 1800
+        : freeMemoryMb >= 2200
+          ? 1280
+          : freeMemoryMb >= 1800
           ? 1024
           : freeMemoryMb >= 1408
             ? 768
             : 512;
   const modernAndroid = requestedVersion >= 15;
-  if (modernAndroid && freeMemoryMb < 1600) {
+  if (modernAndroid && freeMemoryMb < 2200) {
     const error = new Error(
-      `Android ${requestedVersion} needs at least 1024 MB plus Windows breathing room. Only ${freeMemoryMb} MB is currently available on the host. Close a few host apps, then try again.`,
+      `Android ${requestedVersion} needs at least 1280 MB plus Windows breathing room. Only ${freeMemoryMb} MB is currently available on the host. Close a few host apps, then try again.`,
     );
     error.statusCode = 503;
     throw error;
   }
-  const memoryMb =
+  const selectedMemoryMb =
     requestedMemoryMb > 0
       ? Math.min(androidInteger(requestedMemoryMb, 1024, modernAndroid ? 1024 : 512, 4096), adaptiveCeilingMb)
       : adaptiveCeilingMb;
+  const memoryMb = modernAndroid ? Math.max(1280, selectedMemoryMb) : selectedMemoryMb;
   const requestedCores = androidInteger(body.cores, 4, 1, Math.min(4, cpus().length));
   const specs = {
     cores: memoryMb <= 768 ? 1 : Math.min(requestedCores, memoryMb <= 1536 ? 2 : 4),
@@ -1568,6 +1571,9 @@ const androidEmulatorFrame = async (sessionId) => {
       }
       await runBootCommand(["settings", "put", "global", "stay_on_while_plugged_in", "7"]);
       await runBootCommand(["settings", "put", "system", "screen_off_timeout", "2147483647"]);
+      await runBootCommand(["settings", "put", "global", "window_animation_scale", "0"]);
+      await runBootCommand(["settings", "put", "global", "transition_animation_scale", "0"]);
+      await runBootCommand(["settings", "put", "global", "animator_duration_scale", "0"]);
       await runBootCommand(["svc", "power", "stayon", "true"]);
       if (runtime.specs.memoryMb <= 1536) {
         await runBootCommand([
