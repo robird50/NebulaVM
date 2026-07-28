@@ -3725,113 +3725,73 @@ const startAndroidStudioManagement = () => {
   els.androidDisplay.hidden = true;
   els.nativeDisplay.hidden = false;
   els.displayKicker.textContent = "AVD Management";
-  els.machineTitle.textContent = "Android Studio";
-  setViewportSummary("Opening the real Android Studio window");
+  els.machineTitle.textContent = "Private Android device";
+  setViewportSummary("AVD controls are ready");
 
   const shell = document.createElement("div");
-  shell.className = "android-studio-bridge";
-  shell.tabIndex = 0;
-  const image = document.createElement("img");
-  image.alt = "Live Android Studio AVD management window";
-  image.draggable = false;
-  const status = document.createElement("span");
-  status.className = "native-display-status";
-  status.textContent = "Starting Android Studio on the host...";
-  shell.append(image, status);
+  shell.className = "android-avd-manager";
+  shell.innerHTML = `
+    <div class="android-avd-manager__header">
+      <img src="/assets/android-icon.png" alt="" />
+      <div>
+        <p class="kicker">Private AVD</p>
+        <h3>${androidVersionLabel()}</h3>
+        <p>This lightweight panel manages the active device without opening Android Studio on the low-memory host.</p>
+      </div>
+    </div>
+    <dl class="android-avd-stats">
+      <div><dt>Status</dt><dd data-avd-status>Checking...</dd></div>
+      <div><dt>Memory</dt><dd data-avd-memory>Checking...</dd></div>
+      <div><dt>Processor</dt><dd data-avd-cpu>Checking...</dd></div>
+      <div><dt>Orientation</dt><dd data-avd-orientation>Checking...</dd></div>
+    </dl>
+    <div class="android-avd-actions">
+      <button type="button" data-avd-action="wake">Wake display</button>
+      <button type="button" data-avd-action="home">Home</button>
+      <button type="button" data-avd-action="recents">Recent apps</button>
+      <button type="button" class="danger" data-avd-action="reboot">Restart Android</button>
+    </div>
+    <p class="android-avd-note" data-avd-note>Connected to your private browser session.</p>`;
   els.nativeDisplay.replaceChildren(shell);
-  shell.focus({ preventScroll: true });
 
-  const clickHandler = (event) => {
-    const rect = image.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    shell.focus();
-    void sendAndroidStudioInput({
-      type: "click",
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-      width: rect.width,
-      height: rect.height,
-    });
-  };
-  const keyHandler = (event) => {
-    if (event.ctrlKey || event.metaKey || event.altKey) return;
-    const specialKeys = new Set([
-      "Enter",
-      "Escape",
-      "Backspace",
-      "Delete",
-      "Tab",
-      "ArrowUp",
-      "ArrowDown",
-      "ArrowLeft",
-      "ArrowRight",
-      "Home",
-      "End",
-      "PageUp",
-      "PageDown",
-      "F1",
-      "F2",
-      "F3",
-      "F4",
-      "F5",
-      "F6",
-      "F7",
-      "F8",
-      "F9",
-      "F10",
-      "F11",
-      "F12",
-    ]);
-    if (event.key.length === 1) {
-      event.preventDefault();
-      void sendAndroidStudioInput({ type: "text", text: event.key });
-    } else if (specialKeys.has(event.key)) {
-      event.preventDefault();
-      void sendAndroidStudioInput({ type: "key", key: event.key, shiftKey: event.shiftKey });
+  const actionHandler = async (event) => {
+    const button = event.target.closest("[data-avd-action]");
+    if (!button) return;
+    const action = button.dataset.avdAction;
+    const note = shell.querySelector("[data-avd-note]");
+    button.disabled = true;
+    try {
+      await sendNativeAndroidInput(
+        action === "reboot" ? { type: "reboot" } : { type: "key", key: action },
+      );
+      note.textContent =
+        action === "reboot" ? "Android is restarting. Device mode will reconnect automatically." : `${button.textContent} sent.`;
+    } finally {
+      button.disabled = false;
     }
   };
-  const pasteHandler = (event) => {
-    const text = event.clipboardData?.getData("text") || "";
-    if (!text) return;
-    event.preventDefault();
-    void sendAndroidStudioInput({ type: "text", text });
-  };
-  image.addEventListener("click", clickHandler);
-  shell.addEventListener("keydown", keyHandler);
-  shell.addEventListener("paste", pasteHandler);
-  state.androidStudioCleanup = () => {
-    image.removeEventListener("click", clickHandler);
-    shell.removeEventListener("keydown", keyHandler);
-    shell.removeEventListener("paste", pasteHandler);
-  };
+  shell.addEventListener("click", actionHandler);
+  state.androidStudioCleanup = () => shell.removeEventListener("click", actionHandler);
 
   const pollFrame = async () => {
     if (!state.androidStudioActive || state.androidViewportMode !== "management") return;
     try {
-      const frame = await fetchAndroidStudioFrame();
-      const nextFrameUrl = URL.createObjectURL(frame.blob);
-      if (state.androidStudioFrameUrl) URL.revokeObjectURL(state.androidStudioFrameUrl);
-      state.androidStudioFrameUrl = nextFrameUrl;
-      image.src = nextFrameUrl;
-      if (frame.width) image.width = frame.width;
-      if (frame.height) image.height = frame.height;
-      if (frame.width && frame.height) {
-        const frameRatio = frame.width / frame.height;
-        els.screenShell.style.setProperty("--avd-frame-ratio", String(frameRatio));
-        els.screenShell.style.aspectRatio = `${frame.width} / ${frame.height}`;
-      }
-      const avdLabel = frame.avdName || "your private AVD";
-      status.textContent = `Managing ${avdLabel}. Click and type to control Android Studio.`;
-      els.machineTitle.textContent = frame.avdName ? `${frame.avdName} - Android Studio` : frame.title || "Android Studio";
-      setViewportSummary(`${avdLabel} is open in AVD Management`);
+      const { response, data } = await fetchAndroidJson("status");
+      if (!response.ok || !data.running) throw new Error(data.error || "Android is not running.");
+      shell.querySelector("[data-avd-status]").textContent = data.booted ? "Running" : "Cold booting";
+      shell.querySelector("[data-avd-memory]").textContent = `${data.specs?.memoryMb || 0} MB`;
+      shell.querySelector("[data-avd-cpu]").textContent = `${data.specs?.cores || 1} core${data.specs?.cores === 1 ? "" : "s"}`;
+      shell.querySelector("[data-avd-orientation]").textContent =
+        data.orientation === "landscape" ? "16:9 landscape" : "9:16 portrait";
+      setViewportSummary(data.booted ? "Private AVD is running" : "Private AVD is cold booting");
       state.androidStudioTimer = window.setTimeout(pollFrame, 1200);
     } catch (error) {
-      status.textContent = `AVD Management waiting: ${error.message}`;
+      shell.querySelector("[data-avd-note]").textContent = `AVD status unavailable: ${error.message}`;
       state.androidStudioTimer = window.setTimeout(pollFrame, 2000);
     }
   };
   void pollFrame();
-  log("Opening Android Studio AVD Management in the browser viewport.");
+  log("Opened lightweight AVD Management in the browser viewport.");
 };
 
 const setAndroidViewportMode = (mode, { force = false } = {}) => {

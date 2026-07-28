@@ -867,7 +867,7 @@ let activeNativeRuntimeName = null;
 let androidRuntime = null;
 let androidImageCache = { expiresAt: 0, items: [] };
 let lastAndroidEmulatorExit = null;
-const androidSessionLeaseMs = 5 * 60_000;
+const androidSessionLeaseMs = 30 * 60_000;
 const nativeVncHost = "127.0.0.1";
 const nativeVncPath = "/api/native-qemu/vnc";
 const hyperVGuestVncPath = "/api/emustar-hyperv/vnc";
@@ -1564,6 +1564,9 @@ const androidEmulatorFrame = async (sessionId) => {
       if (runtime.image.version >= 16) {
         await runBootCommand(["settings", "put", "global", "hide_error_dialogs", "1"]);
       }
+      await runBootCommand(["settings", "put", "global", "stay_on_while_plugged_in", "7"]);
+      await runBootCommand(["settings", "put", "system", "screen_off_timeout", "2147483647"]);
+      await runBootCommand(["svc", "power", "stayon", "true"]);
       if (runtime.specs.memoryMb <= 1536) {
         await runBootCommand([
           "settings",
@@ -1586,6 +1589,7 @@ const androidEmulatorFrame = async (sessionId) => {
       }
       await runBootCommand(["input", "keyevent", "KEYCODE_WAKEUP"]);
       await runBootCommand(["wm", "dismiss-keyguard"]);
+      await runBootCommand(["input", "keyevent", "KEYCODE_HOME"]);
     } catch {
       // A frame can still be served if the guest does not support these commands.
     }
@@ -1627,6 +1631,8 @@ const sendAndroidEmulatorInput = async (sessionId, body = {}) => {
     back: "KEYCODE_BACK",
     home: "KEYCODE_HOME",
     recents: "KEYCODE_APP_SWITCH",
+    wake: "KEYCODE_WAKEUP",
+    power: "KEYCODE_POWER",
     enter: "KEYCODE_ENTER",
     escape: "KEYCODE_BACK",
   };
@@ -1649,7 +1655,11 @@ const sendAndroidEmulatorInput = async (sessionId, body = {}) => {
     );
   };
 
-  if (body.type === "key" && keyMap[body.key]) {
+  if (body.type === "reboot") {
+    renewAndroidLease(runtime);
+    runtime.awake = false;
+    await runAndroidToolAsync("adb", ["-s", serial, "reboot"], { timeout: 15000 });
+  } else if (body.type === "key" && keyMap[body.key]) {
     await runInput(["keyevent", keyMap[body.key]]);
   } else if (body.type === "tap") {
     await runInput([

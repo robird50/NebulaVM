@@ -2177,6 +2177,86 @@ input[type="text"] {
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.38);
 }
 
+.android-avd-manager {
+  width: min(100%, 760px);
+  padding: clamp(20px, 4vw, 42px);
+  color: #edf7ff;
+}
+
+.android-avd-manager__header {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 18px;
+  align-items: center;
+}
+
+.android-avd-manager__header img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+
+.android-avd-manager__header h3,
+.android-avd-manager__header p {
+  margin: 0;
+}
+
+.android-avd-manager__header h3 {
+  font-size: 1.35rem;
+}
+
+.android-avd-manager__header p:last-child {
+  margin-top: 6px;
+  color: #9fb0c2;
+}
+
+.android-avd-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 26px 0;
+}
+
+.android-avd-stats div {
+  padding: 14px;
+  border: 1px solid rgba(167, 232, 79, 0.28);
+  background: #0b131b;
+}
+
+.android-avd-stats dt {
+  color: #8fa1b3;
+  font-size: 0.78rem;
+}
+
+.android-avd-stats dd {
+  margin: 4px 0 0;
+  color: #a7e84f;
+  font-weight: 900;
+}
+
+.android-avd-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.android-avd-actions button {
+  min-height: 46px;
+}
+
+.android-avd-note {
+  min-height: 1.5em;
+  margin: 18px 0 0;
+  color: #b9c7d4;
+}
+
+@media (max-width: 620px) {
+  .android-avd-stats,
+  .android-avd-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 .hyperv-console-bridge:focus-visible {
   outline: 2px solid #ffe45e;
   outline-offset: -3px;
@@ -2361,10 +2441,10 @@ input[type="text"] {
 }
 
 .workspace.is-android-mode.is-avd-management .screen-shell {
-  width: min(100%, calc(76vh * var(--avd-frame-ratio, 1.6)));
-  max-width: none;
+  width: min(100%, 820px);
+  max-width: 820px;
   min-height: 0;
-  aspect-ratio: var(--avd-frame-ratio, 1.6);
+  aspect-ratio: 16 / 10;
   justify-self: center;
 }
 
