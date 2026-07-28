@@ -1832,6 +1832,140 @@ input[type="text"] {
   display: grid;
 }
 
+.faq-panel {
+  gap: 16px;
+  width: min(820px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  border-color: rgba(255, 221, 61, 0.5);
+  border-top: 4px solid #ffdd3d;
+  background: #0c141d;
+}
+
+.faq-panel:focus {
+  outline: none;
+}
+
+.faq-heading {
+  display: grid;
+  gap: 5px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(96, 220, 255, 0.2);
+}
+
+.faq-heading .kicker {
+  margin: 0;
+  color: #60dcff;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.faq-heading h2 {
+  color: #ffdd3d;
+  font-size: 1.7rem;
+}
+
+.faq-heading > p:last-child {
+  margin: 0;
+  color: #9fb0c2;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.faq-sections {
+  display: grid;
+  gap: 20px;
+}
+
+.faq-section {
+  display: grid;
+  gap: 7px;
+}
+
+.faq-section h3 {
+  margin: 0 0 2px;
+  color: #60dcff;
+  font-size: 0.78rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.faq-section details {
+  border: 1px solid rgba(96, 220, 255, 0.18);
+  border-radius: 6px;
+  background: #101b27;
+}
+
+.faq-section details[open] {
+  border-color: rgba(255, 221, 61, 0.4);
+  background: #111c27;
+}
+
+.faq-section summary {
+  position: relative;
+  padding: 13px 42px 13px 14px;
+  color: #eef5fb;
+  font-size: 0.92rem;
+  font-weight: 850;
+  line-height: 1.35;
+  cursor: pointer;
+  list-style: none;
+}
+
+.faq-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-section summary::after {
+  position: absolute;
+  top: 50%;
+  right: 15px;
+  color: #ffdd3d;
+  content: "+";
+  font-size: 1.25rem;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.faq-section details[open] summary::after {
+  content: "-";
+}
+
+.faq-section summary:focus-visible {
+  outline: 2px solid #60dcff;
+  outline-offset: -2px;
+}
+
+.faq-section details p {
+  margin: 0;
+  padding: 0 14px 14px;
+  color: #bdcad8;
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.faq-section .faq-final {
+  border-color: rgba(255, 221, 61, 0.48);
+}
+
+.faq-section .faq-final summary {
+  color: #ffea76;
+}
+
+.faq-actions {
+  position: sticky;
+  bottom: -18px;
+  display: grid;
+  padding: 14px 0 2px;
+  background: linear-gradient(to bottom, transparent, #0c141d 32%);
+}
+
+.faq-actions .primary {
+  min-height: 44px;
+}
+
 .problem-report-panel {
   width: min(640px, 100%);
   max-height: calc(100vh - 36px);

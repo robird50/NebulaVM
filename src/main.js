@@ -140,7 +140,7 @@ app.innerHTML = `
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
       <button class="mobile-bypass-link" id="mobileBypassButton" type="button">Bypass (devs only)</button>
     </section>
-    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
+    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
   </main>
 
   <div class="mobile-bypass-overlay popup-motion-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
@@ -648,7 +648,7 @@ app.innerHTML = `
         </div>
       </section>
     </section>
-    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
+    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
   </main>
 
   <div class="display-choice-overlay popup-motion-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>
@@ -689,6 +689,92 @@ app.innerHTML = `
       </div>
       <div class="nebula-conflict-actions">
         <button class="primary" id="nebulaConflictOkButton" type="button">OK</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="display-choice-overlay popup-motion-overlay" id="faqDialog" role="dialog" aria-modal="true" aria-labelledby="faqTitle" hidden>
+    <section class="display-choice-panel faq-panel popup-motion-panel" id="faqPanel" tabindex="-1">
+      <header class="faq-heading">
+        <p class="kicker">NEBULAVM HELP CENTER</p>
+        <h2 id="faqTitle">Frequently Asked Questions</h2>
+        <p>Answers about runtimes, compatibility, storage, performance, and the project.</p>
+      </header>
+
+      <div class="faq-sections">
+        <section class="faq-section">
+          <h3>General</h3>
+          <details><summary>What is NebulaVM?</summary><p>NebulaVM is an open-source web interface for launching and controlling virtual machines and emulators. Lightweight guests can run with browser technology, while modern 64-bit systems, EMUSTAR, QEMU, and Android use a configured host computer.</p></details>
+          <details><summary>Is NebulaVM really free?</summary><p>Yes. NebulaVM has no subscriptions, premium plans, hidden fees, or software paywalls. You are still responsible for internet access, computer hardware, and any operating-system licenses you use.</p></details>
+          <details><summary>Do I need to install anything?</summary><p>Not for lightweight browser-compatible guests or for connecting to an already configured NebulaVM host. Running Windows 11, Android, EMUSTAR, or native QEMU requires the host computer to have the matching virtualization tools installed and NebulaVM Host running.</p></details>
+          <details><summary>Is NebulaVM open source?</summary><p>Yes. The source code is public on GitHub under the MIT License. Use the Source Code link in the footer to inspect it.</p></details>
+          <details><summary>Which operating systems can I run?</summary><p>Support depends on the selected runtime and guest architecture. Legacy x86 systems, DOS, lightweight Linux distributions, modern Windows through a native host, and installed Android system images are supported to different degrees.</p></details>
+        </section>
+
+        <section class="faq-section">
+          <h3>Compatibility</h3>
+          <details><summary>Does NebulaVM work on Chromebooks?</summary><p>Yes, a Chromebook can act as the browser client. Host-backed emulators still run on the connected Windows host, which must remain powered on, online, and running NebulaVM Host.</p></details>
+          <details><summary>Can I use NebulaVM on Windows, macOS, or Linux?</summary><p>The web interface works in supported browsers on all three. Native host features currently depend on the runtimes available and configured on the host; EMUSTAR and the current Android host are Windows-focused.</p></details>
+          <details><summary>Does it work on mobile devices?</summary><p>Mobile and tablet support is experimental and under development. Approved testing devices may access the mobile build, but desktop and laptop browsers remain the supported experience.</p></details>
+          <details><summary>Which browsers are supported?</summary><p>Current Chromium-based browsers such as Chrome and Edge provide the best-tested experience. Other modern browsers may work, but fullscreen, large-file handling, keyboard capture, and streamed input can behave differently.</p></details>
+        </section>
+
+        <section class="faq-section">
+          <h3>Features</h3>
+          <details><summary>Can I boot my own ISO?</summary><p>Yes. Choose or drop a bootable ISO, select a compatible emulator and architecture, then launch it. Host-backed modes stage the ISO on the host before booting.</p></details>
+          <details><summary>Can I install Windows?</summary><p>Yes, with a compatible Windows ISO and a host-backed 64-bit runtime such as EMUSTAR or native QEMU. Windows licensing and system requirements still apply.</p></details>
+          <details><summary>Does NebulaVM support Linux?</summary><p>Yes. Lightweight Linux images may run in the browser runtime, while larger or 64-bit distributions generally work better through native QEMU or another suitable host runtime.</p></details>
+          <details><summary>Can I save my virtual machine?</summary><p>Persistent virtual disks and saved state are available only where the selected runtime supports them. Ending a temporary Android session deletes its private AVD, while EMUSTAR and QEMU can use persistent virtual disks.</p></details>
+          <details><summary>Can I upload multiple ISOs?</summary><p>You can keep up to two stored ISOs per approved browser device on the host. Only one boot image is selected for a VM session at a time.</p></details>
+          <details><summary>What hardware settings can I customize?</summary><p>Available controls depend on the runtime and include processor target, processor cores, memory, storage size, video memory, boot order, networking, and Android orientation.</p></details>
+          <details><summary>Does NebulaVM support 64-bit operating systems?</summary><p>Yes through compatible native or host-backed runtimes. The lightweight browser runtime has stricter architecture and memory limits and is not a replacement for native 64-bit virtualization.</p></details>
+        </section>
+
+        <section class="faq-section">
+          <h3>Storage &amp; Privacy</h3>
+          <details><summary>Where are my uploaded ISOs stored?</summary><p>A file selected in the browser remains local until a host-backed mode stages it. Staged and saved ISOs are stored on the configured host computer, not inside Netlify's static website.</p></details>
+          <details><summary>Are my files private?</summary><p>Stored-image access is tied to the browser device that uploaded the image. NebulaVM also uses session protections, but you should not upload highly sensitive data to a host you do not own or trust.</p></details>
+          <details><summary>Are saved ISOs shared with other users?</summary><p>No. Stored ISO listings are scoped to the browser device that saved them, so another user's device should not be able to view or manage your saved images.</p></details>
+          <details><summary>How long are stored images kept?</summary><p>Stored ISOs expire automatically after three days to conserve host storage.</p></details>
+          <details><summary>Can I delete my saved ISOs?</summary><p>Yes. Open Stored images and use the remove button beside an ISO to delete it and free its slot immediately.</p></details>
+        </section>
+
+        <section class="faq-section">
+          <h3>Performance</h3>
+          <details><summary>Why is my VM running slowly?</summary><p>Performance depends on host CPU load, available RAM, disk speed, network quality, guest architecture, and the selected runtime. Close unnecessary host applications, lower the guest memory or core count, and avoid assigning resources the host does not actually have available.</p></details>
+          <details><summary>How much RAM should I allocate?</summary><p>Use the smallest amount the guest can run comfortably with. On an 8 GB host, 1-2 GB is a safer starting point when memory is limited; never allocate all available host RAM to the guest.</p></details>
+          <details><summary>Why won't my ISO boot?</summary><p>The ISO may use the wrong CPU architecture, be non-bootable or corrupted, require a different firmware mode, or need more resources. Confirm x64 versus ARM64, choose the matching emulator, and check the Mission log for the exact failure.</p></details>
+          <details><summary>Does NebulaVM use hardware acceleration?</summary><p>Host-backed runtimes can use hardware virtualization when the host and runtime support it. Browser-only emulation uses web technologies and does not provide the same acceleration or performance as native virtualization.</p></details>
+        </section>
+
+        <section class="faq-section">
+          <h3>Troubleshooting</h3>
+          <details><summary>My VM is stuck on a black screen. What should I do?</summary><p>Check the Mission or Android log first. Wait through an initial cold boot, confirm the host has free memory, try a lower resource setting, and restart the session. If the display never appears, end the session before launching it again.</p></details>
+          <details><summary>Why won't my keyboard or mouse work?</summary><p>Click or tap inside the viewport to focus it. Make sure the VM has finished booting and that the session belongs to the current browser. Fullscreen can improve keyboard capture; mobile input remains experimental.</p></details>
+          <details><summary>Why can't I connect to my host?</summary><p>The host may be asleep, offline, blocked by its firewall or network, running an old NebulaVM version, or missing the host service. Keep NebulaVM Host open and confirm that the site reports the host as reachable.</p></details>
+          <details><summary>What does "Host Offline" mean?</summary><p>The website cannot currently reach the computer that runs the native emulator. The host must be powered on, connected to the internet, and running the matching NebulaVM Host service.</p></details>
+        </section>
+
+        <section class="faq-section">
+          <h3>Security</h3>
+          <details><summary>Is NebulaVM safe?</summary><p>NebulaVM is open source and uses isolated virtualization runtimes, but no virtualization software is risk-free. Use trusted images, keep the host updated, and avoid running unknown software with unnecessary network access.</p></details>
+          <details><summary>Can a virtual machine access my real computer?</summary><p>A guest is isolated from the host by its emulator or hypervisor, but enabled networking, shared folders, clipboard features, runtime vulnerabilities, or host configuration can reduce that isolation. Do not treat a VM as a perfect security boundary.</p></details>
+          <details><summary>Is my data encrypted?</summary><p>Traffic to nebulavm.online is protected by HTTPS. Encryption of staged ISOs and virtual disks at rest depends on the host computer's storage encryption; NebulaVM does not claim separate end-to-end encryption for those files.</p></details>
+        </section>
+
+        <section class="faq-section">
+          <h3>Project</h3>
+          <details><summary>Who created NebulaVM?</summary><p>NebulaVM is a RoBird Studios project.</p></details>
+          <details><summary>How can I report a bug?</summary><p>Select Report a problem in the footer, choose the bug type, describe what happened, and include an email address so the project can follow up.</p></details>
+          <details><summary>How can I contribute?</summary><p>Visit the GitHub repository through the Source Code link, review the project and license, then open an issue or submit a focused pull request.</p></details>
+          <details><summary>Where can I find the source code?</summary><p>Use the yellow Source Code link in the footer to open the official robird50/NebulaVM GitHub repository.</p></details>
+          <details><summary>How can I support the project?</summary><p>Test NebulaVM, submit useful bug reports, improve the code or documentation, and share the official site responsibly. Those contributions help the project stay useful and free.</p></details>
+          <details class="faq-final"><summary>Why is NebulaVM free?</summary><p>NebulaVM's goal is to make virtualization accessible to everyone. The project is open source and is designed to let anyone experiment with operating systems directly from their browser without paying for the software.</p></details>
+        </section>
+      </div>
+
+      <div class="faq-actions">
+        <button class="primary" id="faqOkButton" type="button">OK</button>
       </div>
     </section>
   </div>
@@ -810,6 +896,10 @@ const els = {
   nebulaConflictDialog: document.querySelector("#nebulaConflictDialog"),
   nebulaConflictPanel: document.querySelector("#nebulaConflictPanel"),
   nebulaConflictOkButton: document.querySelector("#nebulaConflictOkButton"),
+  faqLinks: [...document.querySelectorAll("[data-faq-link]")],
+  faqDialog: document.querySelector("#faqDialog"),
+  faqPanel: document.querySelector("#faqPanel"),
+  faqOkButton: document.querySelector("#faqOkButton"),
   problemReportLinks: [...document.querySelectorAll("[data-report-problem-link]")],
   problemReportDialog: document.querySelector("#problemReportDialog"),
   problemReportPanel: document.querySelector("#problemReportPanel"),
@@ -4625,6 +4715,24 @@ els.nebulaConflictDialog.addEventListener("click", (event) => {
     closeNebulaConflictDialog();
   }
 });
+let faqTrigger = null;
+const closeFaqDialog = () => {
+  closePopupTo(els.faqDialog, faqTrigger);
+};
+els.faqLinks.forEach((link) => {
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    faqTrigger = link;
+    els.faqPanel.scrollTop = 0;
+    openPopupFrom(els.faqDialog, link, els.faqPanel);
+  });
+});
+els.faqOkButton.addEventListener("click", closeFaqDialog);
+els.faqDialog.addEventListener("click", (event) => {
+  if (event.target === els.faqDialog) {
+    closeFaqDialog();
+  }
+});
 const problemReportEndpoint = isNetlifyLauncher
   ? "/.netlify/functions/report-problem"
   : "/api/report-problem";
@@ -4754,6 +4862,9 @@ document.addEventListener("keydown", (event) => {
     }
     if (!els.nebulaConflictDialog.hidden) {
       closeNebulaConflictDialog();
+    }
+    if (!els.faqDialog.hidden) {
+      closeFaqDialog();
     }
     if (!els.problemReportDialog.hidden) {
       closeProblemReportDialog();
