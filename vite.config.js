@@ -2547,7 +2547,7 @@ const nativeQemuPlugin = () => ({
             localEnvValue("NEBULAVM_REPORT_GMAIL_APP_PASSWORD") || "",
           ).replace(/\s+/g, "");
           const destination = String(
-            localEnvValue("NEBULAVM_REPORT_TO") || "robird860@gmail.com",
+            localEnvValue("NEBULAVM_REPORT_TO") || "nebulavmsupport@gmail.com",
           ).trim();
           if (!gmailUser || !gmailAppPassword) {
             const error = new Error("Problem reporting is not configured yet.");
