@@ -1521,6 +1521,7 @@ const startAndroidEmulator = (sessionId, body = {}, { publicMobile = false } = {
     configured: false,
     awake: false,
     blankFrameCount: 0,
+    frameCaptureFailureCount: 0,
     lastDisplayRecoveryAt: 0,
     image,
     specs,
@@ -1663,6 +1664,25 @@ const androidEmulatorFrame = async (sessionId) => {
       timeout: 20000,
     });
   } catch (error) {
+    const booted = androidProperty(serial, "sys.boot_completed") === "1";
+    const captureTimedOut = /timed out/i.test(String(error?.message || error));
+    runtime.frameCaptureFailureCount += 1;
+    if (
+      booted &&
+      captureTimedOut &&
+      runtime.frameCaptureFailureCount >= 1 &&
+      Date.now() - runtime.lastDisplayRecoveryAt > 120_000
+    ) {
+      runtime.lastDisplayRecoveryAt = Date.now();
+      runtime.frameCaptureFailureCount = 0;
+      runtime.awake = false;
+      runtime.configured = false;
+      await runAndroidToolAsync("adb", ["-s", serial, "reboot"], { timeout: 8000 }).catch(() => {});
+      runtime.output = `${runtime.output}\nNebulaVM restarted Android after its display pipeline stopped responding.`.slice(
+        -12000,
+      );
+      throw new Error("Android display stalled and is restarting automatically.");
+    }
     // Older Android releases cannot stream screencap output and may mount
     // /sdcard read-only, but /data/local/tmp remains available over ADB.
     const remoteFramePath = "/data/local/tmp/nebulavm-frame.png";
@@ -1679,6 +1699,7 @@ const androidEmulatorFrame = async (sessionId) => {
     }).catch(() => {});
   }
   if (!image?.length) throw new Error("The Android Emulator returned an empty frame.");
+  runtime.frameCaptureFailureCount = 0;
   const booted = androidProperty(serial, "sys.boot_completed") === "1";
   runtime.blankFrameCount = booted && image.length < 12_000 ? runtime.blankFrameCount + 1 : 0;
   if (runtime.blankFrameCount >= 4 && Date.now() - runtime.lastDisplayRecoveryAt > 60_000) {
