@@ -8,6 +8,7 @@ import { cpus, freemem, homedir, networkInterfaces, totalmem } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import nodemailer from "nodemailer";
 import WebSocket, { WebSocketServer } from "ws";
 import {
   MOBILE_DEVICE_DEV_COOKIE,
@@ -26,6 +27,7 @@ import {
   sha256Hex,
 } from "./lib/mobileDevAccess.mjs";
 import { normalizeStoredIsoOwnerId, storedIsosForOwner } from "./lib/storedIsoOwnership.mjs";
+import { buildProblemReportEmail, validateProblemReport } from "./lib/problemReport.mjs";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
@@ -2423,13 +2425,16 @@ const nativeQemuPlugin = () => ({
       const isHostApi = url.pathname.startsWith("/api/emustar-host/");
       const isMobileDevUnlockApi =
         url.pathname === "/api/mobile-dev-unlock" || url.pathname === "/.netlify/functions/mobile-dev-unlock";
+      const isReportProblemApi =
+        url.pathname === "/api/report-problem" || url.pathname === "/.netlify/functions/report-problem";
       if (
         !isNativeQemuApi &&
         !isHyperVApi &&
         !isAndroidApi &&
         !isAndroidStudioApi &&
         !isHostApi &&
-        !isMobileDevUnlockApi
+        !isMobileDevUnlockApi &&
+        !isReportProblemApi
       ) {
         next();
         return;
@@ -2450,6 +2455,51 @@ const nativeQemuPlugin = () => ({
           json(res, result.status, result.body, result.headers);
         } catch (error) {
           json(res, 400, { ok: false, error: error.message });
+        }
+        return;
+      }
+
+      if (isReportProblemApi) {
+        if (req.method !== "POST") {
+          json(res, 405, { ok: false, error: "Method not allowed." });
+          return;
+        }
+        try {
+          const gmailUser = String(localEnvValue("NEBULAVM_REPORT_GMAIL_USER") || "").trim();
+          const gmailAppPassword = String(
+            localEnvValue("NEBULAVM_REPORT_GMAIL_APP_PASSWORD") || "",
+          ).replace(/\s+/g, "");
+          const destination = String(
+            localEnvValue("NEBULAVM_REPORT_TO") || "robird860@gmail.com",
+          ).trim();
+          if (!gmailUser || !gmailAppPassword) {
+            const error = new Error("Problem reporting is not configured yet.");
+            error.statusCode = 503;
+            throw error;
+          }
+          const report = validateProblemReport(await readJsonBody(req));
+          const message = buildProblemReportEmail(report);
+          const transport = nodemailer.createTransport({
+            service: "gmail",
+            auth: { user: gmailUser, pass: gmailAppPassword },
+          });
+          await transport.sendMail({
+            from: `"NebulaVM Problem Reports" <${gmailUser}>`,
+            to: destination,
+            replyTo: report.email,
+            subject: message.subject,
+            text: message.text,
+            html: message.html,
+          });
+          json(res, 200, { ok: true, message: "Your report was sent. Thank you." });
+        } catch (error) {
+          json(res, Number(error.statusCode) || 500, {
+            ok: false,
+            error:
+              error.statusCode
+                ? error.message
+                : "The report could not be sent. Please try again later.",
+          });
         }
         return;
       }

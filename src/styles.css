@@ -100,6 +100,17 @@ button:disabled {
   color: #fff176;
 }
 
+.commit-id a.report-problem-link {
+  color: #ff3f4a;
+  font-weight: 950;
+  text-decoration-color: rgba(255, 63, 74, 0.72);
+}
+
+.commit-id a.report-problem-link:hover,
+.commit-id a.report-problem-link:focus-visible {
+  color: #ff737b;
+}
+
 .mobile-unsupported {
   display: none;
   width: min(1080px, 100%);
@@ -1819,6 +1830,132 @@ input[type="text"] {
 
 .nebula-conflict-actions {
   display: grid;
+}
+
+.problem-report-panel {
+  width: min(640px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  border-color: rgba(255, 77, 87, 0.52);
+  border-top: 4px solid #ff4d57;
+  background: #0c141d;
+}
+
+.problem-report-panel:focus {
+  outline: none;
+}
+
+.problem-report-heading {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(96, 220, 255, 0.18);
+}
+
+.problem-report-heading .kicker {
+  margin: 0;
+  color: #63dcff;
+}
+
+.problem-report-panel .problem-report-heading h2 {
+  color: #ff6069;
+  font-size: 1.65rem;
+}
+
+.problem-report-form {
+  display: grid;
+  gap: 16px;
+}
+
+.problem-report-form > label {
+  display: grid;
+  gap: 7px;
+  color: #dce8f2;
+  font-size: 0.84rem;
+  font-weight: 900;
+}
+
+.problem-report-form select,
+.problem-report-form input,
+.problem-report-form textarea {
+  width: 100%;
+  border: 1px solid rgba(96, 220, 255, 0.34);
+  border-radius: 6px;
+  background: #071019;
+  color: #f4f9fc;
+}
+
+.problem-report-form select,
+.problem-report-form input {
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+.problem-report-form textarea {
+  min-height: 170px;
+  padding: 12px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.problem-report-form select:focus,
+.problem-report-form input:focus,
+.problem-report-form textarea:focus {
+  outline: 2px solid rgba(96, 220, 255, 0.38);
+  outline-offset: 1px;
+  border-color: #63dcff;
+}
+
+.problem-report-form small {
+  color: #758796;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.problem-report-trap {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.problem-report-feedback {
+  min-height: 22px;
+  margin: 0;
+  color: #9db0be;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.problem-report-feedback.is-success {
+  color: #72e0a3;
+}
+
+.problem-report-feedback.is-error {
+  color: #ff737b;
+}
+
+.problem-report-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.problem-report-actions button {
+  min-height: 44px;
+}
+
+.problem-report-actions .primary {
+  background: #ff4d57;
+  color: #240507;
+}
+
+.problem-report-actions .primary:hover:not(:disabled) {
+  background: #ff7078;
 }
 
 .keep-iso-panel {

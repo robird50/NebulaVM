@@ -140,7 +140,7 @@ app.innerHTML = `
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
       <button class="mobile-bypass-link" id="mobileBypassButton" type="button">Bypass (devs only)</button>
     </section>
-    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a></small>
+    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
   </main>
 
   <div class="mobile-bypass-overlay popup-motion-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
@@ -648,7 +648,7 @@ app.innerHTML = `
         </div>
       </section>
     </section>
-    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a></footer>
+    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
   </main>
 
   <div class="display-choice-overlay popup-motion-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>
@@ -690,6 +690,52 @@ app.innerHTML = `
       <div class="nebula-conflict-actions">
         <button class="primary" id="nebulaConflictOkButton" type="button">OK</button>
       </div>
+    </section>
+  </div>
+
+  <div class="display-choice-overlay popup-motion-overlay" id="problemReportDialog" role="dialog" aria-modal="true" aria-labelledby="problemReportTitle" hidden>
+    <section class="display-choice-panel problem-report-panel popup-motion-panel" id="problemReportPanel" tabindex="-1">
+      <div class="problem-report-heading">
+        <p class="kicker">NEBULAVM SUPPORT</p>
+        <h2 id="problemReportTitle">Report a problem/bug</h2>
+      </div>
+      <form class="problem-report-form" id="problemReportForm">
+        <label>
+          <span>Bug type</span>
+          <select id="problemReportType" name="bugType" required>
+            <option value="">Choose a bug type</option>
+            <option>Startup or boot problem</option>
+            <option>ISO upload or staging</option>
+            <option>VM display or controls</option>
+            <option>Slow or unresponsive emulator</option>
+            <option>Android emulator</option>
+            <option>EMUSTAR or Hyper-V</option>
+            <option>QEMU emulator</option>
+            <option>Mobile or tablet</option>
+            <option>Stored images</option>
+            <option>Other</option>
+          </select>
+        </label>
+        <label>
+          <span>Describe what's going on</span>
+          <textarea id="problemReportDescription" name="description" minlength="20" maxlength="5000" rows="8" required></textarea>
+          <small><span id="problemReportCharacterCount">0</span>/5000 characters; minimum 20</small>
+        </label>
+        <label>
+          <span>Email</span>
+          <input id="problemReportEmail" name="email" type="email" maxlength="254" autocomplete="email" required />
+          <small>This is so we can get back to you.</small>
+        </label>
+        <label class="problem-report-trap" aria-hidden="true">
+          <span>Website</span>
+          <input id="problemReportWebsite" name="website" type="text" tabindex="-1" autocomplete="off" />
+        </label>
+        <p class="problem-report-feedback" id="problemReportFeedback" role="status" aria-live="polite"></p>
+        <div class="problem-report-actions">
+          <button class="secondary" id="problemReportBackButton" type="button">Back</button>
+          <button class="primary" id="problemReportSubmitButton" type="submit">Submit</button>
+        </div>
+      </form>
     </section>
   </div>
 
@@ -764,6 +810,18 @@ const els = {
   nebulaConflictDialog: document.querySelector("#nebulaConflictDialog"),
   nebulaConflictPanel: document.querySelector("#nebulaConflictPanel"),
   nebulaConflictOkButton: document.querySelector("#nebulaConflictOkButton"),
+  problemReportLinks: [...document.querySelectorAll("[data-report-problem-link]")],
+  problemReportDialog: document.querySelector("#problemReportDialog"),
+  problemReportPanel: document.querySelector("#problemReportPanel"),
+  problemReportForm: document.querySelector("#problemReportForm"),
+  problemReportType: document.querySelector("#problemReportType"),
+  problemReportDescription: document.querySelector("#problemReportDescription"),
+  problemReportCharacterCount: document.querySelector("#problemReportCharacterCount"),
+  problemReportEmail: document.querySelector("#problemReportEmail"),
+  problemReportWebsite: document.querySelector("#problemReportWebsite"),
+  problemReportFeedback: document.querySelector("#problemReportFeedback"),
+  problemReportBackButton: document.querySelector("#problemReportBackButton"),
+  problemReportSubmitButton: document.querySelector("#problemReportSubmitButton"),
   processorMode: document.querySelector("#processorMode"),
   processorSpeed: document.querySelector("#processorSpeed"),
   processorSpeedValue: document.querySelector("#processorSpeedValue"),
@@ -4567,6 +4625,80 @@ els.nebulaConflictDialog.addEventListener("click", (event) => {
     closeNebulaConflictDialog();
   }
 });
+const problemReportEndpoint = isNetlifyLauncher
+  ? "/.netlify/functions/report-problem"
+  : "/api/report-problem";
+let problemReportTrigger = null;
+const closeProblemReportDialog = () => {
+  closePopupTo(els.problemReportDialog, problemReportTrigger);
+};
+const updateProblemReportCharacterCount = () => {
+  els.problemReportCharacterCount.textContent = String(els.problemReportDescription.value.length);
+};
+els.problemReportLinks.forEach((link) => {
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    problemReportTrigger = link;
+    els.problemReportFeedback.textContent = "";
+    els.problemReportFeedback.className = "problem-report-feedback";
+    els.problemReportPanel.scrollTop = 0;
+    updateProblemReportCharacterCount();
+    openPopupFrom(els.problemReportDialog, link, els.problemReportType);
+  });
+});
+els.problemReportDescription.addEventListener("input", () => {
+  els.problemReportDescription.setCustomValidity("");
+  updateProblemReportCharacterCount();
+});
+els.problemReportBackButton.addEventListener("click", closeProblemReportDialog);
+els.problemReportDialog.addEventListener("click", (event) => {
+  if (event.target === els.problemReportDialog) {
+    closeProblemReportDialog();
+  }
+});
+els.problemReportForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const description = els.problemReportDescription.value.trim();
+  els.problemReportDescription.setCustomValidity(
+    description.length < 20 ? "Please enter at least 20 characters." : "",
+  );
+  if (!els.problemReportForm.reportValidity()) return;
+
+  els.problemReportSubmitButton.disabled = true;
+  els.problemReportSubmitButton.textContent = "Sending...";
+  els.problemReportFeedback.className = "problem-report-feedback";
+  els.problemReportFeedback.textContent = "Sending your report...";
+  try {
+    const response = await fetch(problemReportEndpoint, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bugType: els.problemReportType.value,
+        description,
+        email: els.problemReportEmail.value.trim(),
+        website: els.problemReportWebsite.value,
+        page: window.location.href,
+        commit: COMMIT_ID,
+        userAgent: navigator.userAgent,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "The report could not be sent.");
+    }
+    els.problemReportForm.reset();
+    updateProblemReportCharacterCount();
+    els.problemReportFeedback.className = "problem-report-feedback is-success";
+    els.problemReportFeedback.textContent = data.message || "Your report was sent. Thank you.";
+  } catch (error) {
+    els.problemReportFeedback.className = "problem-report-feedback is-error";
+    els.problemReportFeedback.textContent = error.message;
+  } finally {
+    els.problemReportSubmitButton.disabled = false;
+    els.problemReportSubmitButton.textContent = "Submit";
+  }
+});
 els.emustarCopyShareButton.addEventListener("click", async () => {
   const shareUrl = els.emustarShareUrl.value;
   if (!shareUrl) return;
@@ -4622,6 +4754,9 @@ document.addEventListener("keydown", (event) => {
     }
     if (!els.nebulaConflictDialog.hidden) {
       closeNebulaConflictDialog();
+    }
+    if (!els.problemReportDialog.hidden) {
+      closeProblemReportDialog();
     }
   }
 });
