@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="nebula_background">#071019</color>
+    <color name="nebula_panel">#0D1A26</color>
+    <color name="nebula_cyan">#43D8FF</color>
+    <color name="nebula_green">#A7ED43</color>
+    <color name="nebula_yellow">#FFE34F</color>
+    <color name="nebula_text">#F4F8FC</color>
+    <color name="nebula_muted">#9BAFC1</color>
+</resources>

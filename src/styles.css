@@ -2757,6 +2757,15 @@ input[type="text"] {
   display: none !important;
 }
 
+.mobile-apk-link {
+  display: none;
+}
+
+.mobile-public .mobile-apk-link {
+  display: inline;
+  color: #a7ed43;
+}
+
 .android-spec-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
