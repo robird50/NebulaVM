@@ -95,10 +95,20 @@ export default async (request, context = {}) => {
     });
     return json(200, { ok: true, message: "Your report was sent. Thank you." });
   } catch (error) {
+    console.error("NebulaVM problem report delivery failed.", {
+      code: error?.code || null,
+      command: error?.command || null,
+      responseCode: error?.responseCode || null,
+      message: error?.message || String(error),
+    });
+    const gmailAuthenticationFailed =
+      error?.code === "EAUTH" || Number(error?.responseCode) === 535;
     return json(Number(error.statusCode) || 500, {
       ok: false,
       error: error.statusCode
         ? error.message
+        : gmailAuthenticationFailed
+          ? "Gmail rejected the configured sender account or app password."
         : "The report could not be sent. Please try again later.",
     });
   }
