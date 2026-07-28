@@ -14,6 +14,10 @@ const STORE_NAME = "nebulavm-problem-report-limits";
 const MAX_REPORTS_PER_HOUR = 5;
 const HOUR_MS = 60 * 60 * 1000;
 const PROFANITY_LOCK_REASON = "profane language";
+const OFFICIAL_ORIGINS = new Set([
+  "https://nebulavm.online",
+  "https://www.nebulavm.online",
+]);
 
 const json = (status, payload) =>
   new Response(JSON.stringify(payload), {
@@ -72,8 +76,11 @@ export default async (request, context = {}) => {
   }
 
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
-    return json(403, { ok: false, error: "Cross-origin reports are not allowed." });
+  if (origin && !OFFICIAL_ORIGINS.has(origin)) {
+    return json(403, {
+      ok: false,
+      error: "Can't report right now. Reason: security feature outdated",
+    });
   }
 
   let moderationLockoutUntil = null;

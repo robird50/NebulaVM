@@ -23,6 +23,9 @@ const MOBILE_DEV_LOCK_MS = 5 * 60 * 1000;
 const MOBILE_PUBLIC_RELEASE = true;
 const MOBILE_DEV_GATE_ENABLED = !MOBILE_PUBLIC_RELEASE;
 const hostedLauncherHostnames = new Set(["nebulavm.online", "www.nebulavm.online"]);
+const isHistoricalNetlifyDeploy =
+  /\.netlify\.app$/i.test(window.location.hostname) &&
+  !hostedLauncherHostnames.has(window.location.hostname);
 const isNetlifyLauncher =
   /\.netlify\.app$/i.test(window.location.hostname) || hostedLauncherHostnames.has(window.location.hostname);
 
@@ -4935,6 +4938,8 @@ const problemReportEndpoint = isNetlifyLauncher
   ? "/.netlify/functions/report-problem"
   : "/api/report-problem";
 const problemReportLockedLabel = "Can\u2019t report now. Reason: profane language.";
+const problemReportOutdatedLabel =
+  "Can\u2019t report right now. Reason: security feature outdated";
 let problemReportTrigger = null;
 let problemReportLockedUntil = 0;
 let problemReportLockTimer = null;
@@ -4945,7 +4950,8 @@ const closeProblemReportDialog = () => {
 const updateProblemReportCharacterCount = () => {
   els.problemReportCharacterCount.textContent = String(els.problemReportDescription.value.length);
 };
-const problemReportingIsLocked = () => problemReportLockedUntil > Date.now();
+const problemReportingIsLocked = () =>
+  isHistoricalNetlifyDeploy || problemReportLockedUntil > Date.now();
 const problemReportLockLabel = () => {
   const remainingSeconds = Math.max(
     0,
@@ -4957,10 +4963,13 @@ const problemReportLockLabel = () => {
 };
 const renderProblemReportPrivilege = () => {
   const locked = problemReportingIsLocked();
+  const disabledLabel = isHistoricalNetlifyDeploy
+    ? problemReportOutdatedLabel
+    : problemReportLockLabel();
   els.problemReportLinks.forEach((link) => {
     link.dataset.reportLabel ||= link.textContent;
     link.dataset.reportHref ||= link.getAttribute("href") || "#report-problem";
-    link.textContent = locked ? problemReportLockLabel() : link.dataset.reportLabel;
+    link.textContent = locked ? disabledLabel : link.dataset.reportLabel;
     link.classList.toggle("is-disabled", locked);
     link.setAttribute("aria-disabled", String(locked));
     if (locked) {
@@ -4975,7 +4984,7 @@ const renderProblemReportPrivilege = () => {
 
   window.clearTimeout(problemReportLockTimer);
   problemReportLockTimer = null;
-  if (locked) {
+  if (locked && !isHistoricalNetlifyDeploy) {
     problemReportLockTimer = window.setTimeout(() => {
       if (problemReportingIsLocked()) {
         renderProblemReportPrivilege();
@@ -4988,6 +4997,10 @@ const renderProblemReportPrivilege = () => {
   }
 };
 const applyProblemReportPrivilege = (data = {}) => {
+  if (isHistoricalNetlifyDeploy) {
+    renderProblemReportPrivilege();
+    return;
+  }
   const lockoutUntil = Date.parse(data.lockoutUntil || "");
   problemReportLockedUntil =
     data.canReport === false && Number.isFinite(lockoutUntil) && lockoutUntil > Date.now()
@@ -4996,6 +5009,10 @@ const applyProblemReportPrivilege = (data = {}) => {
   renderProblemReportPrivilege();
 };
 const refreshProblemReportPrivilege = async () => {
+  if (isHistoricalNetlifyDeploy) {
+    renderProblemReportPrivilege();
+    return;
+  }
   try {
     const response = await fetch(problemReportEndpoint, {
       method: "GET",
@@ -5034,7 +5051,9 @@ els.problemReportForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (problemReportingIsLocked()) {
     els.problemReportFeedback.className = "problem-report-feedback is-error";
-    els.problemReportFeedback.textContent = problemReportLockedLabel;
+    els.problemReportFeedback.textContent = isHistoricalNetlifyDeploy
+      ? problemReportOutdatedLabel
+      : problemReportLockedLabel;
     return;
   }
   const description = els.problemReportDescription.value.trim();
