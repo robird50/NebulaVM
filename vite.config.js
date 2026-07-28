@@ -1453,7 +1453,7 @@ const startAndroidEmulator = (sessionId, body = {}) => {
       "-no-audio",
       "-no-boot-anim",
       "-gpu",
-      "swiftshader_indirect",
+      "host",
       "-feature",
       "-BluetoothEmulation",
       "-feature",
