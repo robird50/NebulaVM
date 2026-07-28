@@ -975,16 +975,6 @@ h2 {
   background: #111b27;
 }
 
-.workspace.is-emustar-mode .metric-row .ai-summary-pill {
-  border-color: rgba(255, 228, 94, 0.3);
-  background: #121b24;
-}
-
-.workspace.is-emustar-mode .metric-row .ai-summary-pill::before {
-  background: #ffe45e;
-  color: #171305;
-}
-
 .workspace.is-emustar-mode .terminal-panel {
   border-color: rgba(255, 228, 94, 0.25);
   background: #05090e;
@@ -1967,81 +1957,6 @@ input[type="text"] {
   color: #9ead91;
   background: rgba(167, 232, 79, 0.12);
   box-shadow: none;
-}
-
-.metric-row .ai-summary-pill {
-  width: fit-content;
-  max-width: none;
-  flex: 0 0 auto;
-  gap: 8px;
-  overflow: hidden;
-  border: 1px solid rgba(132, 220, 255, 0.28);
-  background: rgba(20, 39, 54, 0.86);
-  color: #dff7ff;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
-}
-
-.metric-row .ai-summary-pill::before {
-  content: "AI";
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  min-height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: #8ee4d6;
-  color: #052221;
-  font-size: 0.66rem;
-  font-weight: 950;
-}
-
-.ai-summary-stage {
-  position: relative;
-  display: grid;
-  width: var(--summary-text-width, max-content);
-  min-width: var(--summary-text-width, max-content);
-  height: 18px;
-  flex: 0 0 auto;
-  overflow: hidden;
-  transition: width 220ms ease;
-}
-
-.ai-summary-text {
-  grid-area: 1 / 1;
-  display: block;
-  min-width: max-content;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: nowrap;
-  line-height: 18px;
-  opacity: 1;
-  transform: translateY(0);
-  transition:
-    opacity 320ms ease,
-    transform 320ms ease;
-}
-
-.ai-summary-text.is-entering {
-  opacity: 0;
-  transform: translateY(70%);
-}
-
-.ai-summary-text.is-current {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.ai-summary-text.is-leaving {
-  opacity: 0;
-  transform: translateY(70%);
-}
-
-.ai-summary-measure {
-  position: absolute;
-  visibility: hidden;
-  white-space: nowrap;
-  pointer-events: none;
 }
 
 .screen-shell {
@@ -3394,24 +3309,6 @@ pre {
     min-height: 30px;
     padding: 0 8px;
     font-size: 0.72rem;
-  }
-
-  .mobile-dev-bypass .metric-row .ai-summary-pill {
-    max-width: 100%;
-  }
-
-  .mobile-dev-bypass .ai-summary-stage {
-    width: min(var(--summary-text-width, 240px), calc(100vw - 116px));
-    min-width: 0;
-    max-width: calc(100vw - 116px);
-    height: 34px;
-  }
-
-  .mobile-dev-bypass .ai-summary-text {
-    width: 100%;
-    min-width: 0;
-    white-space: normal;
-    line-height: 16px;
   }
 
   .mobile-dev-bypass .screen-shell {

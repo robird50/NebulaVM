@@ -26,7 +26,6 @@ import {
   sha256Hex,
 } from "./lib/mobileDevAccess.mjs";
 import { normalizeStoredIsoOwnerId, storedIsosForOwner } from "./lib/storedIsoOwnership.mjs";
-import { analyzeViewport } from "./lib/viewportAi.mjs";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
@@ -274,7 +273,6 @@ const mobileDevAttempts = new Map();
 const mobileDevMaxAttempts = 5;
 const mobileDevLockMs = 5 * 60 * 1000;
 let mobileDevApprovedDevice = null;
-const viewportAiRequests = new Map();
 
 const configuredMobileDevCodeHash = () => {
   const directHash = String(localEnvValue("NEBULAVM_MOBILE_DEV_CODE_HASH") || "").trim().toLowerCase();
@@ -2425,16 +2423,13 @@ const nativeQemuPlugin = () => ({
       const isHostApi = url.pathname.startsWith("/api/emustar-host/");
       const isMobileDevUnlockApi =
         url.pathname === "/api/mobile-dev-unlock" || url.pathname === "/.netlify/functions/mobile-dev-unlock";
-      const isViewportAiApi =
-        url.pathname === "/api/viewport-ai" || url.pathname === "/.netlify/functions/viewport-ai";
       if (
         !isNativeQemuApi &&
         !isHyperVApi &&
         !isAndroidApi &&
         !isAndroidStudioApi &&
         !isHostApi &&
-        !isMobileDevUnlockApi &&
-        !isViewportAiApi
+        !isMobileDevUnlockApi
       ) {
         next();
         return;
@@ -2455,32 +2450,6 @@ const nativeQemuPlugin = () => ({
           json(res, result.status, result.body, result.headers);
         } catch (error) {
           json(res, 400, { ok: false, error: error.message });
-        }
-        return;
-      }
-
-      if (isViewportAiApi) {
-        try {
-          const now = Date.now();
-          const requestKey = String(req.socket?.remoteAddress || "local");
-          const lastRequest = viewportAiRequests.get(requestKey) || 0;
-          if (now - lastRequest < 2700) {
-            json(res, 429, { ok: false, error: "AI screen analysis is updating too quickly." });
-            return;
-          }
-          viewportAiRequests.set(requestKey, now);
-          const body = await readJsonBody(req);
-          const result = await analyzeViewport({
-            apiKey: localEnvValue("OPENAI_API_KEY"),
-            model: localEnvValue("OPENAI_VIEWPORT_MODEL") || undefined,
-            body,
-          });
-          json(res, 200, { ok: true, ...result });
-        } catch (error) {
-          json(res, Number(error.statusCode) || 500, {
-            ok: false,
-            error: error.message || "AI screen analysis failed.",
-          });
         }
         return;
       }

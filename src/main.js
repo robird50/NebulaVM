@@ -103,12 +103,6 @@ const state = {
   hyperVConsoleFrameUrl: null,
   guestResizeTimer: null,
   lastGuestResize: "",
-  viewportSummaryTimer: null,
-  viewportSummaryAnimationTimer: null,
-  viewportAiBusy: false,
-  viewportAiLastFrameHash: "",
-  viewportAiHistory: [],
-  viewportAiRetryAt: 0,
   hostStagedIsoBase: "",
   hostStagedIsoFileKey: "",
   hostStagedIsoPath: "",
@@ -600,11 +594,6 @@ app.innerHTML = `
               <button class="is-active" type="button" data-android-viewport-mode="device" aria-pressed="true">Device</button>
               <button type="button" data-android-viewport-mode="management" aria-pressed="false">AVD Management</button>
             </div>
-            <span class="ai-summary-pill" id="viewportSummaryMetric" aria-live="polite" title="AI analysis of the visible VM screen">
-              <span class="ai-summary-stage">
-                <span class="ai-summary-text is-current">Waiting for boot media to start</span>
-              </span>
-            </span>
             <span id="ramMetric">128 MB RAM</span>
             <button class="secondary compact-button" id="fullscreenButton" type="button">Fullscreen</button>
           </div>
@@ -855,7 +844,6 @@ const els = {
   keepIsoYesButton: document.querySelector("#keepIsoYesButton"),
   uptimeMetric: document.querySelector("#uptimeMetric"),
   hostMemoryMetric: document.querySelector("#hostMemoryMetric"),
-  viewportSummaryMetric: document.querySelector("#viewportSummaryMetric"),
   ramMetric: document.querySelector("#ramMetric"),
   logOutput: document.querySelector("#logOutput"),
   clearLogButton: document.querySelector("#clearLogButton"),
@@ -2554,9 +2542,6 @@ const adoptRunningHyperVViewport = async (status, base) => {
 
   els.machineTitle.textContent = "EMUSTAR Control Deck";
   setPowerState("EMUSTAR Hyper-V", "running");
-  setViewportSummary(status.vncReady
-    ? "EMUSTAR display is live in the browser"
-    : "EMUSTAR setup is live in the browser");
   updateUptime();
   updateButtons();
   monitorNativeVm();
@@ -2844,246 +2829,6 @@ const updateUptime = () => {
   els.uptimeMetric.textContent = `${minutes}:${seconds}`;
 };
 
-const measureSummaryText = (summary) => {
-  const measure = document.createElement("span");
-  measure.className = "ai-summary-measure";
-  measure.textContent = summary;
-  els.viewportSummaryMetric.append(measure);
-  const width = Math.ceil(measure.getBoundingClientRect().width);
-  measure.remove();
-  return Math.max(42, width);
-};
-
-const setViewportSummary = (summary) => {
-  const stage = els.viewportSummaryMetric.querySelector(".ai-summary-stage");
-  if (!stage) return;
-
-  const cleanSummary = String(summary || "").replace(/\s+/g, " ").trim();
-  if (!cleanSummary) return;
-
-  window.clearTimeout(state.viewportSummaryAnimationTimer);
-  const outgoing =
-    stage.querySelector(".ai-summary-text.is-current") ||
-    [...stage.querySelectorAll(".ai-summary-text")].at(-1);
-  stage
-    .querySelectorAll(".ai-summary-text")
-    .forEach((text) => text !== outgoing && text.remove());
-  stage.style.setProperty("--summary-text-width", `${measureSummaryText(cleanSummary)}px`);
-
-  if (outgoing?.textContent === cleanSummary) {
-    outgoing.className = "ai-summary-text is-current";
-    return;
-  }
-
-  const incoming = document.createElement("span");
-  incoming.className = "ai-summary-text is-entering";
-  incoming.textContent = cleanSummary;
-
-  if (!outgoing) {
-    incoming.classList.remove("is-entering");
-    incoming.classList.add("is-current");
-    stage.replaceChildren(incoming);
-    return;
-  }
-
-  outgoing.classList.remove("is-current", "is-entering");
-  outgoing.classList.add("is-leaving");
-
-  stage.append(incoming);
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      incoming.classList.remove("is-entering");
-      incoming.classList.add("is-current");
-    });
-  });
-
-  state.viewportSummaryAnimationTimer = window.setTimeout(() => {
-    stage
-      .querySelectorAll(".ai-summary-text")
-      .forEach((text) => text !== incoming && text.remove());
-    incoming.className = "ai-summary-text is-current";
-    state.viewportSummaryAnimationTimer = null;
-  }, 420);
-};
-
-const getViewportText = () => {
-  const vgaText = els.screenContainer.querySelector(".vga-text");
-  return [
-    !els.qemuTerminal.hidden ? els.qemuTerminal.textContent : "",
-    vgaText && !vgaText.hidden ? vgaText.textContent : "",
-    !els.nativeDisplay.hidden ? els.nativeDisplay.querySelector(".native-display-status")?.textContent || "" : "",
-  ].join("\n");
-};
-
-const visibleViewportElement = (element) => {
-  if (!element || element.hidden) return false;
-  const rect = element.getBoundingClientRect();
-  return rect.width > 8 && rect.height > 8;
-};
-
-const getVisibleViewportVisual = () => {
-  const roots = [els.androidSurface, els.nativeDisplay, els.screenContainer];
-  for (const root of roots) {
-    if (!root || root.hidden) continue;
-    const images = [...root.querySelectorAll("img")];
-    const image = images.find(
-      (candidate) => {
-        const rect = candidate.getBoundingClientRect();
-        return (
-          visibleViewportElement(candidate) &&
-          rect.width * rect.height > 24_000 &&
-          candidate.complete &&
-          candidate.naturalWidth > 8 &&
-          candidate.naturalHeight > 8
-        );
-      },
-    );
-    if (image) return image;
-
-    const canvas = [...root.querySelectorAll("canvas")].find(
-      (candidate) =>
-        visibleViewportElement(candidate) && candidate.width > 8 && candidate.height > 8,
-    );
-    if (canvas) return canvas;
-  }
-  return null;
-};
-
-const textViewportCanvas = (text) => {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter(Boolean)
-    .slice(-18);
-  if (!lines.length) return null;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = 640;
-  canvas.height = 360;
-  const context = canvas.getContext("2d");
-  if (!context) return null;
-  context.fillStyle = "#05090e";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = "#d9f7ff";
-  context.font = "16px Consolas, monospace";
-  lines.forEach((line, index) => context.fillText(line.slice(0, 74), 16, 26 + index * 18));
-  return canvas;
-};
-
-const hashViewportPixels = (canvas) => {
-  const sample = document.createElement("canvas");
-  sample.width = 48;
-  sample.height = 30;
-  const context = sample.getContext("2d", { willReadFrequently: true });
-  if (!context) return "";
-  context.drawImage(canvas, 0, 0, sample.width, sample.height);
-  const pixels = context.getImageData(0, 0, sample.width, sample.height).data;
-  let hash = 2166136261;
-  for (let index = 0; index < pixels.length; index += 4) {
-    hash ^= pixels[index] >> 4;
-    hash = Math.imul(hash, 16777619);
-    hash ^= pixels[index + 1] >> 4;
-    hash = Math.imul(hash, 16777619);
-    hash ^= pixels[index + 2] >> 4;
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-};
-
-const captureViewportForAi = () => {
-  const source = getVisibleViewportVisual() || textViewportCanvas(getViewportText());
-  if (!source) return null;
-
-  const sourceWidth = source.naturalWidth || source.width;
-  const sourceHeight = source.naturalHeight || source.height;
-  if (!sourceWidth || !sourceHeight) return null;
-
-  const scale = Math.min(1, 560 / Math.max(sourceWidth, sourceHeight));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
-  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
-  const context = canvas.getContext("2d", { alpha: false });
-  if (!context) return null;
-  context.fillStyle = "#000";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  try {
-    context.drawImage(source, 0, 0, canvas.width, canvas.height);
-    const hash = hashViewportPixels(canvas);
-    const image = canvas.toDataURL("image/jpeg", 0.72);
-    return { hash, image };
-  } catch {
-    return null;
-  }
-};
-
-const viewportAiEndpoint = isNetlifyLauncher
-  ? "/.netlify/functions/viewport-ai"
-  : "/api/viewport-ai";
-
-const updateViewportSummary = async () => {
-  if (!els.screenPlaceholder.hidden) {
-    setViewportSummary("Waiting for boot media to start");
-    state.viewportAiLastFrameHash = "";
-    return;
-  }
-
-  if (state.viewportAiBusy || Date.now() < state.viewportAiRetryAt) {
-    return;
-  }
-
-  const capture = captureViewportForAi();
-  if (!capture) {
-    setViewportSummary("AI is waiting for a capturable screen");
-    return;
-  }
-  if (capture.hash === state.viewportAiLastFrameHash) return;
-
-  state.viewportAiBusy = true;
-  try {
-    const context = [
-      els.displayKicker?.textContent,
-      els.machineTitle?.textContent,
-      isAndroidMode() ? `Android viewport mode: ${state.androidViewportMode}` : "",
-      getViewportText(),
-    ]
-      .filter(Boolean)
-      .join(" | ")
-      .slice(0, 1500);
-    const response = await fetch(viewportAiEndpoint, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        image: capture.image,
-        context,
-        previous: state.viewportAiHistory,
-      }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.ok) {
-      const error = new Error(data.error || "AI screen analysis failed.");
-      error.status = response.status;
-      throw error;
-    }
-
-    state.viewportAiLastFrameHash = capture.hash;
-    state.viewportAiRetryAt = 0;
-    if (!data.repeated && data.summary) {
-      state.viewportAiHistory = [...state.viewportAiHistory, data.summary].slice(-5);
-      setViewportSummary(data.summary);
-    }
-  } catch (error) {
-    state.viewportAiRetryAt = Date.now() + (error.status === 429 ? 4_000 : 15_000);
-    setViewportSummary(
-      error.status === 503
-        ? "AI needs backend API configuration"
-        : "AI screen analysis is temporarily unavailable",
-    );
-  } finally {
-    state.viewportAiBusy = false;
-  }
-};
-
 const clearStatsTimer = () => {
   if (state.statsTimer) {
     window.clearInterval(state.statsTimer);
@@ -3165,7 +2910,6 @@ const monitorNativeVm = () => {
         : nativeExitSummary(status.lastExit);
       const runtimeName = state.nativeRuntimeName || nativeRuntimeBrand();
       showNativeDisplayStatus(`${runtimeName} stopped. ${summary}`);
-      setViewportSummary(`${runtimeName} stopped and reported an error`);
       setPowerState(`${runtimeName} stopped`, "off");
       log(`${runtimeName} stopped: ${summary}`);
       state.nativeRuntimeName = null;
@@ -3233,7 +2977,6 @@ const stopEmulator = async () => {
   state.startedAt = null;
   clearStatsTimer();
   updateUptime();
-  setViewportSummary("Waiting for boot media to start");
   setPowerState("Powered off", "off");
   els.screenPlaceholder.hidden = false;
   els.screenContainer.querySelector(".vga-text").textContent = "";
@@ -3251,7 +2994,6 @@ const stopEmulator = async () => {
   if (isAndroidMode()) {
     els.placeholderTitle.textContent = `${androidVersionLabel()} ready`;
     els.placeholderMeta.textContent = "Start Android to open the browser simulator.";
-    setViewportSummary("Android simulator is ready to start");
   }
   updateButtons();
 };
@@ -3285,7 +3027,6 @@ const prepareBootUi = () => {
   clearStatsTimer();
   state.statsTimer = window.setInterval(updateUptime, 1000);
   updateUptime();
-  setViewportSummary("VM display is starting up");
 };
 
 const bootV86 = () => {
@@ -3710,7 +3451,6 @@ const renderAndroidView = () => {
 
   els.androidBackButton.disabled = state.androidView === "home" && state.androidHistory.length <= 1;
   els.machineTitle.textContent = `${version} - ${state.androidView === "home" ? "Home" : state.androidView === "recents" ? "Recent apps" : androidAppNames[state.androidView]}`;
-  setViewportSummary(`${version} ${state.androidView} screen is active`);
 };
 
 const openAndroidView = (view) => {
@@ -3773,7 +3513,6 @@ const startAndroidStudioManagement = () => {
   els.nativeDisplay.hidden = false;
   els.displayKicker.textContent = "AVD Management";
   els.machineTitle.textContent = "Private Android device";
-  setViewportSummary("AVD controls are ready");
 
   const shell = document.createElement("div");
   shell.className = "android-avd-manager";
@@ -3830,7 +3569,6 @@ const startAndroidStudioManagement = () => {
       shell.querySelector("[data-avd-cpu]").textContent = `${data.specs?.cores || 1} core${data.specs?.cores === 1 ? "" : "s"}`;
       shell.querySelector("[data-avd-orientation]").textContent =
         data.orientation === "landscape" ? "16:9 landscape" : "9:16 portrait";
-      setViewportSummary(data.booted ? "Private AVD is running" : "Private AVD is cold booting");
       state.androidStudioTimer = window.setTimeout(pollFrame, 1200);
     } catch (error) {
       shell.querySelector("[data-avd-note]").textContent = `AVD status unavailable: ${error.message}`;
@@ -3862,13 +3600,11 @@ const setAndroidViewportMode = (mode, { force = false } = {}) => {
     els.androidDisplay.hidden = false;
     els.displayKicker.textContent = "Android Emulator";
     els.machineTitle.textContent = `${androidVersionLabel()} - Real device`;
-    setViewportSummary("Android device view is active");
   } else {
     els.androidDisplay.hidden = true;
     els.screenPlaceholder.hidden = false;
     els.displayKicker.textContent = "Android Emulator";
     els.machineTitle.textContent = `${androidVersionLabel()} ready`;
-    setViewportSummary("A private Android device is ready to be created");
   }
   return true;
 };
@@ -4047,7 +3783,6 @@ const refreshNativeAndroidFrame = async (image) => {
       updateUptime();
       els.androidDevice.classList.remove("is-native", "is-paused");
       setPowerState("Android stopped", "off");
-      setViewportSummary("Android stopped during startup");
       if (startupMessage) startupMessage.textContent = `Android stopped: ${summary}`;
       log(`Android stopped: ${summary}`);
       updateButtons();
@@ -4222,7 +3957,6 @@ const bootNativeAndroid = async (status) => {
   els.machineTitle.textContent = `${androidVersionLabel()} - Real device`;
   els.ramMetric.textContent = `${data.specs?.memoryMb || els.androidMemory.value} MB RAM`;
   setPowerState(data.booted ? "Android running" : "Android starting", data.booted ? "running" : "booting");
-  setViewportSummary(data.booted ? "Real Android is live from the host" : "Android Emulator is starting on the host");
   log(
     `${androidVersionLabel()} private AVD created with ${data.specs?.cores || els.androidCores.value} cores, ` +
       `${data.specs?.memoryMb || els.androidMemory.value} MB RAM, and ${orientation === "landscape" ? "16:9" : "9:16"} orientation.`,
@@ -4719,7 +4453,6 @@ const updateBackendUi = () => {
       ? "x86_64 support uses QEMU Wasm and local artifacts from public/qemu."
     : "Legacy x86, 32-bit Linux, DOS, hobby OS, and vintage Windows images work best.";
   if (androidMode && !state.emulator) {
-    setViewportSummary("A private Android device is ready to be created");
     void fetchAndroidJson("status")
       .then(({ data }) => {
         applyAndroidVersionCatalog(data.versions || []);
@@ -4985,5 +4718,3 @@ renderStoredIsoSlots();
 updateBackendUi();
 void connectNetlifyHostRegistry();
 updateButtons();
-updateViewportSummary();
-state.viewportSummaryTimer = window.setInterval(updateViewportSummary, 3000);
