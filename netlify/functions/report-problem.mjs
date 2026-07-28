@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import { getStore } from "@netlify/blobs";
 import nodemailer from "nodemailer";
-import { buildProblemReportEmail, validateProblemReport } from "../../lib/problemReport.mjs";
+import {
+  buildProblemReportEmail,
+  buildProfanityModerationEmail,
+  containsProfanity,
+  validateProblemReport,
+} from "../../lib/problemReport.mjs";
 
 const STORE_NAME = "nebulavm-problem-report-limits";
 const MAX_REPORTS_PER_HOUR = 3;
@@ -73,7 +78,10 @@ export default async (request, context = {}) => {
     const store = getStore(STORE_NAME);
     const key = rateLimitKey(request, context);
     const limit = await checkRateLimit(store, key);
-    const message = buildProblemReportEmail(report);
+    const moderated = containsProfanity(report.description);
+    const message = moderated
+      ? buildProfanityModerationEmail()
+      : buildProblemReportEmail(report);
     const transport = nodemailer.createTransport({
       service: "gmail",
       auth: {
@@ -83,8 +91,8 @@ export default async (request, context = {}) => {
     });
     await transport.sendMail({
       from: `"NebulaVM Problem Reports" <${gmailUser}>`,
-      to: destination,
-      replyTo: report.email,
+      to: moderated ? report.email : destination,
+      ...(moderated ? {} : { replyTo: report.email }),
       subject: message.subject,
       text: message.text,
       html: message.html,
@@ -93,7 +101,13 @@ export default async (request, context = {}) => {
       startedAt: limit.startedAt,
       count: Number(limit.count || 0) + 1,
     });
-    return json(200, { ok: true, message: "Your report was sent. Thank you." });
+    return json(200, {
+      ok: true,
+      moderated,
+      message: moderated
+        ? "Your report was not submitted because it contained inappropriate language. Check your email."
+        : "Your report was sent. Thank you.",
+    });
   } catch (error) {
     console.error("NebulaVM problem report delivery failed.", {
       code: error?.code || null,

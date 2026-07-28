@@ -27,7 +27,12 @@ import {
   sha256Hex,
 } from "./lib/mobileDevAccess.mjs";
 import { normalizeStoredIsoOwnerId, storedIsosForOwner } from "./lib/storedIsoOwnership.mjs";
-import { buildProblemReportEmail, validateProblemReport } from "./lib/problemReport.mjs";
+import {
+  buildProblemReportEmail,
+  buildProfanityModerationEmail,
+  containsProfanity,
+  validateProblemReport,
+} from "./lib/problemReport.mjs";
 import { getCommitHistory } from "./lib/commitHistory.mjs";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
@@ -2555,20 +2560,29 @@ const nativeQemuPlugin = () => ({
             throw error;
           }
           const report = validateProblemReport(await readJsonBody(req));
-          const message = buildProblemReportEmail(report);
+          const moderated = containsProfanity(report.description);
+          const message = moderated
+            ? buildProfanityModerationEmail()
+            : buildProblemReportEmail(report);
           const transport = nodemailer.createTransport({
             service: "gmail",
             auth: { user: gmailUser, pass: gmailAppPassword },
           });
           await transport.sendMail({
             from: `"NebulaVM Problem Reports" <${gmailUser}>`,
-            to: destination,
-            replyTo: report.email,
+            to: moderated ? report.email : destination,
+            ...(moderated ? {} : { replyTo: report.email }),
             subject: message.subject,
             text: message.text,
             html: message.html,
           });
-          json(res, 200, { ok: true, message: "Your report was sent. Thank you." });
+          json(res, 200, {
+            ok: true,
+            moderated,
+            message: moderated
+              ? "Your report was not submitted because it contained inappropriate language. Check your email."
+              : "Your report was sent. Thank you.",
+          });
         } catch (error) {
           json(res, Number(error.statusCode) || 500, {
             ok: false,
