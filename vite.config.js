@@ -1677,11 +1677,11 @@ const androidEmulatorFrame = async (sessionId) => {
       runtime.frameCaptureFailureCount = 0;
       runtime.awake = false;
       runtime.configured = false;
-      await runAndroidToolAsync("adb", ["-s", serial, "reboot"], { timeout: 8000 }).catch(() => {});
-      runtime.output = `${runtime.output}\nNebulaVM restarted Android after its display pipeline stopped responding.`.slice(
-        -12000,
+      await releaseAndroidRuntime(
+        runtime,
+        "Android display stopped responding after boot, so NebulaVM reset the session.",
       );
-      throw new Error("Android display stalled and is restarting automatically.");
+      throw new Error("Android display stalled. The session was reset; press Start Android to try again.");
     }
     // Older Android releases cannot stream screencap output and may mount
     // /sdcard read-only, but /data/local/tmp remains available over ADB.
