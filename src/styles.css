@@ -2760,9 +2760,12 @@ input[type="text"] {
   line-height: 1.45;
 }
 
-.mobile-public .emulator-field,
 .mobile-public .android-view-switch {
   display: none !important;
+}
+
+.emulator-menu-option[hidden] {
+  display: none;
 }
 
 .mobile-apk-link {

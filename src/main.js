@@ -313,8 +313,8 @@ app.innerHTML = `
 
           <section class="android-config full-span" id="androidConfig" hidden>
             <p class="android-public-limits">
-              Public mobile mode: Android only, adaptive RAM, up to 2 CPU cores, 4 GB storage,
-              portrait display, Device view, and a 20-minute session limit.
+              Public mobile mode: Android or Remote VM. Android uses adaptive RAM, up to 2 CPU
+              cores, 4 GB storage, portrait Device view, and a 20-minute session limit.
             </p>
             <label class="field full-span">
               <span>Genuine Android system image</span>
@@ -725,7 +725,7 @@ app.innerHTML = `
           <h3>Compatibility</h3>
           <details><summary>Does NebulaVM work on Chromebooks?</summary><p>Yes, a Chromebook can act as the browser client. Host-backed emulators still run on the connected Windows host, which must remain powered on, online, and running NebulaVM Host.</p></details>
           <details><summary>Can I use NebulaVM on Windows, macOS, or Linux?</summary><p>The web interface works in supported browsers on all three. Native host features currently depend on the runtimes available and configured on the host; EMUSTAR and the current Android host are Windows-focused.</p></details>
-          <details><summary>Does it work on mobile devices?</summary><p>Yes, the public mobile build provides a restricted Android-only experience for modern phones and tablets. It remains experimental, uses lower host resource limits, and does not include ISO, EMUSTAR, QEMU, or AVD Management controls.</p></details>
+          <details><summary>Does it work on mobile devices?</summary><p>Yes, the public mobile build provides restricted Android and Remote VM modes for modern phones and tablets. Android remains experimental and uses lower host resource limits. ISO, EMUSTAR, QEMU, and AVD Management controls are unavailable on public mobile.</p></details>
           <details><summary>Which browsers are supported?</summary><p>Current Chromium-based browsers such as Chrome and Edge provide the best-tested experience. Other modern browsers may work, but fullscreen, large-file handling, keyboard capture, and streamed input can behave differently.</p></details>
         </section>
 
@@ -2823,6 +2823,8 @@ const isNativeArm64Mode = () => isNativeWindowsArm64Mode() || isNativeUbuntuArm6
 const isNativeMode = () => isNativeX64Mode() || isNativeArm64Mode();
 const isRemoteMode = () => els.emulatorMode.value === "remote-vm";
 const isAndroidMode = () => els.emulatorMode.value === "android";
+const isPublicMobileModeAllowed = (value = els.emulatorMode.value) =>
+  value === "android" || value === "remote-vm";
 const isNativeQemuMode = () => isStandaloneQemuMode();
 const isQemuMode = () => isBrowserQemuMode() || isNativeQemuMode();
 const isExternalMode = () => isQemuMode() || isHyperVMode() || isRemoteMode();
@@ -2927,9 +2929,17 @@ const syncEmulatorDropdown = () => {
         : "/assets/nebulavm-emulator-icon.png";
 
   els.emulatorMenuOptions.forEach((option) => {
+    const allowedOnMobile = !isPublicMobileClient || isPublicMobileModeAllowed(option.dataset.emulatorOption);
+    option.hidden = !allowedOnMobile;
+    option.disabled = !allowedOnMobile;
     const selected = option.dataset.emulatorOption === selectedValue;
     option.classList.toggle("is-selected", selected);
     option.setAttribute("aria-selected", String(selected));
+  });
+  [...els.emulatorMode.options].forEach((option) => {
+    const allowedOnMobile = !isPublicMobileClient || isPublicMobileModeAllowed(option.value);
+    option.hidden = !allowedOnMobile;
+    option.disabled = !allowedOnMobile;
   });
 };
 
@@ -4240,10 +4250,10 @@ const bootAndroid = async () => {
 };
 
 const bootEmulator = async () => {
-  if (isPublicMobileClient && !isAndroidMode()) {
+  if (isPublicMobileClient && !isPublicMobileModeAllowed()) {
     els.emulatorMode.value = "android";
     updateBackendUi();
-    log("Public mobile mode supports Android only.");
+    log("Public mobile mode supports Android and Remote VM only.");
     return;
   }
   if (!isAndroidMode() && !isNativeMode() && !isRemoteMode() && !state.isoFile) return;
@@ -4547,7 +4557,7 @@ const updateBrowserQemuCapabilities = async () => {
 };
 
 const updateBackendUi = () => {
-  if (isPublicMobileClient && els.emulatorMode.value !== "android") {
+  if (isPublicMobileClient && !isPublicMobileModeAllowed()) {
     els.emulatorMode.value = "android";
   }
   const qemuMode = isQemuMode();
