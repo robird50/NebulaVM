@@ -38,6 +38,7 @@ import {
 import { getCommitHistory } from "./lib/commitHistory.mjs";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
+const reportGmailAccount = "nebulavmsupport@gmail.com";
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
 const publicUrlPath = resolve(workspaceDir, ".nebulavm-public-url");
 const guestCredentialsPath = resolve(workspaceDir, ".nebulavm-guest-credentials.json");
@@ -2652,14 +2653,14 @@ const nativeQemuPlugin = () => ({
             error.statusCode = 429;
             throw error;
           }
-          const gmailUser = String(localEnvValue("NEBULAVM_REPORT_GMAIL_USER") || "").trim();
+          const gmailUser = reportGmailAccount;
           const gmailAppPassword = String(
             localEnvValue("NEBULAVM_REPORT_GMAIL_APP_PASSWORD") || "",
           ).replace(/\s+/g, "");
           const destination = String(
-            localEnvValue("NEBULAVM_REPORT_TO") || "nebulavmsupport@gmail.com",
+            localEnvValue("NEBULAVM_REPORT_TO") || reportGmailAccount,
           ).trim();
-          if (!gmailUser || !gmailAppPassword) {
+          if (!gmailAppPassword) {
             const error = new Error("Problem reporting is not configured yet.");
             error.statusCode = 503;
             throw error;

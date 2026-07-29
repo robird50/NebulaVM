@@ -11,6 +11,7 @@ import {
 } from "../../lib/problemReport.mjs";
 
 const STORE_NAME = "nebulavm-problem-report-limits";
+const REPORT_GMAIL_ACCOUNT = "nebulavmsupport@gmail.com";
 const MAX_REPORTS_PER_HOUR = 5;
 const HOUR_MS = 60 * 60 * 1000;
 const PROFANITY_LOCK_REASON = "profane language";
@@ -100,13 +101,13 @@ export default async (request, context = {}) => {
       });
     }
 
-    const gmailUser = String(process.env.NEBULAVM_REPORT_GMAIL_USER || "").trim();
+    const gmailUser = REPORT_GMAIL_ACCOUNT;
     const gmailAppPassword = String(process.env.NEBULAVM_REPORT_GMAIL_APP_PASSWORD || "")
       .replace(/\s+/g, "");
     const destination = String(
-      process.env.NEBULAVM_REPORT_TO || "nebulavmsupport@gmail.com",
+      process.env.NEBULAVM_REPORT_TO || REPORT_GMAIL_ACCOUNT,
     ).trim();
-    if (!gmailUser || !gmailAppPassword) {
+    if (!gmailAppPassword) {
       const error = new Error("Problem reporting is not configured yet.");
       error.statusCode = 503;
       throw error;
