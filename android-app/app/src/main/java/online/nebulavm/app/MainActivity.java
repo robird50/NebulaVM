@@ -82,20 +82,20 @@ public final class MainActivity extends Activity {
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.nebulavm_logo);
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        header.addView(logo, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        header.addView(logo, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
         LinearLayout titleBox = column();
-        titleBox.setPadding(dp(10), 0, 0, 0);
-        TextView kicker = text("NATIVE ANDROID CLIENT", 11, GREEN, true);
-        TextView title = text("NebulaVM", 27, TEXT, true);
+        titleBox.setPadding(dp(9), 0, 0, 0);
+        TextView kicker = text("NATIVE ANDROID CLIENT", 10, GREEN, true);
+        TextView title = text("NebulaVM", 24, TEXT, true);
         titleBox.addView(kicker);
         titleBox.addView(title);
         header.addView(titleBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         root.addView(header);
 
         TextView warning = text(
-                "EXPERIMENTAL  •  Android only  •  20-minute private sessions",
-                12, Color.rgb(16, 18, 20), true);
+                "EXPERIMENTAL  /  Android only  /  20-minute private sessions",
+                11, Color.rgb(16, 18, 20), true);
         warning.setGravity(Gravity.CENTER);
         warning.setPadding(dp(8), dp(7), dp(8), dp(7));
         warning.setBackgroundColor(Color.rgb(255, 89, 89));
@@ -105,7 +105,7 @@ public final class MainActivity extends Activity {
         root.addView(warning, warningParams);
 
         LinearLayout statusRow = row();
-        statusText = text("Finding your NebulaVM host…", 13, TEXT, true);
+        statusText = text("Finding your NebulaVM host...", 13, TEXT, true);
         statusText.setBackgroundResource(R.drawable.panel);
         statusText.setPadding(dp(10), dp(8), dp(10), dp(8));
         statusRow.addView(statusText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
@@ -120,25 +120,35 @@ public final class MainActivity extends Activity {
         hostMemoryText.setPadding(0, dp(6), 0, dp(6));
         root.addView(hostMemoryText);
 
-        LinearLayout controls = row();
-        versionSpinner = new Spinner(this);
-        versionSpinner.setEnabled(false);
-        controls.addView(versionSpinner, new LinearLayout.LayoutParams(0, dp(48), 1));
+        TextView versionLabel = text("Android version", 11, MUTED, true);
+        versionLabel.setPadding(0, dp(2), 0, dp(4));
+        root.addView(versionLabel);
 
+        versionSpinner = new Spinner(this);
+        versionSpinner.setBackgroundResource(R.drawable.panel);
+        versionSpinner.setPadding(dp(10), 0, dp(10), 0);
+        versionSpinner.setEnabled(false);
+        root.addView(versionSpinner, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
+
+        LinearLayout controls = row();
         startButton = button("Start Android", true);
         startButton.setEnabled(false);
         startButton.setOnClickListener(v -> startAndroid());
-        LinearLayout.LayoutParams startParams = new LinearLayout.LayoutParams(dp(124), dp(48));
-        startParams.setMargins(dp(8), 0, 0, 0);
+        LinearLayout.LayoutParams startParams = new LinearLayout.LayoutParams(0, dp(48), 2);
+        startParams.setMargins(0, 0, dp(4), 0);
         controls.addView(startButton, startParams);
 
         stopButton = button("Stop", false);
         stopButton.setEnabled(false);
         stopButton.setOnClickListener(v -> stopAndroid(true));
-        LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(dp(72), dp(48));
-        stopParams.setMargins(dp(8), 0, 0, 0);
+        LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(0, dp(48), 1);
+        stopParams.setMargins(dp(4), 0, 0, 0);
         controls.addView(stopButton, stopParams);
-        root.addView(controls);
+        LinearLayout.LayoutParams controlsParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        controlsParams.setMargins(0, dp(8), 0, 0);
+        root.addView(controls, controlsParams);
 
         console = new ConsoleView();
         console.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -152,9 +162,9 @@ public final class MainActivity extends Activity {
 
         LinearLayout nav = row();
         nav.setGravity(Gravity.CENTER);
-        Button back = navButton("◀");
-        Button home = navButton("●");
-        Button recents = navButton("■");
+        Button back = navButton("\u25C0");
+        Button home = navButton("\u25CF");
+        Button recents = navButton("\u25A0");
         back.setOnClickListener(v -> sendInput("{\"type\":\"key\",\"key\":\"back\"}"));
         home.setOnClickListener(v -> sendInput("{\"type\":\"key\",\"key\":\"home\"}"));
         recents.setOnClickListener(v -> sendInput("{\"type\":\"key\",\"key\":\"recents\"}"));
@@ -164,7 +174,7 @@ public final class MainActivity extends Activity {
         root.addView(nav);
 
         TextView limits = text(
-                "Adaptive RAM • up to 2 cores • 4 GB storage • portrait Device view",
+                "Adaptive RAM  /  up to 2 cores  /  4 GB storage  /  portrait",
                 11, MUTED, false);
         limits.setGravity(Gravity.CENTER);
         limits.setPadding(0, dp(7), 0, 0);
@@ -173,7 +183,7 @@ public final class MainActivity extends Activity {
     }
 
     private void discoverHost() {
-        setBusy("Finding your NebulaVM host…");
+        setBusy("Finding your NebulaVM host...");
         network.execute(() -> {
             try {
                 HttpResult registry = request("GET", REGISTRY_URL, null, false);
@@ -207,15 +217,29 @@ public final class MainActivity extends Activity {
                 }
             }
             main.post(() -> {
-                ArrayAdapter<String> adapter = new ArrayAdapter<>(
-                        this, android.R.layout.simple_spinner_dropdown_item, labels);
+                ArrayAdapter<String> adapter = new ArrayAdapter<String>(
+                        this, android.R.layout.simple_spinner_dropdown_item, labels) {
+                    @Override
+                    public View getView(int position, View convertView, ViewGroup parent) {
+                        TextView view = (TextView) super.getView(position, convertView, parent);
+                        styleSpinnerText(view, TEXT);
+                        return view;
+                    }
+
+                    @Override
+                    public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                        TextView view = (TextView) super.getDropDownView(position, convertView, parent);
+                        styleSpinnerText(view, Color.rgb(16, 24, 32));
+                        return view;
+                    }
+                };
                 versionSpinner.setAdapter(adapter);
                 versionSpinner.setEnabled(!labels.isEmpty());
                 startButton.setEnabled(!labels.isEmpty());
                 progress.setVisibility(View.GONE);
                 statusText.setText(labels.isEmpty()
                         ? "No Android system images are installed on the host"
-                        : "Host ready • choose a real Android version");
+                        : "Host ready - choose a real Android version");
             });
         } catch (Exception error) {
             showError("Android host unavailable. Check the Windows host and try again.");
@@ -225,7 +249,7 @@ public final class MainActivity extends Activity {
     private void startAndroid() {
         if (versions.isEmpty() || versionSpinner.getSelectedItemPosition() < 0) return;
         int version = versions.get(versionSpinner.getSelectedItemPosition());
-        setBusy("Starting Android " + version + "…");
+        setBusy("Starting Android " + version + "...");
         startButton.setEnabled(false);
         versionSpinner.setEnabled(false);
         network.execute(() -> {
@@ -270,10 +294,10 @@ public final class MainActivity extends Activity {
                     if (bitmap == null) throw new IllegalStateException("The host returned an empty frame.");
                     main.post(() -> {
                         console.setFrame(bitmap);
-                        statusText.setText("Android running • private host session");
+                        statusText.setText("Android running - private host session");
                     });
                 } catch (Exception ignored) {
-                    main.post(() -> statusText.setText("Android is still starting…"));
+                    main.post(() -> statusText.setText("Android is still starting..."));
                 } finally {
                     frameInFlight.set(false);
                     if (running && foreground) scheduleFrame(1100);
@@ -287,7 +311,7 @@ public final class MainActivity extends Activity {
         running = false;
         frameInFlight.set(false);
         main.removeCallbacksAndMessages(null);
-        setBusy("Ending private Android session…");
+        setBusy("Ending private Android session...");
         network.execute(() -> {
             try {
                 request("POST", hostBase + "/api/android-emulator/stop", "{}", true);
@@ -299,7 +323,7 @@ public final class MainActivity extends Activity {
                 stopButton.setEnabled(false);
                 startButton.setEnabled(true);
                 versionSpinner.setEnabled(true);
-                if (showReady) statusText.setText("Session ended • host ready");
+                if (showReady) statusText.setText("Session ended - host ready");
             });
         });
     }
@@ -454,10 +478,21 @@ public final class MainActivity extends Activity {
 
     private Button navButton(String label) {
         Button button = button(label, false);
+        button.setTextSize(18);
+        button.setContentDescription(
+                "\u25C0".equals(label) ? "Back" : "\u25CF".equals(label) ? "Home" : "Recent apps");
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1);
         params.setMargins(dp(4), 0, dp(4), 0);
         button.setLayoutParams(params);
         return button;
+    }
+
+    private void styleSpinnerText(TextView view, int color) {
+        view.setTextColor(color);
+        view.setTextSize(15);
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        view.setPadding(dp(12), 0, dp(12), 0);
+        view.setSingleLine(true);
     }
 
     private int dp(int value) {
