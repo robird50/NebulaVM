@@ -2117,10 +2117,11 @@ const HOST_UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 const HOST_UPLOAD_MAX_ATTEMPTS = 5;
 
 const createHostUploadId = (file) => {
-  const randomId = crypto.randomUUID
-    ? crypto.randomUUID()
-    : Array.from(crypto.getRandomValues(new Uint8Array(12)), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `${Date.now()}-${randomId}-${file.size}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const name = String(file.name || "browser-upload.iso")
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 40);
+  return `${file.size}-${file.lastModified || 0}-${name}`.slice(0, 80);
 };
 
 const wait = (ms) => new Promise((resolveWait) => window.setTimeout(resolveWait, ms));
@@ -2163,8 +2164,39 @@ const uploadBrowserIsoChunkToBase = (base, file, uploadId, start, end, onProgres
     xhr.send(file.slice(start, end));
   });
 
+const fetchBrowserIsoUploadStatus = async (base, file, uploadId) => {
+  const response = await fetch(`${base}/api/emustar-host/upload-iso-status`, {
+    method: "GET",
+    headers: {
+      ...(state.nativeHostToken ? { Authorization: `Bearer ${state.nativeHostToken}` } : {}),
+      "X-NebulaVM-Filename": encodeURIComponent(file.name),
+      "X-NebulaVM-Device": state.nativeDeviceId,
+      "X-NebulaVM-Session": state.nativeSessionId,
+      "X-NebulaVM-Upload-Id": uploadId,
+      "X-NebulaVM-Total-Bytes": String(file.size),
+    },
+    cache: "no-store",
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || data.message || `Host upload status failed with HTTP ${response.status}.`);
+  }
+  return data;
+};
+
 const uploadBrowserIsoToBase = async (base, file, uploadId, onProgress) => {
-  let uploadedBytes = 0;
+  const initialStatus = await fetchBrowserIsoUploadStatus(base, file, uploadId);
+  if (initialStatus.complete && initialStatus.isoPath) return initialStatus;
+
+  let uploadedBytes = Math.min(file.size, Number(initialStatus.bytesReceived) || 0);
+  if (uploadedBytes > 0) {
+    onProgress?.({
+      bytesUploaded: uploadedBytes,
+      totalBytes: file.size,
+      percent: Math.max(0, Math.min(100, (uploadedBytes / file.size) * 100)),
+      resumed: true,
+    });
+  }
 
   while (uploadedBytes < file.size) {
     const start = uploadedBytes;
@@ -2202,6 +2234,8 @@ const uploadBrowserIsoToBase = async (base, file, uploadId, onProgress) => {
     }
   }
 
+  const finalStatus = await fetchBrowserIsoUploadStatus(base, file, uploadId);
+  if (finalStatus.complete && finalStatus.isoPath) return finalStatus;
   throw new Error("Host upload finished without a final ISO path.");
 };
 
@@ -2248,6 +2282,7 @@ const updateHostStagingProgress = ({ bytesUploaded = 0, totalBytes = 0, startedA
   const percent = totalBytes > 0 ? Math.max(0, Math.min(100, (bytesUploaded / totalBytes) * 100)) : 0;
   const elapsedSeconds = Math.max(0.001, (performance.now() - startedAt) / 1000);
   const speed = complete ? 0 : bytesUploaded / elapsedSeconds;
+  const finalizing = !complete && totalBytes > 0 && bytesUploaded >= totalBytes;
   const percentText = complete ? "100%" : `${Math.floor(percent)}%`;
   const uploaded = formatBytes(bytesUploaded);
   const total = totalBytes ? ` / ${formatBytes(totalBytes)}` : "";
@@ -2255,8 +2290,10 @@ const updateHostStagingProgress = ({ bytesUploaded = 0, totalBytes = 0, startedA
   els.hostStagingProgress.hidden = false;
   els.hostStagingProgressFill.style.width = `${percent}%`;
   els.hostStagingProgress.querySelector(".host-staging-track").setAttribute("aria-valuenow", String(Math.round(percent)));
-  els.hostStagingProgressText.textContent = `${percentText} - ${uploaded}${total}`;
-  els.hostStagingSpeed.textContent = complete ? "Complete" : formatTransferSpeed(speed);
+  els.hostStagingProgressText.textContent = finalizing
+    ? "100% - Finalizing on host..."
+    : `${percentText} - ${uploaded}${total}`;
+  els.hostStagingSpeed.textContent = complete ? "Complete" : finalizing ? "Verifying" : formatTransferSpeed(speed);
 };
 
 const cleanupStagedHostIso = async ({ keepalive = false, silent = false, preserveUploadLock = false } = {}) => {
