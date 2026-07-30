@@ -2115,6 +2115,7 @@ const addStoredIsoFromFile = async (file) => {
 
 const HOST_UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 const HOST_UPLOAD_MAX_ATTEMPTS = 5;
+const HOST_UPLOAD_CONFIRM_ATTEMPTS = 10;
 
 const createHostUploadId = (file) => {
   const name = String(file.name || "browser-upload.iso")
@@ -2184,8 +2185,34 @@ const fetchBrowserIsoUploadStatus = async (base, file, uploadId) => {
   return data;
 };
 
+const confirmBrowserIsoUpload = async (base, file, uploadId, onProgress, attempts = HOST_UPLOAD_CONFIRM_ATTEMPTS) => {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const status = await fetchBrowserIsoUploadStatus(base, file, uploadId);
+      const bytesReceived = Math.min(file.size, Number(status.bytesReceived) || 0);
+      onProgress?.({
+        bytesUploaded: bytesReceived,
+        totalBytes: file.size,
+        percent: Math.max(0, Math.min(100, (bytesReceived / file.size) * 100)),
+        confirming: bytesReceived >= file.size,
+        resumed: bytesReceived > 0 && bytesReceived < file.size,
+      });
+      return status;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await wait(Math.min(5000, 750 * attempt));
+      }
+    }
+  }
+
+  throw lastError || new Error("The host did not confirm the staged ISO.");
+};
+
 const uploadBrowserIsoToBase = async (base, file, uploadId, onProgress) => {
-  const initialStatus = await fetchBrowserIsoUploadStatus(base, file, uploadId);
+  const initialStatus = await confirmBrowserIsoUpload(base, file, uploadId, onProgress, 3);
   if (initialStatus.complete && initialStatus.isoPath) return initialStatus;
 
   let uploadedBytes = Math.min(file.size, Number(initialStatus.bytesReceived) || 0);
@@ -2217,6 +2244,20 @@ const uploadBrowserIsoToBase = async (base, file, uploadId, onProgress) => {
         break;
       } catch (error) {
         lastChunkError = error;
+        try {
+          const status = await confirmBrowserIsoUpload(base, file, uploadId, onProgress, 1);
+          if (status.complete && status.isoPath) return status;
+
+          const confirmedBytes = Math.min(file.size, Number(status.bytesReceived) || 0);
+          if (confirmedBytes > start) {
+            uploadedBytes = confirmedBytes;
+            lastChunkError = null;
+            break;
+          }
+        } catch {
+          // The host may be briefly unreachable while the public tunnel recovers.
+        }
+
         if (attempt < HOST_UPLOAD_MAX_ATTEMPTS) {
           onProgress?.({
             bytesUploaded: start,
@@ -2230,11 +2271,22 @@ const uploadBrowserIsoToBase = async (base, file, uploadId, onProgress) => {
     }
 
     if (lastChunkError) {
+      try {
+        const recovered = await confirmBrowserIsoUpload(base, file, uploadId, onProgress);
+        if (recovered.complete && recovered.isoPath) return recovered;
+        const confirmedBytes = Math.min(file.size, Number(recovered.bytesReceived) || 0);
+        if (confirmedBytes > start) {
+          uploadedBytes = confirmedBytes;
+          continue;
+        }
+      } catch {
+        // Preserve the original chunk failure because it identifies where the transfer dropped.
+      }
       throw new Error(`Host upload dropped at ${Math.floor((start / file.size) * 100)}%. ${lastChunkError.message}`);
     }
   }
 
-  const finalStatus = await fetchBrowserIsoUploadStatus(base, file, uploadId);
+  const finalStatus = await confirmBrowserIsoUpload(base, file, uploadId, onProgress);
   if (finalStatus.complete && finalStatus.isoPath) return finalStatus;
   throw new Error("Host upload finished without a final ISO path.");
 };
