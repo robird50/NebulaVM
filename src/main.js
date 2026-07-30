@@ -3355,6 +3355,7 @@ const bootV86 = () => {
   els.screenContainer.querySelector(".vga-canvas").hidden = false;
   state.emulator = new V86(buildConfig());
   state.running = els.autostart.checked;
+  updateButtons();
 
   state.emulator.add_listener("emulator-ready", () => {
     log("Emulator ready.");
@@ -3409,6 +3410,7 @@ const bootQemuX64 = async () => {
     },
   });
 
+  updateButtons();
   await state.emulator.start();
 };
 
