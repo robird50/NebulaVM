@@ -525,6 +525,8 @@ const storedIsoSnapshot = (item) => ({
   expiresAt: item.expiresAt,
 });
 
+const activeStoredIsos = (items) => items.filter((item) => !item.pendingDelete);
+
 const cleanupStoredIsos = () => {
   const now = Date.now();
   const current = loadStoredIsoManifest();
@@ -532,11 +534,17 @@ const cleanupStoredIsos = () => {
   let changed = false;
 
   for (const item of current) {
-    const expired = Date.parse(item.expiresAt || "") <= now;
+    const expired = item.pendingDelete || Date.parse(item.expiresAt || "") <= now;
     const missing = !item.isoPath || !existsSync(item.isoPath);
     if (expired || missing) {
       if (item.isoPath && existsSync(item.isoPath) && isPathInsideDirectory(item.isoPath, storedIsoDirectory)) {
-        rmSync(item.isoPath, { force: true });
+        try {
+          rmSync(item.isoPath, { force: true });
+        } catch {
+          kept.push({ ...item, pendingDelete: true });
+          changed ||= !item.pendingDelete;
+          continue;
+        }
       }
       changed = true;
       continue;
@@ -555,7 +563,7 @@ const listStoredIsos = (ownerId) => ({
   ok: true,
   limit: storedIsoLimit,
   ttlHours: Math.round(storedIsoTtlMs / 60 / 60 / 1000),
-  items: storedIsosForOwner(cleanupStoredIsos(), ownerId).map(storedIsoSnapshot),
+  items: storedIsosForOwner(activeStoredIsos(cleanupStoredIsos()), ownerId).map(storedIsoSnapshot),
 });
 
 const assertStoredIsoAccess = (req, isoPath) => {
@@ -564,7 +572,7 @@ const assertStoredIsoAccess = (req, isoPath) => {
 
   const ownerId = storedIsoOwnerId(req);
   const resolvedCandidate = resolve(candidatePath).toLowerCase();
-  const target = cleanupStoredIsos().find(
+  const target = activeStoredIsos(cleanupStoredIsos()).find(
     (item) => item.isoPath && resolve(item.isoPath).toLowerCase() === resolvedCandidate,
   );
   if (!target || normalizeStoredIsoOwnerId(target.ownerId) !== ownerId) {
@@ -577,7 +585,7 @@ const assertStoredIsoAccess = (req, isoPath) => {
 const removeStoredIso = (ownerId, id) => {
   const safeId = sanitizeUploadId(id);
   const items = cleanupStoredIsos();
-  const ownerItems = storedIsosForOwner(items, ownerId);
+  const ownerItems = storedIsosForOwner(activeStoredIsos(items), ownerId);
   const target = ownerItems.find((item) => item.id === safeId);
   if (!target) {
     return {
@@ -598,7 +606,7 @@ const removeStoredIso = (ownerId, id) => {
     ok: true,
     removed: true,
     limit: storedIsoLimit,
-    items: storedIsosForOwner(nextItems, ownerId).map(storedIsoSnapshot),
+    items: storedIsosForOwner(activeStoredIsos(nextItems), ownerId).map(storedIsoSnapshot),
   };
 };
 
@@ -618,7 +626,8 @@ const storeBrowserIsoOnHost = (ownerId, body) => {
   const name = sanitizeFilename(body.name || body.fileName || sourcePath.split(/[\\/]/).pop() || "stored.iso");
   const size = Number(body.size) || statSync(sourcePath).size;
   const fileKey = storedIsoFileKey({ fileKey: body.fileKey, name, size });
-  const current = cleanupStoredIsos();
+  const manifestItems = cleanupStoredIsos();
+  const current = activeStoredIsos(manifestItems);
   const ownerItems = storedIsosForOwner(current, ownerId);
   let existing = ownerItems.find(
     (item) => item.fileKey === fileKey || (item.name === name && Number(item.size) === size),
@@ -631,7 +640,7 @@ const storeBrowserIsoOnHost = (ownerId, body) => {
     );
     if (existing) {
       existing.ownerId = ownerId;
-      saveStoredIsoManifest(current);
+      saveStoredIsoManifest(manifestItems);
     }
   }
   if (existing) {
@@ -648,7 +657,7 @@ const storeBrowserIsoOnHost = (ownerId, body) => {
     };
   }
 
-  if (current.length >= storedIsoLimit) {
+  if (ownerItems.length >= storedIsoLimit) {
     return {
       ok: false,
       slotLimitReached: true,
@@ -678,7 +687,7 @@ const storeBrowserIsoOnHost = (ownerId, body) => {
     storedAt: storedAt.toISOString(),
     expiresAt: new Date(storedAt.getTime() + storedIsoTtlMs).toISOString(),
   };
-  const items = [...current, item];
+  const items = [...manifestItems, item];
   saveStoredIsoManifest(items);
 
   return {
