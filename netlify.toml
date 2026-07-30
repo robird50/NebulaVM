@@ -16,6 +16,16 @@
     Cross-Origin-Embedder-Policy = "require-corp"
 
 [[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
   for = "/downloads/*.apk"
   [headers.values]
     Content-Type = "application/vnd.android.package-archive"
