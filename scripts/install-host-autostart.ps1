@@ -3,18 +3,22 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $supervisorPath = Join-Path $PSScriptRoot "start-public-host.ps1"
 $taskName = "NebulaVM Host"
+$interactiveUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+
+if ([string]::IsNullOrWhiteSpace($interactiveUser) -or $interactiveUser -eq "NT AUTHORITY\SYSTEM") {
+  throw "Run this installer from the Windows account that will use NebulaVM Host, not as SYSTEM."
+}
 
 $action = New-ScheduledTaskAction `
   -Execute "powershell.exe" `
   -Argument "-NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$supervisorPath`"" `
   -WorkingDirectory $projectRoot
 
-$startupTrigger = New-ScheduledTaskTrigger -AtStartup
-$startupTrigger.Delay = "PT30S"
-$logonTrigger = New-ScheduledTaskTrigger -AtLogOn
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $interactiveUser
+$logonTrigger.Delay = "PT10S"
 $principal = New-ScheduledTaskPrincipal `
-  -UserId "SYSTEM" `
-  -LogonType ServiceAccount `
+  -UserId $interactiveUser `
+  -LogonType Interactive `
   -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
@@ -27,10 +31,10 @@ $settings = New-ScheduledTaskSettingsSet `
 Register-ScheduledTask `
   -TaskName $taskName `
   -Action $action `
-  -Trigger @($startupTrigger, $logonTrigger) `
+  -Trigger $logonTrigger `
   -Principal $principal `
   -Settings $settings `
-  -Description "Keeps the NebulaVM browser host, Windows VM, and public tunnel available." `
+  -Description "Keeps NebulaVM Host and its hidden interactive display bridges available while this user is signed in." `
   -Force | Out-Null
 
 Start-ScheduledTask -TaskName $taskName

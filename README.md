@@ -81,8 +81,10 @@ Install the startup task from an elevated PowerShell window:
 powershell.exe -ExecutionPolicy Bypass -File scripts\install-host-autostart.ps1
 ```
 
-The task runs as `SYSTEM` at Windows startup, keeps Vite and the tunnel alive,
-and restarts the EMUSTAR VM when it is off.
+The task runs in the installing user's interactive Windows session after sign-in,
+keeps Vite and the tunnel alive, and allows hidden EMUSTAR and Android Studio
+windows to be mirrored into the browser. Keep that Windows user signed in; a
+Session 0 or `SYSTEM` host cannot capture interactive application windows.
 
 ## Windows 11 Guest
 
