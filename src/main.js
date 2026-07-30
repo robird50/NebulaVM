@@ -1782,12 +1782,18 @@ const requestRfbDesktopResize = () => {
 const requestGuestDesktopResize = (reason = "viewport") => {
   requestRfbDesktopResize();
 
-  if (els.emulatorMode.value !== "emustar-hyperv" || state.nativeRuntimeName !== "EMUSTAR" || !state.running) {
+  if (
+    els.emulatorMode.value !== "emustar-hyperv" ||
+    state.nativeRuntimeName !== "EMUSTAR" ||
+    !state.running ||
+    state.hyperVConsoleActive
+  ) {
     return;
   }
 
   window.clearTimeout(state.guestResizeTimer);
   state.guestResizeTimer = window.setTimeout(async () => {
+    if (state.hyperVConsoleActive || !state.running) return;
     const { width, height } = viewportDesktopSize();
     const resizeKey = `${width}x${height}`;
     if (state.lastGuestResize === resizeKey) return;

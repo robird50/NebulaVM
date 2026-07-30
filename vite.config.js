@@ -2028,8 +2028,14 @@ const runPowerShellJson = (label, args, timeoutMs = 30000) =>
     });
   });
 
-const runHyperVConsoleFrame = (contentOnly = false) =>
-  runPowerShellJson(
+let hyperVConsoleFramePromise = null;
+
+const runHyperVConsoleFrame = (contentOnly = false) => {
+  if (hyperVConsoleFramePromise) {
+    return hyperVConsoleFramePromise;
+  }
+
+  hyperVConsoleFramePromise = runPowerShellJson(
     "Hyper-V setup console frame",
     [
       "-NoLogo",
@@ -2044,7 +2050,12 @@ const runHyperVConsoleFrame = (contentOnly = false) =>
       ...(contentOnly ? ["-ContentOnly"] : []),
     ],
     45000,
-  );
+  ).finally(() => {
+    hyperVConsoleFramePromise = null;
+  });
+
+  return hyperVConsoleFramePromise;
+};
 
 const runHyperVConsoleInput = (body) =>
   runPowerShellJson(

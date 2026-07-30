@@ -77,13 +77,17 @@ function Get-ConsoleProcess {
   Get-TargetConsoleProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
 
   Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $VmName | Out-Null
-  $deadline = (Get-Date).AddSeconds(8)
+  $deadline = (Get-Date).AddSeconds(20)
   do {
     Start-Sleep -Milliseconds 350
     $process = Get-TargetConsoleProcesses |
       Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle -like "*$VmName*" } |
       Select-Object -First 1
   } while (-not $process -and (Get-Date) -lt $deadline)
+
+  if (-not $process) {
+    Get-TargetConsoleProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+  }
 
   return $process
 }
