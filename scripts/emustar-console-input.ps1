@@ -34,9 +34,20 @@ namespace NebulaVM {
     public int Bottom;
   }
 
+  public struct POINT {
+    public int X;
+    public int Y;
+  }
+
   public static class NativeConsoleInput {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -148,6 +159,32 @@ function Get-ConsoleBounds {
   }
 }
 
+function Get-ConsoleClientBounds {
+  param([object]$Process)
+
+  $rect = New-Object NebulaVM.RECT
+  $origin = New-Object NebulaVM.POINT
+  if (
+    -not [NebulaVM.NativeConsoleInput]::GetClientRect($Process.MainWindowHandle, [ref]$rect) -or
+    -not [NebulaVM.NativeConsoleInput]::ClientToScreen($Process.MainWindowHandle, [ref]$origin)
+  ) {
+    throw "The Hyper-V setup console content area could not be measured."
+  }
+
+  $width = [math]::Max(0, [int]($rect.Right - $rect.Left))
+  $height = [math]::Max(0, [int]($rect.Bottom - $rect.Top))
+  if ($width -lt 64 -or $height -lt 64) {
+    throw "The Hyper-V setup console content area is too small for pointer control."
+  }
+
+  return [ordered]@{
+    left = [int]$origin.X
+    top = [int]$origin.Y
+    width = $width
+    height = $height
+  }
+}
+
 function Send-ConsoleClick {
   param(
     [object]$Process,
@@ -155,7 +192,11 @@ function Send-ConsoleClick {
   )
 
   Focus-Console -Process $Process
-  $bounds = Get-ConsoleBounds -Process $Process
+  $bounds = if ([bool]$Config.contentOnly) {
+    Get-ConsoleClientBounds -Process $Process
+  } else {
+    Get-ConsoleBounds -Process $Process
+  }
   $sourceWidth = [math]::Max(1.0, [double]$Config.width)
   $sourceHeight = [math]::Max(1.0, [double]$Config.height)
   $relativeX = [math]::Min([math]::Max(0.0, [double]$Config.x), $sourceWidth)

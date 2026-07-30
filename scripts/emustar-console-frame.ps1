@@ -1,6 +1,7 @@
 param(
   [string]$VmName = "NebulaVM-EMUSTAR",
-  [string]$OutputPath = ""
+  [string]$OutputPath = "",
+  [switch]$ContentOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,9 +25,20 @@ namespace NebulaVM {
     public int Bottom;
   }
 
+  public struct POINT {
+    public int X;
+    public int Y;
+  }
+
   public static class NativeConsoleFrame {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
     [DllImport("user32.dll")]
     public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
@@ -107,6 +119,37 @@ function Get-ConsoleBounds {
   }
 }
 
+function Get-ConsoleClientBounds {
+  param(
+    [object]$Process,
+    [object]$WindowBounds
+  )
+
+  $rect = New-Object NebulaVM.RECT
+  $origin = New-Object NebulaVM.POINT
+  if (
+    -not [NebulaVM.NativeConsoleFrame]::GetClientRect($Process.MainWindowHandle, [ref]$rect) -or
+    -not [NebulaVM.NativeConsoleFrame]::ClientToScreen($Process.MainWindowHandle, [ref]$origin)
+  ) {
+    throw "The Hyper-V setup console content area could not be measured."
+  }
+
+  $width = [math]::Max(0, [int]($rect.Right - $rect.Left))
+  $height = [math]::Max(0, [int]($rect.Bottom - $rect.Top))
+  $offsetX = [int]($origin.X - $WindowBounds.left)
+  $offsetY = [int]($origin.Y - $WindowBounds.top)
+  if ($width -lt 64 -or $height -lt 64) {
+    throw "The Hyper-V setup console content area is too small to mirror."
+  }
+
+  return [ordered]@{
+    offsetX = [math]::Max(0, $offsetX)
+    offsetY = [math]::Max(0, $offsetY)
+    width = [math]::Min($width, [int]$WindowBounds.width - [math]::Max(0, $offsetX))
+    height = [math]::Min($height, [int]$WindowBounds.height - [math]::Max(0, $offsetY))
+  }
+}
+
 function Hide-ConsoleFromHost {
   param([object]$Process)
 
@@ -152,6 +195,13 @@ try {
   $bitmap = New-Object System.Drawing.Bitmap $bounds.width, $bounds.height
   try {
     Capture-ConsoleBitmap -Process $process -Bitmap $bitmap
+    $outputBitmap = $bitmap
+    if ($ContentOnly) {
+      $clientBounds = Get-ConsoleClientBounds -Process $process -WindowBounds $bounds
+      $cropRect = New-Object System.Drawing.Rectangle `
+        $clientBounds.offsetX, $clientBounds.offsetY, $clientBounds.width, $clientBounds.height
+      $outputBitmap = $bitmap.Clone($cropRect, $bitmap.PixelFormat)
+    }
     $stream = New-Object System.IO.MemoryStream
     try {
       $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
@@ -159,10 +209,13 @@ try {
         Select-Object -First 1
       $encoderParams = New-Object System.Drawing.Imaging.EncoderParameters 1
       $encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 72L
-      $bitmap.Save($stream, $codec, $encoderParams)
+      $outputBitmap.Save($stream, $codec, $encoderParams)
       $bytes = $stream.ToArray()
     } finally {
       $stream.Dispose()
+      if ($outputBitmap -ne $bitmap) {
+        $outputBitmap.Dispose()
+      }
     }
   } finally {
     Hide-ConsoleFromHost -Process $process
@@ -172,8 +225,8 @@ try {
   $payload = [ordered]@{
     ok = $true
     mimeType = "image/jpeg"
-    width = $bounds.width
-    height = $bounds.height
+    width = if ($ContentOnly) { $clientBounds.width } else { $bounds.width }
+    height = if ($ContentOnly) { $clientBounds.height } else { $bounds.height }
     title = $process.MainWindowTitle
   }
 

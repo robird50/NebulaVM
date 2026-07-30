@@ -2028,7 +2028,7 @@ const runPowerShellJson = (label, args, timeoutMs = 30000) =>
     });
   });
 
-const runHyperVConsoleFrame = () =>
+const runHyperVConsoleFrame = (contentOnly = false) =>
   runPowerShellJson(
     "Hyper-V setup console frame",
     [
@@ -2041,6 +2041,7 @@ const runHyperVConsoleFrame = () =>
       hyperVConsoleFrameScriptPath,
       "-OutputPath",
       hyperVConsoleFramePath,
+      ...(contentOnly ? ["-ContentOnly"] : []),
     ],
     45000,
   );
@@ -2921,7 +2922,7 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/console-frame") {
-          const frame = await runHyperVConsoleFrame();
+          const frame = await runHyperVConsoleFrame(url.searchParams.get("contentOnly") === "1");
           if (!frame.outputPath || !existsSync(frame.outputPath)) {
             throw new Error("Hyper-V setup console frame was not written.");
           }

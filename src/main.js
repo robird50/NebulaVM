@@ -1534,7 +1534,7 @@ const fetchHyperVJson = async (path, options) => {
   throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
-const fetchHyperVFrame = async () => {
+const fetchHyperVFrame = async (contentOnly = false) => {
   const uniqueBridgeBases = nativeBridgeBases();
   let lastError = new Error(nativeQemuBridgeMessage);
 
@@ -1544,7 +1544,9 @@ const fetchHyperVFrame = async () => {
       if (state.nativeHostToken) {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
-      const response = await fetch(`${base}/api/emustar-hyperv/console-frame`, {
+      const frameUrl = new URL("/api/emustar-hyperv/console-frame", base);
+      if (contentOnly) frameUrl.searchParams.set("contentOnly", "1");
+      const response = await fetch(frameUrl, {
         cache: "no-store",
         headers,
       });
@@ -2711,6 +2713,7 @@ const startHyperVSetupConsole = (base) => {
       y: event.clientY - rect.top,
       width: rect.width,
       height: rect.height,
+      contentOnly: document.fullscreenElement === els.screenShell,
     });
   };
 
@@ -2775,7 +2778,7 @@ const startHyperVSetupConsole = (base) => {
   const pollFrame = async () => {
     if (!state.hyperVConsoleActive) return;
     try {
-      const frame = await fetchHyperVFrame();
+      const frame = await fetchHyperVFrame(document.fullscreenElement === els.screenShell);
       const nextFrameUrl = URL.createObjectURL(frame.blob);
       if (state.hyperVConsoleFrameUrl) {
         URL.revokeObjectURL(state.hyperVConsoleFrameUrl);
