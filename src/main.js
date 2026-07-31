@@ -122,6 +122,8 @@ const state = {
   storedIsoLimit: STORED_ISO_LIMIT,
   storedImagesMenuOpen: false,
   storedIsoUploading: false,
+  windowsTemplateLoading: false,
+  windowsTemplateSelected: false,
   androidView: "home",
   androidHistory: ["home"],
   androidRecents: [],
@@ -202,6 +204,9 @@ app.innerHTML = `
             <div class="stored-iso-slots" id="storedIsoSlots"></div>
           </div>
         </div>
+        <button class="windows-template-button" id="windowsTemplateButton" type="button" hidden>
+          Windows 11 Template &#128513;
+        </button>
       </div>
     </section>
 
@@ -1028,6 +1033,7 @@ const els = {
   storedImagesMenu: document.querySelector("#storedImagesMenu"),
   storedImagesCount: document.querySelector("#storedImagesCount"),
   storedIsoSlots: document.querySelector("#storedIsoSlots"),
+  windowsTemplateButton: document.querySelector("#windowsTemplateButton"),
   keepIsoDialog: document.querySelector("#keepIsoDialog"),
   keepIsoDontAsk: document.querySelector("#keepIsoDontAsk"),
   keepIsoNoButton: document.querySelector("#keepIsoNoButton"),
@@ -1859,6 +1865,27 @@ const fetchEmustarHostJson = async (path, options) => {
 const emustarHostBaseCandidates = () => nativeBridgeBases();
 
 const browserIsoFileKey = (file) => (file ? `${file.name}:${file.size}` : "");
+const WINDOWS_TEMPLATE_MEDIA_TYPE = "cdrom";
+const WINDOWS_TEMPLATE_BOOT_ORDER = "213";
+
+const applyWindowsTemplateBootLocks = () => {
+  if (!state.windowsTemplateSelected) return;
+  els.mediaType.value = WINDOWS_TEMPLATE_MEDIA_TYPE;
+  els.bootOrder.value = WINDOWS_TEMPLATE_BOOT_ORDER;
+};
+
+const clearWindowsTemplateSelection = () => {
+  state.windowsTemplateSelected = false;
+  els.windowsTemplateButton?.classList.remove("is-active");
+};
+
+const fetchWindows11Template = async () => {
+  const { response, data } = await fetchEmustarHostJson("windows11-template");
+  if (!response.ok || !data.ok || !data.available) {
+    throw new Error(data.error || "Windows 11 Template is not available on the host.");
+  }
+  return data;
+};
 
 const storedIsoPromptPreference = () => {
   const value = window.localStorage.getItem(STORED_ISO_PROMPT_KEY);
@@ -1979,6 +2006,7 @@ const selectStoredIso = async (item, { silent = false } = {}) => {
   if (!item?.isoPath) return "";
   await cleanupStagedHostIso({ silent: true });
   resetHostStagedIsoStateOnly();
+  clearWindowsTemplateSelection();
   state.isoFile = null;
   els.nativeIsoPath.value = item.isoPath;
   els.isoMeta.textContent = `${item.name || "Stored ISO"} stored on host - ${formatBytes(item.size || 0)}`;
@@ -1988,6 +2016,50 @@ const selectStoredIso = async (item, { silent = false } = {}) => {
   if (!silent) log(`Using stored ISO: ${item.name || item.isoPath}`);
   setStoredImagesMenuOpen(false);
   return item.isoPath;
+};
+
+const selectWindows11Template = async ({ boot = false } = {}) => {
+  if (isMobileOrTabletDevice()) {
+    log("Windows 11 Template is available on desktop and laptop browsers only.");
+    return;
+  }
+  if (state.emulator) {
+    log("End the current session before launching the Windows 11 Template.");
+    return;
+  }
+
+  state.windowsTemplateLoading = true;
+  updateButtons();
+  try {
+    const template = await fetchWindows11Template();
+    await cleanupStagedHostIso({ silent: true });
+    resetHostStagedIsoStateOnly();
+    state.isoFile = null;
+    state.windowsTemplateSelected = true;
+    els.emulatorMode.value = "emustar-hyperv";
+    els.processorMode.value = "x64";
+    els.nativeIsoPath.value = template.isoPath;
+    applyWindowsTemplateBootLocks();
+    updateBackendUi();
+    state.windowsTemplateSelected = true;
+    applyWindowsTemplateBootLocks();
+    els.isoMeta.textContent = `${template.name || "Windows 11 Template"} on host - ${formatBytes(template.size || 0)}`;
+    els.machineTitle.textContent = template.name || "Windows 11 Template";
+    els.dropZone.classList.add("has-file");
+    els.windowsTemplateButton.classList.add("is-active");
+    setStoredImagesMenuOpen(false);
+    log(`Using Windows 11 Template: ${template.isoPath}`);
+    updateButtons();
+    if (boot) {
+      await bootEmulator();
+    }
+  } catch (error) {
+    clearWindowsTemplateSelection();
+    log(`Windows 11 Template unavailable: ${error.message}`);
+  } finally {
+    state.windowsTemplateLoading = false;
+    updateButtons();
+  }
 };
 
 const removeStoredIso = async (id) => {
@@ -2049,6 +2121,7 @@ const saveStagedIsoAsStored = async (file, stagedData) => {
   resetHostStagedIsoStateOnly();
   const item = data.item;
   if (item?.isoPath) {
+    clearWindowsTemplateSelection();
     els.nativeIsoPath.value = item.isoPath;
     els.isoMeta.textContent = `${item.name || file.name} stored on host - ${formatBytes(item.size || file.size)}`;
     els.machineTitle.textContent = item.name || file.name;
@@ -3192,6 +3265,7 @@ const updateMediaWarning = () => {
 const updateButtons = (busy = false) => {
   updateMediaWarning();
   updateWindowsCredentialUi();
+  applyWindowsTemplateBootLocks();
   const externalMode = isExternalMode();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   const androidMode = isAndroidMode();
@@ -3227,6 +3301,10 @@ const updateButtons = (busy = false) => {
   els.nativeResetFirmwareButton.disabled =
     busy || !isNativeMode() || Boolean(state.emulator) || nativeUnavailable;
   els.nativeConsoleButton.disabled = busy || !isHyperVMode() || nativeUnavailable;
+  els.windowsTemplateButton.hidden = isMobileOrTabletDevice();
+  els.windowsTemplateButton.disabled =
+    busy || Boolean(state.emulator) || state.hostStagedIsoUploading || state.windowsTemplateLoading;
+  els.windowsTemplateButton.classList.toggle("is-active", state.windowsTemplateSelected);
   els.bootButton.textContent = androidMode ? "Start Android" : emustarMode ? "Launch Hyper-V" : "Boot VM";
   els.stopButton.textContent = emustarMode ? "End session" : androidMode ? "Stop Android" : "Stop";
   els.pauseButton.textContent = state.running ? "Pause" : "Resume";
@@ -3345,6 +3423,7 @@ const monitorNativeVm = () => {
 };
 
 const setSelectedFile = (file) => {
+  clearWindowsTemplateSelection();
   state.isoFile = file;
   els.isoMeta.textContent = `${file.name} - ${formatBytes(file.size)}`;
   els.machineTitle.textContent = file.name;
@@ -3632,6 +3711,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   );
 
   await saveWindowsGuestCredentialsIfNeeded();
+  applyWindowsTemplateBootLocks();
 
   let startFinished = false;
   const startRequest = fetchHyperVJson("start", {
@@ -4779,6 +4859,9 @@ const updateBackendUi = () => {
   const runtimeBrand = nativeRuntimeBrand();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   const androidMode = isAndroidMode();
+  if (state.windowsTemplateSelected && !emustarMode) {
+    clearWindowsTemplateSelection();
+  }
   syncEmulatorDropdown();
   els.workspace.classList.toggle("is-emustar-mode", emustarMode);
   els.workspace.classList.toggle("is-android-mode", androidMode);
@@ -4786,6 +4869,7 @@ const updateBackendUi = () => {
   els.experimentalWarningPill.hidden = !emustarMode && !androidMode && !remoteMode;
   els.emustarInfoLink.hidden = !emustarMode;
   els.storedImagesControl.hidden = androidMode;
+  els.windowsTemplateButton.hidden = isMobileOrTabletDevice();
   els.dropZone.hidden = androidMode;
   els.mediaWarning.hidden = androidMode;
   els.demoButton.hidden = androidMode;
@@ -4813,7 +4897,7 @@ const updateBackendUi = () => {
     : emustarMode
       ? "Hyper-V viewport standing by"
       : "Drop an ISO to begin";
-  if (!state.emulator && !state.isoFile) {
+  if (!state.emulator && !state.isoFile && !state.windowsTemplateSelected) {
     els.machineTitle.textContent = androidMode
       ? `${androidVersionLabel()} private device`
       : emustarMode
@@ -4868,7 +4952,9 @@ const updateBackendUi = () => {
     els.nativeStatus.textContent = `Checking ${nativeModeLabel()}...`;
   }
   els.vgaSize.disabled = externalMode;
-  els.bootOrder.disabled = remoteMode || state.emulator;
+  applyWindowsTemplateBootLocks();
+  els.mediaType.disabled = state.windowsTemplateSelected;
+  els.bootOrder.disabled = remoteMode || state.emulator || state.windowsTemplateSelected;
   els.nativeDisplayMode.disabled = (emustarMode && isNetlifyLauncher) || Boolean(state.emulator);
   els.demoButton.disabled = externalMode;
   els.autostart.disabled = externalMode;
@@ -5353,6 +5439,9 @@ els.emulatorMenuOptions.forEach((option) => {
 els.storedImagesButton.addEventListener("click", () => {
   setStoredImagesMenuOpen(!state.storedImagesMenuOpen);
 });
+els.windowsTemplateButton.addEventListener("click", () => {
+  void selectWindows11Template({ boot: true });
+});
 els.storedIsoInput.addEventListener("change", () => {
   const [file] = els.storedIsoInput.files || [];
   if (file) {
@@ -5400,7 +5489,10 @@ els.processorMode.addEventListener("change", () => {
         : "v86";
   updateBackendUi();
 });
-els.nativeIsoPath.addEventListener("input", () => updateButtons());
+els.nativeIsoPath.addEventListener("input", () => {
+  clearWindowsTemplateSelection();
+  updateButtons();
+});
 els.nativeIsoPath.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || els.nativeIsoPath.value.trim().toLowerCase() !== "meow") return;
 

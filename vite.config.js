@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import dgram from "node:dgram";
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { cpus, freemem, homedir, networkInterfaces, totalmem } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
@@ -431,6 +431,13 @@ const storedIsoDirectory = resolve(isoImportDirectory, "stored-isos");
 const storedIsoManifestPath = resolve(storedIsoDirectory, "stored-isos.json");
 const storedIsoLimit = 2;
 const storedIsoTtlMs = 3 * 24 * 60 * 60 * 1000;
+const templateIsoDirectory = resolve(workspaceDir, "vm-disks", "templates");
+const windows11TemplateIsoPath = resolve(templateIsoDirectory, "windows-11-template.iso");
+const windows11TemplateSourceCandidates = [
+  windows11TemplateIsoPath,
+  resolve(homedir(), "Downloads", "Win11_25H2_English_x64_v2.iso"),
+  resolve(storedIsoDirectory, "46a6f91a9bdd0c0f-w11.iso"),
+];
 
 const sanitizeFilename = (value) => {
   const cleaned = String(value || "")
@@ -489,6 +496,47 @@ const isPathInsideDirectory = (candidatePath, parentDirectory) => {
 
 const storedIsoFileKey = ({ fileKey, name, size }) =>
   String(fileKey || `${name || ""}:${Number(size) || 0}`).trim().slice(0, 240);
+
+const sourceLooksLikeWindows11Template = (candidatePath) => {
+  if (!candidatePath || !existsSync(candidatePath)) return false;
+  const name = candidatePath.split(/[\\/]/).pop() || "";
+  const size = statSync(candidatePath).size;
+  return size > 4 * 1024 * 1024 * 1024 && /(?:win(?:dows)?[\s_-]*11|w11)/i.test(name);
+};
+
+const ensureWindows11TemplateIso = () => {
+  const existingTemplate = existsSync(windows11TemplateIsoPath) ? windows11TemplateIsoPath : "";
+  const sourcePath =
+    (sourceLooksLikeWindows11Template(existingTemplate) && existingTemplate) ||
+    windows11TemplateSourceCandidates.find((candidatePath) => sourceLooksLikeWindows11Template(candidatePath));
+
+  if (!sourcePath) {
+    return {
+      ok: true,
+      available: false,
+      name: "Windows 11 Template",
+      error: "Windows 11 Template ISO is not installed on this host.",
+    };
+  }
+
+  mkdirSync(templateIsoDirectory, { recursive: true });
+  if (!existsSync(windows11TemplateIsoPath)) {
+    try {
+      linkSync(sourcePath, windows11TemplateIsoPath);
+    } catch {
+      copyFileSync(sourcePath, windows11TemplateIsoPath);
+    }
+  }
+
+  const size = statSync(windows11TemplateIsoPath).size;
+  return {
+    ok: true,
+    available: true,
+    name: "Windows 11 Template",
+    isoPath: windows11TemplateIsoPath,
+    size,
+  };
+};
 
 const storedIsoOwnerId = (req, fallback = "") => {
   const ownerId = normalizeStoredIsoOwnerId(req.headers["x-nebulavm-device"] || fallback);
@@ -2894,6 +2942,11 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "GET" && url.pathname === "/api/emustar-host/upload-iso-status") {
           json(res, 200, browserIsoUploadStatus(req));
+          return;
+        }
+
+        if (req.method === "GET" && url.pathname === "/api/emustar-host/windows11-template") {
+          json(res, 200, ensureWindows11TemplateIso());
           return;
         }
 

@@ -677,6 +677,41 @@ h2 {
   background: rgba(255, 228, 94, 0.1);
 }
 
+.windows-template-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 15px;
+  border: 1px solid rgba(125, 249, 255, 0.48);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(31, 111, 235, 0.28), rgba(255, 228, 94, 0.2));
+  color: #f8fbff;
+  font-size: 0.84rem;
+  font-weight: 950;
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.22),
+    0 0 28px rgba(31, 111, 235, 0.18);
+}
+
+.windows-template-button:hover,
+.windows-template-button:focus-visible,
+.windows-template-button.is-active {
+  outline: 0;
+  border-color: rgba(255, 228, 94, 0.82);
+  background: linear-gradient(135deg, rgba(31, 111, 235, 0.4), rgba(255, 228, 94, 0.32));
+  color: #ffe45e;
+}
+
+.windows-template-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+  filter: grayscale(0.35);
+}
+
+.windows-template-button[hidden] {
+  display: none;
+}
+
 .stored-images-arrow {
   display: inline-grid;
   width: 18px;
