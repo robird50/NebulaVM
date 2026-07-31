@@ -26,6 +26,7 @@ test("accepts a complete problem report", () => {
 });
 
 test("detects listed profanity as whole words", () => {
+  assert.ok(PROFANITY_WORDS.length > 1000);
   for (const word of PROFANITY_WORDS) {
     assert.equal(containsProfanity(`The report contains ${word}.`), true, word);
   }
@@ -34,11 +35,12 @@ test("detects listed profanity as whole words", () => {
   assert.equal(containsProfanity("The class assignment will not boot."), false);
   assert.equal(containsProfanity("Please assist with this display issue."), false);
   assert.equal(containsProfanity("Hello, the emulator is still loading."), false);
+  assert.equal(containsProfanity("The report contains a s s."), true);
 });
 
-test("allows mild frustration and redacts stronger language", () => {
+test("redacts blocked language before delivery", () => {
   assert.equal(containsProfanity("The damn emulator is stuck."), true);
-  assert.equal(containsStrongProfanity("The damn emulator is stuck."), false);
+  assert.equal(containsStrongProfanity("The damn emulator is stuck."), true);
   assert.equal(containsStrongProfanity("The fucking emulator is stuck."), true);
   assert.equal(
     redactStrongProfanity("The fucking emulator is still shit."),

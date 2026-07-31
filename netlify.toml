@@ -5,6 +5,7 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+  included_files = ["data/profane-words.json"]
 
 [build.environment]
   NODE_VERSION = "22"
