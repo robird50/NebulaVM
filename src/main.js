@@ -4732,7 +4732,7 @@ const updateBackendUi = () => {
   els.workspace.classList.toggle("is-emustar-mode", emustarMode);
   els.workspace.classList.toggle("is-android-mode", androidMode);
   document.documentElement.classList.toggle("android-mode", androidMode);
-  els.experimentalWarningPill.hidden = !emustarMode && !androidMode;
+  els.experimentalWarningPill.hidden = !emustarMode && !androidMode && !remoteMode;
   els.emustarInfoLink.hidden = !emustarMode;
   els.storedImagesControl.hidden = androidMode;
   els.dropZone.hidden = androidMode;
