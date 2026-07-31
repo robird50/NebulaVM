@@ -2112,6 +2112,7 @@ const addStoredIsoFromFile = async (file) => {
       log(`Stored ${item.name || file.name} in a host ISO slot.`);
     }
   } catch (error) {
+    els.isoMeta.textContent = "boi you aint uploadin shi😂😂";
     els.hostStagingSpeed.textContent = "Failed";
     log(`Stored ISO upload failed: ${error.message}`);
   } finally {
@@ -2501,7 +2502,7 @@ const stageSelectedIsoForEmustar = (file = state.isoFile) => {
     return state.hostStagedIsoPath;
   })()
     .catch((error) => {
-      els.isoMeta.textContent = `${file.name} - staging paused; launch again to resume`;
+      els.isoMeta.textContent = "boi you aint uploadin shi😂😂";
       els.hostStagingSpeed.textContent = "Failed";
       log(`Host staging paused: ${error.message}`);
       log("Select Launch again with the same ISO to resume from the host's saved progress.");
