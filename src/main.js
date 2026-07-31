@@ -149,7 +149,7 @@ app.innerHTML = `
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
       <button class="mobile-bypass-link" id="mobileBypassButton" type="button">Bypass (devs only)</button>
     </section>
-    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#other-commits" data-commit-history-link>Other commits</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
+    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#other-commits" data-commit-history-link>Other commits</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
   </main>
 
   <div class="mobile-bypass-overlay popup-motion-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
@@ -662,7 +662,7 @@ app.innerHTML = `
         </div>
       </section>
     </section>
-    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#other-commits" data-commit-history-link>Other commits</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
+    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#other-commits" data-commit-history-link>Other commits</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
   </main>
 
   <div class="display-choice-overlay popup-motion-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>

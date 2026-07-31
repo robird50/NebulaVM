@@ -100,6 +100,32 @@ button:disabled {
   color: #fff176;
 }
 
+.commit-id a.tiktok-footer-link {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  margin-left: 10px;
+  padding: 1px;
+  vertical-align: middle;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  text-decoration: none;
+}
+
+.commit-id a.tiktok-footer-link img {
+  display: block;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+.commit-id a.tiktok-footer-link:hover,
+.commit-id a.tiktok-footer-link:focus-visible {
+  filter: brightness(1.12);
+}
+
 .commit-id a.report-problem-link {
   color: #ff3f4a;
   font-weight: 950;
