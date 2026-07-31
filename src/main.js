@@ -2039,6 +2039,8 @@ const selectWindows11Template = async ({ boot = false } = {}) => {
     els.emulatorMode.value = "emustar-hyperv";
     els.processorMode.value = "x64";
     els.nativeIsoPath.value = template.isoPath;
+    els.windowsPasswordOff.checked = true;
+    els.windowsPassword.value = "";
     applyWindowsTemplateBootLocks();
     updateBackendUi();
     state.windowsTemplateSelected = true;

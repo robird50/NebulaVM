@@ -504,6 +504,24 @@ const sourceLooksLikeWindows11Template = (candidatePath) => {
   return size > 4 * 1024 * 1024 * 1024 && /(?:win(?:dows)?[\s_-]*11|w11)/i.test(name);
 };
 
+const grantHyperVTemplateAccess = () => {
+  const grantTarget = "*S-1-5-83-0:(R)";
+  const grantTree = "*S-1-5-83-0:(OI)(CI)(RX)";
+  for (const directoryPath of [resolve(workspaceDir, "vm-disks"), templateIsoDirectory]) {
+    if (!existsSync(directoryPath)) continue;
+    execFileSync("icacls", [directoryPath, "/grant", grantTree], {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+  }
+  if (existsSync(windows11TemplateIsoPath)) {
+    execFileSync("icacls", [windows11TemplateIsoPath, "/grant", grantTarget], {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+  }
+};
+
 const ensureWindows11TemplateIso = () => {
   const existingTemplate = existsSync(windows11TemplateIsoPath) ? windows11TemplateIsoPath : "";
   const sourcePath =
@@ -527,6 +545,7 @@ const ensureWindows11TemplateIso = () => {
       copyFileSync(sourcePath, windows11TemplateIsoPath);
     }
   }
+  grantHyperVTemplateAccess();
 
   const size = statSync(windows11TemplateIsoPath).size;
   return {
