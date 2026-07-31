@@ -3548,6 +3548,9 @@ const bootNativeQemu = async (displayMode = "viewport") => {
     } (pid ${result.pid}).`,
   );
   if (base !== window.location.origin) log(`Using local bridge: ${base}`);
+  if (result.replacedRuntime) {
+    log(`Stopped existing ${result.replacedRuntime} session before starting ${runtimeName}.`);
+  }
   if (result.arch) log(`Native architecture: ${result.arch}.`);
   if (result.profile) log(`Native profile: ${result.profile}.`);
   if (result.diskPath) log(`Using install disk: ${result.diskPath}`);
@@ -3632,6 +3635,9 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   log(`EMUSTAR started ${vm.name || "the Windows VM"} with Microsoft Hyper-V.`);
   if (result.recoveredFromSlowStart) {
     log("Recovered the EMUSTAR browser display from host status after the start request stalled.");
+  }
+  if (result.replacedRuntime) {
+    log(`Stopped existing ${result.replacedRuntime} session before starting EMUSTAR.`);
   }
   if (base !== window.location.origin) log(`Using local bridge: ${base}`);
   if (vm.diskPath) log(`Using VHDX install disk: ${vm.diskPath}`);

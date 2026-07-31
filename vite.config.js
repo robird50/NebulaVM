@@ -2287,15 +2287,50 @@ const nativeStatus = (requestedArch = "x86_64") => {
   };
 };
 
+const stopNativeVmIfRunning = async () => {
+  if (!nativeVm) return null;
+
+  const child = nativeVm;
+  const stopped = {
+    runtime: activeNativeRuntimeName || "QEMU",
+    pid: child.pid || null,
+  };
+
+  await new Promise((resolveStop) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolveStop();
+    };
+    const timeout = setTimeout(finish, 5000);
+    child.once("exit", finish);
+    child.once("error", finish);
+    try {
+      child.kill();
+    } catch {
+      finish();
+    }
+  });
+
+  if (nativeVm === child) {
+    nativeVm = null;
+    activeNativeRuntimeName = null;
+  }
+  return stopped;
+};
+
 const startNativeVm = async (body) => {
+  let replacedRuntime = null;
   if (nativeVm) {
-    throw new Error(`A native QEMU VM is already running with pid ${nativeVm.pid}.`);
+    const stopped = await stopNativeVmIfRunning();
+    replacedRuntime = stopped?.runtime || "QEMU";
   }
   const hyperVStatus = await runHyperVAction("Status", {}, 45000).catch(() => null);
   if (hyperVStatus?.vm?.state === "Running") {
-    throw new Error(
-      "EMUSTAR Hyper-V is already running. End that session before starting a separate QEMU emulator.",
-    );
+    await runHyperVAction("Stop", {}, 120000);
+    replacedRuntime = "EMUSTAR Hyper-V";
   }
 
   const arch = normalizeArch(body.arch);
@@ -2506,6 +2541,7 @@ const startNativeVm = async (body) => {
     ovmfVarsPath,
     vncPath: embeddedDisplay ? nativeVncPath : null,
     vncPort: vnc?.port || null,
+    replacedRuntime,
     get recentOutput() {
       return nativeVmOutput;
     },
@@ -2897,10 +2933,10 @@ const nativeQemuPlugin = () => ({
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") {
           const body = await readJsonBody(req);
           assertStoredIsoAccess(req, body.isoPath);
+          let replacedRuntime = null;
           if (nativeVm) {
-            throw new Error(
-              "A native QEMU emulator is already running. Stop it before launching EMUSTAR Hyper-V.",
-            );
+            const stopped = await stopNativeVmIfRunning();
+            replacedRuntime = stopped?.runtime || "QEMU";
           }
           const storageOwnerId = storedIsoOwnerId(req);
           const result = await runHyperVAction("Start", {
@@ -2908,6 +2944,7 @@ const nativeQemuPlugin = () => ({
               storageOwnerId,
               vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
             }, 120000);
+          result.replacedRuntime = replacedRuntime;
           json(res, 200, await withHyperVDisplayStatus(result));
           return;
         }
@@ -3055,6 +3092,7 @@ const nativeQemuPlugin = () => ({
             ovmf: result.ovmf,
             ovmfVarsPath: result.ovmfVarsPath,
             vncPath: result.vncPath,
+            replacedRuntime: result.replacedRuntime,
           });
           return;
         }
@@ -3066,12 +3104,8 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "POST" && url.pathname === "/api/native-qemu/stop") {
-          if (nativeVm) {
-            nativeVm.kill();
-            nativeVm = null;
-            activeNativeRuntimeName = null;
-          }
-          json(res, 200, { ok: true });
+          const stopped = await stopNativeVmIfRunning();
+          json(res, 200, { ok: true, stopped });
           return;
         }
 
