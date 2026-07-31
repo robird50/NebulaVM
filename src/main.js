@@ -117,6 +117,7 @@ const state = {
   hostStagedIsoUploading: false,
   hostStagingEtaBaselineBytes: 0,
   hostStagingEtaStartedAt: 0,
+  hostStagingEtaLastRenderedAt: 0,
   storedIsos: [],
   storedIsoLimit: STORED_ISO_LIMIT,
   storedImagesMenuOpen: false,
@@ -2349,6 +2350,7 @@ const resetHostStagingProgress = () => {
   els.hostStagingEta.textContent = "--:--:-- remaining";
   state.hostStagingEtaBaselineBytes = 0;
   state.hostStagingEtaStartedAt = 0;
+  state.hostStagingEtaLastRenderedAt = 0;
 };
 
 const formatHostStagingEta = (seconds) => {
@@ -2412,7 +2414,17 @@ const updateHostStagingProgress = ({
       : retrying
         ? "Retrying"
         : formatTransferSpeed(speed);
-  els.hostStagingEta.textContent = etaLabel;
+  const etaShouldRender =
+    complete ||
+    finalizing ||
+    retrying ||
+    confirming ||
+    !state.hostStagingEtaLastRenderedAt ||
+    now - state.hostStagingEtaLastRenderedAt >= 1000;
+  if (etaShouldRender) {
+    els.hostStagingEta.textContent = etaLabel;
+    state.hostStagingEtaLastRenderedAt = now;
+  }
 };
 
 const cleanupStagedHostIso = async ({
