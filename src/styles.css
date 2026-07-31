@@ -1098,9 +1098,8 @@ h2 {
 }
 
 .host-staging-stats {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   color: #d7f8ff;
   font-size: 0.76rem;
@@ -1113,9 +1112,15 @@ h2 {
   overflow-wrap: anywhere;
 }
 
-.host-staging-stats span:last-child {
+.host-staging-speed {
   flex: 0 0 auto;
   color: #ffe45e;
+}
+
+.host-staging-eta {
+  grid-column: 1 / -1;
+  color: #8eeaff;
+  overflow-wrap: anywhere;
 }
 
 .media-warning {

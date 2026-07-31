@@ -115,6 +115,8 @@ const state = {
   hostStagedIsoSessionId: "",
   hostStagedIsoUploadPromise: null,
   hostStagedIsoUploading: false,
+  hostStagingEtaBaselineBytes: 0,
+  hostStagingEtaStartedAt: 0,
   storedIsos: [],
   storedIsoLimit: STORED_ISO_LIMIT,
   storedImagesMenuOpen: false,
@@ -236,7 +238,8 @@ app.innerHTML = `
             </span>
             <span class="host-staging-stats">
               <span id="hostStagingProgressText">0% - 0 B</span>
-              <span id="hostStagingSpeed">0 KB/s</span>
+              <span class="host-staging-speed" id="hostStagingSpeed">0 KB/s</span>
+              <span class="host-staging-eta" id="hostStagingEta">--:--:-- remaining</span>
             </span>
           </span>
         </label>
@@ -899,6 +902,7 @@ const els = {
   hostStagingProgressFill: document.querySelector("#hostStagingProgressFill"),
   hostStagingProgressText: document.querySelector("#hostStagingProgressText"),
   hostStagingSpeed: document.querySelector("#hostStagingSpeed"),
+  hostStagingEta: document.querySelector("#hostStagingEta"),
   mediaWarning: document.querySelector("#mediaWarning"),
   demoButton: document.querySelector("#demoButton"),
   emulatorMode: document.querySelector("#emulatorMode"),
@@ -2095,8 +2099,9 @@ const addStoredIsoFromFile = async (file) => {
   updateHostStagingProgress({ bytesUploaded: 0, totalBytes: file.size, startedAt });
 
   try {
-    const { data, base } = await uploadBrowserIsoToHost(file, ({ bytesUploaded = 0, totalBytes = file.size }) => {
-      updateHostStagingProgress({ bytesUploaded, totalBytes, startedAt });
+    const { data, base } = await uploadBrowserIsoToHost(file, (progress = {}) => {
+      const { bytesUploaded = 0, totalBytes = file.size } = progress;
+      updateHostStagingProgress({ ...progress, bytesUploaded, totalBytes, startedAt });
     });
     state.hostStagedIsoBase = base;
     state.hostStagedIsoPath = data.isoPath || "";
@@ -2114,6 +2119,7 @@ const addStoredIsoFromFile = async (file) => {
   } catch (error) {
     els.isoMeta.textContent = "boi you aint uploadin shi😂😂";
     els.hostStagingSpeed.textContent = "Failed";
+    els.hostStagingEta.textContent = "Upload failed";
     log(`Stored ISO upload failed: ${error.message}`);
   } finally {
     state.storedIsoUploading = false;
@@ -2340,6 +2346,17 @@ const resetHostStagingProgress = () => {
   els.hostStagingProgress.querySelector(".host-staging-track").setAttribute("aria-valuenow", "0");
   els.hostStagingProgressText.textContent = "0% - 0 B";
   els.hostStagingSpeed.textContent = "0 KB/s";
+  els.hostStagingEta.textContent = "--:--:-- remaining";
+  state.hostStagingEtaBaselineBytes = 0;
+  state.hostStagingEtaStartedAt = 0;
+};
+
+const formatHostStagingEta = (seconds) => {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remainder = safeSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")} remaining`;
 };
 
 const updateHostStagingProgress = ({
@@ -2351,10 +2368,28 @@ const updateHostStagingProgress = ({
   resumed = false,
   retrying = false,
 } = {}) => {
+  const now = performance.now();
   const percent = totalBytes > 0 ? Math.max(0, Math.min(100, (bytesUploaded / totalBytes) * 100)) : 0;
-  const elapsedSeconds = Math.max(0.001, (performance.now() - startedAt) / 1000);
-  const speed = complete ? 0 : bytesUploaded / elapsedSeconds;
+  if (
+    bytesUploaded <= 0 ||
+    resumed ||
+    !state.hostStagingEtaStartedAt ||
+    bytesUploaded < state.hostStagingEtaBaselineBytes
+  ) {
+    state.hostStagingEtaBaselineBytes = bytesUploaded;
+    state.hostStagingEtaStartedAt = bytesUploaded > 0 && resumed ? now : startedAt;
+  }
+  const elapsedSeconds = Math.max(0.001, (now - state.hostStagingEtaStartedAt) / 1000);
+  const uploadedThisAttempt = Math.max(0, bytesUploaded - state.hostStagingEtaBaselineBytes);
+  const speed = complete ? 0 : uploadedThisAttempt / elapsedSeconds;
   const finalizing = !complete && totalBytes > 0 && bytesUploaded >= totalBytes;
+  const remainingBytes = Math.max(0, totalBytes - bytesUploaded);
+  const etaLabel =
+    complete || finalizing
+      ? "00:00:00 remaining"
+      : speed > 1 && remainingBytes > 0
+        ? formatHostStagingEta(remainingBytes / speed)
+        : "--:--:-- remaining";
   const percentText = complete ? "100%" : `${Math.floor(percent)}%`;
   const uploaded = formatBytes(bytesUploaded);
   const total = totalBytes ? ` / ${formatBytes(totalBytes)}` : "";
@@ -2377,6 +2412,7 @@ const updateHostStagingProgress = ({
       : retrying
         ? "Retrying"
         : formatTransferSpeed(speed);
+  els.hostStagingEta.textContent = etaLabel;
 };
 
 const cleanupStagedHostIso = async ({
@@ -2473,10 +2509,11 @@ const stageSelectedIsoForEmustar = (file = state.isoFile) => {
     state.hostStagedIsoFileKey = fileKey;
     state.hostStagedIsoSessionId = state.nativeSessionId;
 
-    const { data, base } = await uploadBrowserIsoToHost(file, ({ bytesUploaded = 0, totalBytes = file.size }) => {
+    const { data, base } = await uploadBrowserIsoToHost(file, (progress = {}) => {
+      const { bytesUploaded = 0, totalBytes = file.size } = progress;
       const percent = totalBytes > 0 ? Math.max(0, Math.min(100, (bytesUploaded / totalBytes) * 100)) : 0;
       els.isoMeta.textContent = `Staging to host ${Math.floor(percent)}%`;
-      updateHostStagingProgress({ bytesUploaded, totalBytes, startedAt: stagingStartedAt });
+      updateHostStagingProgress({ ...progress, bytesUploaded, totalBytes, startedAt: stagingStartedAt });
     });
 
     state.hostStagedIsoBase = base;
@@ -2504,6 +2541,7 @@ const stageSelectedIsoForEmustar = (file = state.isoFile) => {
     .catch((error) => {
       els.isoMeta.textContent = "boi you aint uploadin shi😂😂";
       els.hostStagingSpeed.textContent = "Failed";
+      els.hostStagingEta.textContent = "Upload failed";
       log(`Host staging paused: ${error.message}`);
       log("Select Launch again with the same ISO to resume from the host's saved progress.");
       throw error;
