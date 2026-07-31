@@ -107,6 +107,9 @@ const state = {
   hyperVConsoleActive: false,
   hyperVConsoleCleanup: null,
   hyperVConsoleFrameUrl: null,
+  hyperVConsolePollNow: null,
+  virtualKeyboardOpen: false,
+  virtualKeyboardShift: false,
   guestResizeTimer: null,
   lastGuestResize: "",
   hostStagedIsoBase: "",
@@ -615,6 +618,7 @@ app.innerHTML = `
             </div>
             <span id="ramMetric">128 MB RAM</span>
             <button class="secondary compact-button" id="fullscreenButton" type="button">Fullscreen</button>
+            <button class="secondary compact-button" id="virtualKeyboardButton" type="button" hidden>Keyboard</button>
           </div>
         </div>
 
@@ -656,6 +660,17 @@ app.innerHTML = `
               <small id="placeholderMeta">Legacy x86, 32-bit Linux, DOS, hobby OS, and vintage Windows images work best.</small>
             </div>
           </div>
+          <section class="virtual-keyboard" id="virtualKeyboard" aria-label="Virtual keyboard" hidden>
+            <div class="virtual-keyboard-head">
+              <strong>Virtual keyboard</strong>
+              <button class="secondary compact-button" id="virtualKeyboardClose" type="button">Close</button>
+            </div>
+            <div class="virtual-keyboard-send">
+              <input id="virtualKeyboardText" type="text" placeholder="Type here, then send" autocomplete="off" />
+              <button class="primary compact-button" id="virtualKeyboardSend" type="button">Send</button>
+            </div>
+            <div class="virtual-keyboard-keys" id="virtualKeyboardKeys"></div>
+          </section>
         </div>
 
         <div class="terminal-panel">
@@ -1003,6 +1018,12 @@ const els = {
   saveStateButton: document.querySelector("#saveStateButton"),
   loadStateButton: document.querySelector("#loadStateButton"),
   fullscreenButton: document.querySelector("#fullscreenButton"),
+  virtualKeyboardButton: document.querySelector("#virtualKeyboardButton"),
+  virtualKeyboard: document.querySelector("#virtualKeyboard"),
+  virtualKeyboardClose: document.querySelector("#virtualKeyboardClose"),
+  virtualKeyboardText: document.querySelector("#virtualKeyboardText"),
+  virtualKeyboardSend: document.querySelector("#virtualKeyboardSend"),
+  virtualKeyboardKeys: document.querySelector("#virtualKeyboardKeys"),
   androidViewSwitch: document.querySelector("#androidViewSwitch"),
   androidViewModeButtons: [...document.querySelectorAll("[data-android-viewport-mode]")],
   stateInput: document.querySelector("#stateInput"),
@@ -2753,6 +2774,137 @@ const nativeWebSocketUrl = (base, path) => {
   return url.toString();
 };
 
+const RFB_KEYSYMS = {
+  Backspace: 0xff08,
+  Tab: 0xff09,
+  Enter: 0xff0d,
+  Escape: 0xff1b,
+  Delete: 0xffff,
+  Home: 0xff50,
+  End: 0xff57,
+  PageUp: 0xff55,
+  PageDown: 0xff56,
+  ArrowLeft: 0xff51,
+  ArrowUp: 0xff52,
+  ArrowRight: 0xff53,
+  ArrowDown: 0xff54,
+  Space: 0x20,
+};
+
+const VIRTUAL_KEYBOARD_ROWS = [
+  [
+    { label: "Esc", key: "Escape", type: "special" },
+    { label: "Tab", key: "Tab", type: "special" },
+    { label: "Del", key: "Delete", type: "special" },
+    { label: "Ctrl+Alt+Del", key: "CtrlAltDel", type: "combo", wide: true },
+  ],
+  [..."1234567890"].map((key) => ({ label: key, key, type: "text" })),
+  [..."qwertyuiop"].map((key) => ({ label: key, key, type: "text" })),
+  [..."asdfghjkl"].map((key) => ({ label: key, key, type: "text" })),
+  [
+    { label: "Shift", key: "Shift", type: "shift" },
+    ...[..."zxcvbnm"].map((key) => ({ label: key, key, type: "text" })),
+    { label: "Back", key: "Backspace", type: "special" },
+  ],
+  [
+    { label: "Left", key: "ArrowLeft", type: "special" },
+    { label: "Up", key: "ArrowUp", type: "special" },
+    { label: "Down", key: "ArrowDown", type: "special" },
+    { label: "Right", key: "ArrowRight", type: "special" },
+    { label: "Space", key: " ", type: "text", wide: true },
+    { label: "Enter", key: "Enter", type: "special", wide: true },
+  ],
+];
+
+const renderVirtualKeyboard = () => {
+  els.virtualKeyboardKeys.replaceChildren();
+  for (const row of VIRTUAL_KEYBOARD_ROWS) {
+    const rowElement = document.createElement("div");
+    rowElement.className = "virtual-keyboard-row";
+    for (const key of row) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.keyboardType = key.type;
+      button.dataset.keyboardKey = key.key;
+      button.textContent =
+        key.type === "text" && key.key.length === 1 && /[a-z]/.test(key.key) && state.virtualKeyboardShift
+          ? key.key.toUpperCase()
+          : key.label;
+      button.className = key.wide ? "is-wide" : "";
+      if (key.type === "shift" && state.virtualKeyboardShift) {
+        button.classList.add("is-active");
+      }
+      rowElement.append(button);
+    }
+    els.virtualKeyboardKeys.append(rowElement);
+  }
+};
+
+const setVirtualKeyboardOpen = (open) => {
+  state.virtualKeyboardOpen = open;
+  els.virtualKeyboard.hidden = !open;
+  els.virtualKeyboardButton.classList.toggle("is-active", open);
+  els.virtualKeyboardButton.setAttribute("aria-expanded", String(open));
+  if (open) {
+    renderVirtualKeyboard();
+    els.virtualKeyboardText.focus({ preventScroll: true });
+  }
+};
+
+const sendRfbText = (text) => {
+  const rfb = state.nativeRfb;
+  if (!rfb) return false;
+  for (const char of text) {
+    if (char === "\n" || char === "\r") {
+      rfb.sendKey(RFB_KEYSYMS.Enter, "Enter");
+      continue;
+    }
+    const codePoint = char.codePointAt(0);
+    if (codePoint >= 0x20 && codePoint <= 0x7e) {
+      rfb.sendKey(codePoint, null);
+    }
+  }
+  rfb.focus?.({ preventScroll: true });
+  return true;
+};
+
+const sendRfbSpecialKey = (key) => {
+  const rfb = state.nativeRfb;
+  if (!rfb) return false;
+  if (key === "CtrlAltDel") {
+    rfb.sendCtrlAltDel();
+    return true;
+  }
+  const keysym = RFB_KEYSYMS[key] || 0;
+  if (!keysym) return false;
+  rfb.sendKey(keysym, key === "Space" ? "Space" : key);
+  rfb.focus?.({ preventScroll: true });
+  return true;
+};
+
+const sendVirtualKeyboardText = async (text) => {
+  if (!text) return;
+  if (state.hyperVConsoleActive) {
+    await sendHyperVConsoleInput({ type: "text", text });
+    return;
+  }
+  if (sendRfbText(text)) return;
+  log("Virtual keyboard is waiting for the Hyper-V browser display to connect.");
+};
+
+const sendVirtualKeyboardKey = async (key, { text = false } = {}) => {
+  if (text) {
+    await sendVirtualKeyboardText(key);
+    return;
+  }
+  if (state.hyperVConsoleActive) {
+    await sendHyperVConsoleInput({ type: "key", key });
+    return;
+  }
+  if (sendRfbSpecialKey(key)) return;
+  log("Virtual keyboard is waiting for the Hyper-V browser display to connect.");
+};
+
 const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   if (!vncPath) return null;
 
@@ -2779,6 +2931,7 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
     status.remove();
     requestGuestDesktopResize(`${runtimeName} viewport`);
     log(`${runtimeName} display connected in browser.`);
+    updateButtons();
   });
   rfb.addEventListener("disconnect", () => {
     if (state.nativeRfb === rfb) {
@@ -2787,6 +2940,7 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
     if (state.emulator) {
       log(`${runtimeName} display disconnected.`);
     }
+    updateButtons();
   });
 
   return rfb;
@@ -2814,6 +2968,8 @@ const stopHyperVSetupConsole = () => {
     URL.revokeObjectURL(state.hyperVConsoleFrameUrl);
     state.hyperVConsoleFrameUrl = null;
   }
+  state.hyperVConsolePollNow = null;
+  updateButtons();
 };
 
 const sendHyperVConsoleInput = async (payload) => {
@@ -2824,6 +2980,7 @@ const sendHyperVConsoleInput = async (payload) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    state.hyperVConsolePollNow?.(80);
   } catch (error) {
     log(`Hyper-V setup input failed: ${error.message}`);
   }
@@ -2948,15 +3105,23 @@ const startHyperVSetupConsole = (base) => {
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
       status.textContent = "Use Tab, arrows, Enter, and paste text here to control setup.";
-      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 1100);
+      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 650);
     } catch (error) {
       status.textContent = `Hyper-V setup mirror waiting: ${error.message}`;
-      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 1800);
+      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 1200);
     }
+  };
+  state.hyperVConsolePollNow = (delay = 80) => {
+    if (!state.hyperVConsoleActive) return;
+    if (state.hyperVConsoleTimer) {
+      window.clearTimeout(state.hyperVConsoleTimer);
+    }
+    state.hyperVConsoleTimer = window.setTimeout(pollFrame, delay);
   };
 
   void pollFrame();
   log("Mirroring Hyper-V setup into the requesting browser viewport.");
+  updateButtons();
 };
 
 const adoptRunningHyperVViewport = async (status, base) => {
@@ -3307,6 +3472,13 @@ const updateButtons = (busy = false) => {
   els.windowsTemplateButton.disabled =
     busy || Boolean(state.emulator) || state.hostStagedIsoUploading || state.windowsTemplateLoading;
   els.windowsTemplateButton.classList.toggle("is-active", state.windowsTemplateSelected);
+  const virtualKeyboardAvailable =
+    isHyperVMode() && (state.hyperVConsoleActive || Boolean(state.nativeRfb));
+  els.virtualKeyboardButton.hidden = !isHyperVMode();
+  els.virtualKeyboardButton.disabled = busy || !virtualKeyboardAvailable;
+  if (!virtualKeyboardAvailable && state.virtualKeyboardOpen) {
+    setVirtualKeyboardOpen(false);
+  }
   els.bootButton.textContent = androidMode ? "Start Android" : emustarMode ? "Launch Hyper-V" : "Boot VM";
   els.stopButton.textContent = emustarMode ? "End session" : androidMode ? "Stop Android" : "Stop";
   els.pauseButton.textContent = state.running ? "Pause" : "Resume";
@@ -3460,6 +3632,7 @@ const createDemoBootImage = () => {
 
 const stopEmulator = async () => {
   clearNativeMonitor();
+  setVirtualKeyboardOpen(false);
   stopHyperVSetupConsole();
 
   if (isAndroidMode()) {
@@ -5460,6 +5633,9 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (state.virtualKeyboardOpen) {
+      setVirtualKeyboardOpen(false);
+    }
     setEmulatorMenuOpen(false);
     setStoredImagesMenuOpen(false);
     if (!els.keepIsoDialog.hidden) {
@@ -5541,6 +5717,55 @@ const toggleFullscreen = async () => {
 els.fullscreenButton.addEventListener("click", toggleFullscreen);
 document.addEventListener("fullscreenchange", updateFullscreenButton);
 window.addEventListener("resize", () => requestGuestDesktopResize("browser resize"));
+els.virtualKeyboardButton.addEventListener("click", () => {
+  setVirtualKeyboardOpen(!state.virtualKeyboardOpen);
+});
+els.virtualKeyboardClose.addEventListener("click", () => {
+  setVirtualKeyboardOpen(false);
+});
+els.virtualKeyboardSend.addEventListener("click", async () => {
+  const text = els.virtualKeyboardText.value;
+  if (!text) return;
+  await sendVirtualKeyboardText(text);
+  els.virtualKeyboardText.value = "";
+});
+els.virtualKeyboardText.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  els.virtualKeyboardSend.click();
+});
+els.virtualKeyboardKeys.addEventListener("pointerdown", (event) => {
+  if (event.target.closest("button")) {
+    event.preventDefault();
+  }
+});
+els.virtualKeyboardKeys.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-keyboard-type]");
+  if (!button) return;
+  const type = button.dataset.keyboardType;
+  const key = button.dataset.keyboardKey || "";
+
+  if (type === "shift") {
+    state.virtualKeyboardShift = !state.virtualKeyboardShift;
+    renderVirtualKeyboard();
+    return;
+  }
+
+  if (type === "text") {
+    const text =
+      state.virtualKeyboardShift && key.length === 1 && /[a-z]/.test(key)
+        ? key.toUpperCase()
+        : key;
+    await sendVirtualKeyboardKey(text, { text: true });
+    if (state.virtualKeyboardShift && key !== " ") {
+      state.virtualKeyboardShift = false;
+      renderVirtualKeyboard();
+    }
+    return;
+  }
+
+  await sendVirtualKeyboardKey(key);
+});
 
 els.clearLogButton.addEventListener("click", () => {
   els.logOutput.textContent = "";

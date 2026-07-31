@@ -2495,6 +2495,7 @@ input[type="text"] {
 }
 
 .screen-shell {
+  position: relative;
   display: grid;
   width: 100%;
   min-height: clamp(360px, 58vh, 700px);
@@ -2566,6 +2567,93 @@ input[type="text"] {
 
 .qemu-terminal[hidden] {
   display: none;
+}
+
+.virtual-keyboard {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 38;
+  display: grid;
+  max-height: min(330px, calc(100% - 24px));
+  gap: 10px;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid rgba(255, 228, 94, 0.42);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(255, 228, 94, 0.16), transparent 34%),
+    rgba(5, 9, 14, 0.96);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.48);
+}
+
+.virtual-keyboard[hidden] {
+  display: none;
+}
+
+.virtual-keyboard-head,
+.virtual-keyboard-send {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.virtual-keyboard-head {
+  justify-content: space-between;
+  color: #ffe45e;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
+.virtual-keyboard-send input {
+  min-width: 0;
+  flex: 1;
+  min-height: 38px;
+  border-color: rgba(96, 220, 255, 0.34);
+  background: rgba(9, 18, 27, 0.94);
+}
+
+.virtual-keyboard-keys {
+  display: grid;
+  gap: 7px;
+}
+
+.virtual-keyboard-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(42px, 1fr));
+  gap: 6px;
+}
+
+.virtual-keyboard-row button {
+  min-height: 38px;
+  padding: 6px 8px;
+  border: 1px solid rgba(96, 220, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(16, 28, 41, 0.96);
+  color: #edf7ff;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.virtual-keyboard-row button:hover,
+.virtual-keyboard-row button:focus-visible {
+  border-color: rgba(255, 228, 94, 0.72);
+  color: #fff8be;
+  outline: none;
+}
+
+.virtual-keyboard-row button.is-active,
+.compact-button.is-active {
+  border-color: rgba(255, 228, 94, 0.82);
+  background: #ffe45e;
+  color: #0a0f15;
+}
+
+.virtual-keyboard-row button.is-wide {
+  grid-column: span 2;
 }
 
 .native-display {
@@ -2704,6 +2792,34 @@ input[type="text"] {
   .android-avd-stats,
   .android-avd-actions {
     grid-template-columns: 1fr;
+  }
+
+  .virtual-keyboard {
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    max-height: min(300px, calc(100% - 16px));
+    padding: 10px;
+  }
+
+  .virtual-keyboard-head,
+  .virtual-keyboard-send {
+    align-items: stretch;
+  }
+
+  .virtual-keyboard-send {
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+
+  .virtual-keyboard-row {
+    grid-template-columns: repeat(auto-fit, minmax(36px, 1fr));
+  }
+
+  .virtual-keyboard-row button {
+    min-height: 36px;
+    padding: 5px 6px;
+    font-size: 0.78rem;
   }
 }
 
