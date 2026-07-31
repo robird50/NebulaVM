@@ -3161,6 +3161,7 @@ const adoptRunningHyperVViewport = async (status, base) => {
     state.emulator = {
       stop: async () => {
         state.nativeRfb?.disconnect();
+        await fetchHyperVJson("stop", { method: "POST" });
       },
       destroy: async () => {
         state.nativeRfb?.disconnect();
@@ -3926,6 +3927,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
     stop: async () => {
       stopHyperVSetupConsole();
       rfb?.disconnect();
+      await fetchHyperVJson("stop", { method: "POST" });
     },
     destroy: async () => {
       stopHyperVSetupConsole();

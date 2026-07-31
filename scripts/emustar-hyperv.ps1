@@ -114,6 +114,47 @@ function Assert-HyperVReady {
   }
 }
 
+function Send-BootPromptKeys {
+  param(
+    [int]$Seconds = 14
+  )
+
+  $deadline = (Get-Date).AddSeconds($Seconds)
+  $sent = 0
+  while ((Get-Date) -lt $deadline) {
+    $computer = Get-CimInstance `
+      -Namespace root\virtualization\v2 `
+      -ClassName Msvm_ComputerSystem `
+      -Filter "ElementName='$vmName'" `
+      -ErrorAction SilentlyContinue
+    if ($computer) {
+      $keyboard = Get-CimAssociatedInstance `
+        -InputObject $computer `
+        -ResultClassName Msvm_Keyboard `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+      if ($keyboard) {
+        Invoke-CimMethod `
+          -InputObject $keyboard `
+          -MethodName TypeKey `
+          -Arguments @{ KeyCode = [uint32]32 } `
+          -ErrorAction SilentlyContinue |
+          Out-Null
+        Invoke-CimMethod `
+          -InputObject $keyboard `
+          -MethodName TypeKey `
+          -Arguments @{ KeyCode = [uint32]13 } `
+          -ErrorAction SilentlyContinue |
+          Out-Null
+        $sent += 2
+      }
+    }
+    Start-Sleep -Milliseconds 160
+  }
+
+  return $sent
+}
+
 function Get-BootDevice {
   param(
     [object]$Vm,
@@ -441,6 +482,13 @@ function Start-Emustar {
     }
   } elseif ($vm.State -ne "Running") {
     throw "EMUSTAR cannot start while Hyper-V is in state '$($vm.State)'."
+  }
+
+  if (-not $diskFirst -and $isoProvided) {
+    $bootKeyCount = Send-BootPromptKeys
+    if ($bootKeyCount -gt 0) {
+      $warnings.Add("Sent boot prompt keys so CD-ROM setup can start automatically.")
+    }
   }
 
   if ([string]$config.displayMode -eq "external") {
