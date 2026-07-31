@@ -1,7 +1,7 @@
 # NebulaVM
 
 NebulaVM is an open-source, browser-based virtual machine interface built with
-Vite, v86, EMUSTAR, and optional QEMU backends.
+Vite, v86, Hyper-V, Android Studio Emulator, and optional QEMU backends.
 
 ## What Works
 
@@ -9,14 +9,14 @@ Vite, v86, EMUSTAR, and optional QEMU backends.
 - Optional QEMU backends support additional x64 and ARM64 boot media.
 - Android mode creates a private, disposable Android Studio AVD from a genuine
   system image installed on NebulaVM Host.
-- EMUSTAR serves an installed Windows 11 x64 Hyper-V guest to a browser through
+- Hyper-V serves an installed Windows 11 x64 guest to a browser through
   an authenticated noVNC connection.
-- A free Cloudflare Quick Tunnel makes the EMUSTAR browser link reachable from
+- A free Cloudflare Quick Tunnel makes the Hyper-V browser link reachable from
   desktop and laptop browsers on other networks.
 - Client devices do not need QEMU, Hyper-V, a VPN, or any NebulaVM software.
 
-EMUSTAR uses Microsoft Hyper-V on the host. QEMU is not involved in an EMUSTAR
-session.
+Hyper-V mode uses Microsoft Hyper-V on the host. QEMU is not involved in a
+Hyper-V session.
 
 ## Run Locally
 
@@ -45,7 +45,7 @@ developer code is still required, and IPv4 remains denied.
 node -e "console.log(require('crypto').createHash('sha256').update('your-6-digit-code').digest('hex'))"
 ```
 
-## Public EMUSTAR Host
+## Public Hyper-V Host
 
 The Windows host needs Windows 10/11 Pro or Enterprise, Hyper-V, Node.js, and
 Cloudflared. Those requirements apply only to the host PC.
@@ -56,7 +56,7 @@ Start the supervised host:
 powershell.exe -ExecutionPolicy Bypass -File scripts\start-public-host.ps1
 ```
 
-Choose **EMUSTAR x64 / Hyper-V**, then use **Copy browser link**. Anyone with
+Choose **Hyper-V x64**, then use **Copy browser link**. Anyone with
 that private link can open the shared Windows VM from a modern desktop or
 laptop browser on any network. The host PC must remain powered on, connected to
 the internet, and awake.
@@ -82,7 +82,7 @@ powershell.exe -ExecutionPolicy Bypass -File scripts\install-host-autostart.ps1
 ```
 
 The task runs in the installing user's interactive Windows session after sign-in,
-keeps Vite and the tunnel alive, and allows hidden EMUSTAR and Android Studio
+keeps Vite and the tunnel alive, and allows hidden Hyper-V and Android Studio
 windows to be mirrored into the browser. Keep that Windows user signed in; a
 Session 0 or `SYSTEM` host cannot capture interactive application windows.
 
@@ -96,8 +96,8 @@ media and older Windows 10 Hyper-V firmware.
 powershell.exe -ExecutionPolicy Bypass -File scripts\prepare-windows-guest.ps1
 ```
 
-The script creates the VM when needed and only wipes the dedicated EMUSTAR
-virtual disk under `vm-disks/emustar-hyperv/`. It creates the EFI partitions,
+The script creates the VM when needed and only wipes the dedicated Hyper-V
+virtual disk inside NebulaVM's `vm-disks` folder. It creates the EFI partitions,
 applies image index 6 from the configured x64 ISO, creates the local Nebula
 account, installs TightVNC, and prepares a private host-only display network.
 
@@ -140,7 +140,7 @@ the normal authenticated NebulaVM host connection.
 
 ## Limits
 
-- EMUSTAR exposes one shared Windows VM, not a separate VM per visitor.
+- Hyper-V exposes one shared Windows VM, not a separate VM per visitor.
 - Host CPU, RAM, upload bandwidth, sleep, and internet outages affect clients.
 - Mobile and tablet browsers are intentionally blocked for now.
 - Netlify serves only the static app; it cannot run Hyper-V or store the VHDX.

@@ -2245,7 +2245,7 @@ const nativeVarsName = (profile) => {
 
 const resetNativeFirmware = (body) => {
   if (nativeVm) {
-    throw new Error("Stop EMUSTAR before resetting its UEFI settings.");
+    throw new Error("Stop Hyper-V before resetting its UEFI settings.");
   }
 
   const arch = normalizeArch(body.arch);
@@ -2281,7 +2281,7 @@ const nativeStatus = (requestedArch = "x86_64") => {
     running: Boolean(nativeVm),
     pid: nativeVm?.pid || null,
     embeddedDisplay: Boolean(nativeVm?.vncPort),
-    runtime: activeNativeRuntimeName || "EMUSTAR",
+    runtime: activeNativeRuntimeName || "Hyper-V",
     engine: "QEMU",
     lastExit: lastNativeExit,
   };
@@ -2330,7 +2330,7 @@ const startNativeVm = async (body) => {
   const hyperVStatus = await runHyperVAction("Status", {}, 45000).catch(() => null);
   if (hyperVStatus?.vm?.state === "Running") {
     await runHyperVAction("Stop", {}, 120000);
-    replacedRuntime = "EMUSTAR Hyper-V";
+    replacedRuntime = "Hyper-V";
   }
 
   const arch = normalizeArch(body.arch);
@@ -2588,7 +2588,7 @@ const nativeQemuPlugin = () => ({
       try {
         const status = await withHyperVDisplayStatus(await runHyperVAction("Status"));
         if (!status.guestAddress || !status.vncReady) {
-          socket.close(1011, "The EMUSTAR guest display is not ready.");
+          socket.close(1011, "The Hyper-V guest display is not ready.");
           return;
         }
 
@@ -2613,7 +2613,7 @@ const nativeQemuPlugin = () => ({
         socket.on("error", closeBoth);
         socket.on("close", closeBoth);
       } catch {
-        socket.close(1011, "The EMUSTAR guest display could not be reached.");
+        socket.close(1011, "The Hyper-V guest display could not be reached.");
       }
     });
 
@@ -2830,7 +2830,7 @@ const nativeQemuPlugin = () => ({
       }
 
       if (!isAuthorizedHostRequest(req, url)) {
-        json(res, 401, { error: "This EMUSTAR host link is missing a valid access token." });
+        json(res, 401, { error: "This Hyper-V host link is missing a valid access token." });
         return;
       }
 

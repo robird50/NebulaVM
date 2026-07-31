@@ -58,7 +58,7 @@ const connect = async () => {
       throw new Error(
         status.running
           ? "The Windows VM is running, but its browser display is not ready yet."
-          : "Start the Windows VM with EMUSTAR on the host first.",
+          : "Start the Windows VM with Hyper-V on the host first.",
       );
     }
 
