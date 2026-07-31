@@ -1454,7 +1454,7 @@ const log = (message) => {
 };
 
 const nativeQemuBridgeMessage = isNetlifyLauncher
-  ? "NebulaVM is waiting for a live Windows EMUSTAR host. Keep the Windows host PC online, then refresh this page."
+  ? "NebulaVM is waiting for the public Windows EMUSTAR host to come back online. This is a NebulaVM host issue, not a problem with your device. Refresh this page in a moment."
   : "Native runtimes need the local NebulaVM bridge. Run NebulaVM locally with npm run host, then keep this page open.";
 
 const nativeBridgeBases = () => {
@@ -1581,7 +1581,7 @@ const fetchHyperVFrame = async (contentOnly = false) => {
 };
 
 const androidBridgeMessage = isNetlifyLauncher
-  ? "The Android host is offline. Keep the Windows host running NebulaVM Host, then try again."
+  ? "The public Android host is offline or unreachable right now. This is a NebulaVM host issue, not a problem with your device. Try again in a moment."
   : "The real Android Emulator needs NebulaVM Host running locally.";
 
 const prepareAndroidBridgeBases = async () => {
@@ -2121,9 +2121,10 @@ const addStoredIsoFromFile = async (file) => {
   }
 };
 
-const HOST_UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
-const HOST_UPLOAD_MAX_ATTEMPTS = 5;
+const HOST_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+const HOST_UPLOAD_MAX_ATTEMPTS = 8;
 const HOST_UPLOAD_CONFIRM_ATTEMPTS = 10;
+const HOST_UPLOAD_RECOVERY_ATTEMPTS = 18;
 
 const createHostUploadId = (file) => {
   const name = String(file.name || "browser-upload.iso")
@@ -2140,6 +2141,7 @@ const uploadBrowserIsoChunkToBase = (base, file, uploadId, start, end, onProgres
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${base}/api/emustar-host/upload-iso-chunk`, true);
     xhr.responseType = "json";
+    xhr.timeout = 5 * 60 * 1000;
     if (state.nativeHostToken) {
       xhr.setRequestHeader("Authorization", `Bearer ${state.nativeHostToken}`);
     }
@@ -2169,6 +2171,7 @@ const uploadBrowserIsoChunkToBase = (base, file, uploadId, start, end, onProgres
       resolveUpload(data);
     };
     xhr.onerror = () => rejectUpload(new Error(nativeQemuBridgeMessage));
+    xhr.ontimeout = () => rejectUpload(new Error("The host upload paused because the connection timed out."));
     xhr.onabort = () => rejectUpload(new Error("Browser ISO upload was canceled."));
     xhr.send(file.slice(start, end));
   });
@@ -2273,7 +2276,7 @@ const uploadBrowserIsoToBase = async (base, file, uploadId, onProgress) => {
             percent: Math.max(0, Math.min(100, (start / file.size) * 100)),
             retrying: true,
           });
-          await wait(800 * attempt);
+          await wait(Math.min(6000, 900 * attempt));
         }
       }
     }
@@ -2303,7 +2306,7 @@ const uploadBrowserIsoToHost = async (file, onProgress) => {
   const uploadId = createHostUploadId(file);
   let lastError = new Error(nativeQemuBridgeMessage);
 
-  const recoveryAttempts = isNetlifyLauncher ? 6 : 1;
+  const recoveryAttempts = isNetlifyLauncher ? HOST_UPLOAD_RECOVERY_ATTEMPTS : 1;
   for (let recoveryAttempt = 0; recoveryAttempt < recoveryAttempts; recoveryAttempt += 1) {
     if (isNetlifyLauncher && recoveryAttempt > 0) {
       await wait(5000);
@@ -2338,7 +2341,15 @@ const resetHostStagingProgress = () => {
   els.hostStagingSpeed.textContent = "0 KB/s";
 };
 
-const updateHostStagingProgress = ({ bytesUploaded = 0, totalBytes = 0, startedAt = performance.now(), complete = false } = {}) => {
+const updateHostStagingProgress = ({
+  bytesUploaded = 0,
+  totalBytes = 0,
+  startedAt = performance.now(),
+  complete = false,
+  confirming = false,
+  resumed = false,
+  retrying = false,
+} = {}) => {
   const percent = totalBytes > 0 ? Math.max(0, Math.min(100, (bytesUploaded / totalBytes) * 100)) : 0;
   const elapsedSeconds = Math.max(0.001, (performance.now() - startedAt) / 1000);
   const speed = complete ? 0 : bytesUploaded / elapsedSeconds;
@@ -2346,19 +2357,35 @@ const updateHostStagingProgress = ({ bytesUploaded = 0, totalBytes = 0, startedA
   const percentText = complete ? "100%" : `${Math.floor(percent)}%`;
   const uploaded = formatBytes(bytesUploaded);
   const total = totalBytes ? ` / ${formatBytes(totalBytes)}` : "";
+  const progressLabel = finalizing
+    ? "100% - Finalizing on host..."
+    : retrying
+      ? `${percentText} - Reconnecting, will resume from ${uploaded}${total}`
+      : resumed
+        ? `${percentText} - Resumed at ${uploaded}${total}`
+        : `${percentText} - ${uploaded}${total}`;
 
   els.hostStagingProgress.hidden = false;
   els.hostStagingProgressFill.style.width = `${percent}%`;
   els.hostStagingProgress.querySelector(".host-staging-track").setAttribute("aria-valuenow", String(Math.round(percent)));
-  els.hostStagingProgressText.textContent = finalizing
-    ? "100% - Finalizing on host..."
-    : `${percentText} - ${uploaded}${total}`;
-  els.hostStagingSpeed.textContent = complete ? "Complete" : finalizing ? "Verifying" : formatTransferSpeed(speed);
+  els.hostStagingProgressText.textContent = progressLabel;
+  els.hostStagingSpeed.textContent = complete
+    ? "Complete"
+    : finalizing || confirming
+      ? "Verifying"
+      : retrying
+        ? "Retrying"
+        : formatTransferSpeed(speed);
 };
 
-const cleanupStagedHostIso = async ({ keepalive = false, silent = false, preserveUploadLock = false } = {}) => {
+const cleanupStagedHostIso = async ({
+  keepalive = false,
+  silent = false,
+  preserveUploadLock = false,
+  cleanupPartial = false,
+} = {}) => {
   const sessionId = state.hostStagedIsoSessionId || state.nativeSessionId;
-  const shouldCleanup = Boolean(state.hostStagedIsoPath || state.hostStagedIsoSessionId);
+  const shouldCleanup = Boolean(state.hostStagedIsoPath || (cleanupPartial && state.hostStagedIsoSessionId));
   if (!shouldCleanup || !sessionId) return;
 
   const resetStagedState = () => {
@@ -2474,9 +2501,10 @@ const stageSelectedIsoForEmustar = (file = state.isoFile) => {
     return state.hostStagedIsoPath;
   })()
     .catch((error) => {
-      els.isoMeta.textContent = `${file.name} - host staging failed`;
+      els.isoMeta.textContent = `${file.name} - staging paused; launch again to resume`;
       els.hostStagingSpeed.textContent = "Failed";
-      log(`Host staging failed: ${error.message}`);
+      log(`Host staging paused: ${error.message}`);
+      log("Select Launch again with the same ISO to resume from the host's saved progress.");
       throw error;
     })
     .finally(() => {
@@ -5343,7 +5371,7 @@ els.clearLogButton.addEventListener("click", () => {
 });
 
 window.addEventListener("pagehide", () => {
-  void cleanupStagedHostIso({ keepalive: true, silent: true });
+  void cleanupStagedHostIso({ keepalive: true, silent: true, cleanupPartial: true });
   if (state.androidNativeActive && state.nativeQemuApiBase) {
     const headers = {
       "X-NebulaVM-Session": state.nativeSessionId,
@@ -5359,7 +5387,7 @@ window.addEventListener("pagehide", () => {
 });
 window.addEventListener("beforeunload", () => {
   stopAndroidLeaseHeartbeat();
-  void cleanupStagedHostIso({ keepalive: true, silent: true });
+  void cleanupStagedHostIso({ keepalive: true, silent: true, cleanupPartial: true });
   void stopEmulator();
 });
 
