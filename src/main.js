@@ -3103,8 +3103,29 @@ const isSelectedMediaTooLarge = () =>
   state.isoFile &&
   state.isoFile.size > MAX_BROWSER_MEDIA_BYTES;
 
+const isHostStoredMediaSelectedForBrowserMode = () =>
+  !isAndroidMode() &&
+  !isNativeMode() &&
+  !isRemoteMode() &&
+  Boolean(els.nativeIsoPath.value.trim()) &&
+  !state.isoFile;
+
 const updateMediaWarning = () => {
-  if (isAndroidMode() || !isSelectedMediaTooLarge()) {
+  if (isAndroidMode()) {
+    els.mediaWarning.hidden = true;
+    els.mediaWarning.textContent = "";
+    return;
+  }
+
+  if (isHostStoredMediaSelectedForBrowserMode()) {
+    els.mediaWarning.hidden = false;
+    els.mediaWarning.textContent =
+      "This ISO is stored on the NebulaVM host, but the selected emulator runs only inside this browser. " +
+      "Choose EMUSTAR or QEMU large ISO, or drop the ISO file again for Nebula x86 / v86.";
+    return;
+  }
+
+  if (!isSelectedMediaTooLarge()) {
     els.mediaWarning.hidden = true;
     els.mediaWarning.textContent = "";
     return;
@@ -3118,10 +3139,12 @@ const updateMediaWarning = () => {
 };
 
 const updateButtons = (busy = false) => {
+  updateMediaWarning();
   updateWindowsCredentialUi();
   const externalMode = isExternalMode();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   const androidMode = isAndroidMode();
+  const mediaWarningBlocksBoot = !els.mediaWarning.hidden && Boolean(els.mediaWarning.textContent);
   const hasBootMedia = androidMode
     ? true
     : emustarMode
@@ -3140,10 +3163,11 @@ const updateButtons = (busy = false) => {
   els.bootButton.disabled =
     !hasBootMedia ||
     Boolean(state.emulator) ||
-    isSelectedMediaTooLarge() ||
+    mediaWarningBlocksBoot ||
     nativeUnavailable ||
     windowsCredentialsBlocked ||
     state.hostStagedIsoUploading;
+  els.bootButton.title = els.bootButton.disabled && mediaWarningBlocksBoot ? els.mediaWarning.textContent : "";
   els.pauseButton.disabled = busy || !state.emulator || externalMode;
   els.stopButton.disabled = busy || !state.emulator;
   els.resetButton.disabled = busy || !state.emulator || externalMode;
