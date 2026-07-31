@@ -296,7 +296,7 @@ function Start-Emustar {
   $guestType = [string]$config.guestType
   $isWindowsGuest = $guestType -eq "windows"
   if ([string]::IsNullOrWhiteSpace($guestType)) {
-    $isWindowsGuest = [IO.Path]::GetFileName($isoPath) -match '(?i)(^|[^a-z0-9])(windows|win[0-9]+)'
+    $isWindowsGuest = [IO.Path]::GetFileName($isoPath) -match '(?i)(^|[^a-z0-9])(windows|win(?:dows)?[\s_-]*[0-9]+|w[0-9]+)(?=[^a-z0-9]|$)'
   }
   $vmDirectory = [string]$config.vmDirectory
   if ([string]::IsNullOrWhiteSpace($vmDirectory)) {

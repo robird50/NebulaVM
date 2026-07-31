@@ -3032,7 +3032,8 @@ const hasEmulatorIcon = (value) =>
 const looksLikeArm64Iso = (path) => /(^|[^a-z0-9])(arm64|aarch64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeX64Iso = (path) => /(^|[^a-z0-9])(x64|amd64|x86_64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeUbuntuIso = (path) => /(^|[^a-z0-9])ubuntu(?=[^a-z0-9]|$)/i.test(path);
-const looksLikeWindowsIso = (path) => /(^|[^a-z0-9])(windows|win\d*)(?=[^a-z0-9]|$)/i.test(path);
+const looksLikeWindowsIso = (path) =>
+  /(^|[^a-z0-9])(windows|win(?:dows)?[\s_-]*\d+|w\d+)(?=[^a-z0-9]|$)/i.test(path);
 const selectedIsoDescriptor = () =>
   [els.nativeIsoPath.value.trim(), state.isoFile?.name || "", els.isoMeta.textContent || ""].join(" ");
 const selectedIsoLooksLikeWindows = () => looksLikeWindowsIso(selectedIsoDescriptor());

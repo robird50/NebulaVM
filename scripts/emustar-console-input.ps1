@@ -269,6 +269,78 @@ function ConvertTo-SendKeysKey {
   }
 }
 
+function ConvertTo-VirtualKeyCode {
+  param([string]$Key)
+
+  switch ($Key) {
+    "Enter" { return 13 }
+    "Escape" { return 27 }
+    "Backspace" { return 8 }
+    "Delete" { return 46 }
+    "Tab" { return 9 }
+    "ArrowUp" { return 38 }
+    "ArrowDown" { return 40 }
+    "ArrowLeft" { return 37 }
+    "ArrowRight" { return 39 }
+    "Home" { return 36 }
+    "End" { return 35 }
+    "PageUp" { return 33 }
+    "PageDown" { return 34 }
+    " " { return 32 }
+    default {
+      if ($Key -match '^F([1-9]|1[0-2])$') {
+        return 111 + [int]$Matches[1]
+      }
+      if ($Key.Length -eq 1) {
+        return [int][char]$Key.ToUpperInvariant()
+      }
+      return $null
+    }
+  }
+}
+
+function Get-VirtualKeyboard {
+  $vm = Get-CimInstance -Namespace root\virtualization\v2 -ClassName Msvm_ComputerSystem -Filter "ElementName='$VmName'" -ErrorAction SilentlyContinue
+  if (-not $vm) {
+    return $null
+  }
+
+  return Get-CimAssociatedInstance -InputObject $vm -ResultClassName Msvm_Keyboard -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+}
+
+function Send-VirtualKeyboardInput {
+  param(
+    [object]$Config,
+    [string]$Type
+  )
+
+  $keyboard = Get-VirtualKeyboard
+  if (-not $keyboard) {
+    return $false
+  }
+
+  if ($Type -eq "text") {
+    $text = [string]$Config.text
+    if ([string]::IsNullOrEmpty($text)) {
+      return $false
+    }
+    $result = Invoke-CimMethod -InputObject $keyboard -MethodName TypeText -Arguments @{ AsciiText = $text }
+    return [int]$result.ReturnValue -eq 0
+  }
+
+  if ($Type -eq "key") {
+    $keyCode = ConvertTo-VirtualKeyCode -Key ([string]$Config.key)
+    if ($null -eq $keyCode) {
+      return $false
+    }
+    $result = Invoke-CimMethod -InputObject $keyboard -MethodName TypeKey -Arguments @{ KeyCode = [uint32]$keyCode }
+    return [int]$result.ReturnValue -eq 0
+  }
+
+  return $false
+}
+
 try {
   Ensure-BridgeAssemblies
   $config = Read-Config
@@ -282,8 +354,24 @@ try {
   $sequence = ""
 
   if ($type -eq "text") {
+    if (Send-VirtualKeyboardInput -Config $config -Type $type) {
+      Hide-ConsoleFromHost -Process $process
+      [ordered]@{
+        ok = $true
+        input = $type
+      } | ConvertTo-Json -Depth 4 -Compress
+      exit 0
+    }
     $sequence = ConvertTo-SendKeysLiteral -Text ([string]$config.text)
   } elseif ($type -eq "key") {
+    if (Send-VirtualKeyboardInput -Config $config -Type $type) {
+      Hide-ConsoleFromHost -Process $process
+      [ordered]@{
+        ok = $true
+        input = $type
+      } | ConvertTo-Json -Depth 4 -Compress
+      exit 0
+    }
     $sequence = ConvertTo-SendKeysKey -Key ([string]$config.key)
     if ([bool]$config.shiftKey -and -not [string]::IsNullOrEmpty($sequence)) {
       $sequence = "+$sequence"
