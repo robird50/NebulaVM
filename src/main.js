@@ -20,6 +20,10 @@ const MOBILE_DEV_ATTEMPTS_KEY = "nebulavm.mobile.devAttempts";
 const MOBILE_DEV_LOCK_KEY = "nebulavm.mobile.devLockUntil";
 const MOBILE_DEV_MAX_ATTEMPTS = 5;
 const MOBILE_DEV_LOCK_MS = 5 * 60 * 1000;
+const HYPERV_MIRROR_FAST_FRAME_MS = 33;
+const HYPERV_MIRROR_HIGH_FRAME_MS = 50;
+const HYPERV_MIRROR_IDLE_FRAME_MS = 83;
+const HYPERV_MIRROR_RETRY_MS = 500;
 const MOBILE_PUBLIC_RELEASE = true;
 const MOBILE_DEV_GATE_ENABLED = !MOBILE_PUBLIC_RELEASE;
 const ANDROID_CURATED_VERSIONS = [2, 4, 5, 6, 8, 9, 12, 16, 17];
@@ -3306,7 +3310,7 @@ const stopHyperVSetupConsole = () => {
 
 const sendHyperVConsoleInput = async (payload) => {
   if (!state.hyperVConsoleActive) return;
-  state.hyperVConsoleFastUntil = Date.now() + 1600;
+  state.hyperVConsoleFastUntil = Date.now() + 2200;
   state.hyperVConsolePollNow?.(8);
   try {
     await fetchHyperVJson("console-input", {
@@ -3324,6 +3328,7 @@ const startHyperVSetupConsole = (base) => {
   stopHyperVSetupConsole();
 
   state.hyperVConsoleActive = true;
+  state.hyperVConsoleFastUntil = Date.now() + (state.windowsTemplateSelected ? 12000 : 3000);
   state.nativeQemuApiBase = base || state.nativeQemuApiBase || window.location.origin;
   els.screenPlaceholder.hidden = true;
   els.screenContainer.querySelector(".vga-text").hidden = true;
@@ -3391,7 +3396,7 @@ const startHyperVSetupConsole = (base) => {
     image.releasePointerCapture?.(event.pointerId);
     const moved = Math.hypot(point.x - pointerStart.x, point.y - pointerStart.y);
     if (moved > 18) {
-      state.hyperVConsoleFastUntil = Date.now() + 500;
+      state.hyperVConsoleFastUntil = Date.now() + 1200;
     }
     pointerStart = null;
   };
@@ -3477,11 +3482,17 @@ const startHyperVSetupConsole = (base) => {
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
       status.textContent = "Use Tab, arrows, Enter, and paste text here to control setup.";
-      const nextDelay = Date.now() < state.hyperVConsoleFastUntil ? 83 : 280;
+      const highFrameMode = state.windowsTemplateSelected || isScreenFullscreen();
+      const nextDelay =
+        Date.now() < state.hyperVConsoleFastUntil
+          ? HYPERV_MIRROR_FAST_FRAME_MS
+          : highFrameMode
+            ? HYPERV_MIRROR_HIGH_FRAME_MS
+            : HYPERV_MIRROR_IDLE_FRAME_MS;
       state.hyperVConsoleTimer = window.setTimeout(pollFrame, nextDelay);
     } catch (error) {
       status.textContent = `Hyper-V setup mirror waiting: ${error.message}`;
-      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 800);
+      state.hyperVConsoleTimer = window.setTimeout(pollFrame, HYPERV_MIRROR_RETRY_MS);
     }
   };
   state.hyperVConsolePollNow = (delay = 80) => {

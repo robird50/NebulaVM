@@ -9,6 +9,10 @@ const reconnectButton = document.querySelector("#reconnectButton");
 const fullscreenButton = document.querySelector("#fullscreenButton");
 const fullscreenExitButton = document.querySelector("#fullscreenExitButton");
 const expectedSessionId = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("session") || "";
+const REMOTE_MIRROR_FAST_FRAME_MS = 33;
+const REMOTE_MIRROR_HIGH_FRAME_MS = 50;
+const REMOTE_MIRROR_IDLE_FRAME_MS = 83;
+const REMOTE_MIRROR_RETRY_MS = 500;
 
 let rfb = null;
 let mirrorTimer = null;
@@ -195,7 +199,7 @@ const fetchMirrorFrame = async (contentOnly = false) => {
 
 const sendMirrorInput = async (payload) => {
   if (!mirrorActive) return;
-  mirrorFastUntil = Date.now() + 1600;
+  mirrorFastUntil = Date.now() + 2200;
   pollMirrorFrame(8);
   try {
     await fetch(`${mirrorBase}/api/emustar-hyperv/console-input`, {
@@ -265,7 +269,7 @@ const startMirrorConsole = (base, token) => {
     event.preventDefault();
     image.releasePointerCapture?.(event.pointerId);
     const moved = Math.hypot(point.x - pointerStart.x, point.y - pointerStart.y);
-    if (moved > 18) mirrorFastUntil = Date.now() + 500;
+    if (moved > 18) mirrorFastUntil = Date.now() + 1200;
     pointerStart = null;
   });
 
@@ -331,11 +335,16 @@ const startMirrorConsole = (base, token) => {
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
       status.textContent = "Click, type, Tab, arrows, Enter, and paste to control this VM.";
-      const nextDelay = Date.now() < mirrorFastUntil ? 83 : 280;
+      const nextDelay =
+        Date.now() < mirrorFastUntil
+          ? REMOTE_MIRROR_FAST_FRAME_MS
+          : isRemoteFullscreen()
+            ? REMOTE_MIRROR_HIGH_FRAME_MS
+            : REMOTE_MIRROR_IDLE_FRAME_MS;
       mirrorTimer = window.setTimeout(poll, nextDelay);
     } catch (error) {
       status.textContent = `Waiting for Hyper-V mirror: ${error.message}`;
-      mirrorTimer = window.setTimeout(poll, 800);
+      mirrorTimer = window.setTimeout(poll, REMOTE_MIRROR_RETRY_MS);
     }
   };
 
