@@ -228,9 +228,13 @@ function Set-LowHostMemoryProfile {
 
   if ($FixedStartup) {
     $freeMemoryMb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
-    $reserveMb = 512
-    if ($freeMemoryMb -lt ($MemoryMb + $reserveMb)) {
-      throw "Hyper-V needs about $($MemoryMb + $reserveMb) MB of free host memory to boot this Windows guest with a fixed $MemoryMb MB startup allocation, but only $freeMemoryMb MB is currently free. Close a few applications or browser tabs, then launch it again."
+    $hardReserveMb = 128
+    $comfortReserveMb = 512
+    if ($freeMemoryMb -lt ($MemoryMb + $hardReserveMb)) {
+      throw "Hyper-V needs at least $MemoryMb MB of free host memory, plus a small host cushion, to boot this Windows guest. Only $freeMemoryMb MB is currently free. Close a few applications or browser tabs, then launch it again."
+    }
+    if ($freeMemoryMb -lt ($MemoryMb + $comfortReserveMb)) {
+      $warnings.Add("Host memory is tight: $freeMemoryMb MB is free for a fixed $MemoryMb MB Windows startup allocation. Hyper-V will still try to boot it.")
     }
     Set-VMMemory -VM $Vm -DynamicMemoryEnabled $false -StartupBytes ($MemoryMb * 1MB)
     return
