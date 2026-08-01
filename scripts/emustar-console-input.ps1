@@ -131,6 +131,13 @@ function Get-VmConnectChromeTopPixels {
   return [math]::Min(96, [math]::Max(58, [math]::Round($ClientHeight * 0.075)))
 }
 
+function Get-VmConnectChromeBottomPixels {
+  param([int]$ClientHeight)
+
+  # Hide VMConnect's bottom status strip in fullscreen/browser-content mode.
+  return [math]::Min(36, [math]::Max(20, [math]::Round($ClientHeight * 0.03)))
+}
+
 function Get-TargetConsoleProcesses {
   $processIds = Get-CimInstance Win32_Process -Filter "Name = 'vmconnect.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -and $_.CommandLine -like "*$VmName*" } |
@@ -201,7 +208,22 @@ function Get-ConsoleBounds {
   param([object]$Process)
 
   $rect = New-Object NebulaVM.RECT
-  if (-not [NebulaVM.NativeConsoleInput]::GetWindowRect($Process.MainWindowHandle, [ref]$rect)) {
+  $measured = $false
+  $deadline = (Get-Date).AddSeconds(3)
+  do {
+    try {
+      $Process.Refresh()
+    } catch {
+      # Best effort only.
+    }
+    $measured = [NebulaVM.NativeConsoleInput]::GetWindowRect($Process.MainWindowHandle, [ref]$rect)
+    if ($measured) {
+      break
+    }
+    Start-Sleep -Milliseconds 120
+  } while ((Get-Date) -lt $deadline)
+
+  if (-not $measured) {
     throw "The Hyper-V setup console window could not be measured."
   }
 
@@ -233,10 +255,26 @@ function Get-ConsoleClientBounds {
 
   $rect = New-Object NebulaVM.RECT
   $origin = New-Object NebulaVM.POINT
-  if (
-    -not [NebulaVM.NativeConsoleInput]::GetClientRect($Process.MainWindowHandle, [ref]$rect) -or
-    -not [NebulaVM.NativeConsoleInput]::ClientToScreen($Process.MainWindowHandle, [ref]$origin)
-  ) {
+  $measured = $false
+  $deadline = (Get-Date).AddSeconds(3)
+  do {
+    try {
+      $Process.Refresh()
+    } catch {
+      # Best effort only.
+    }
+    $rect = New-Object NebulaVM.RECT
+    $origin = New-Object NebulaVM.POINT
+    $measured =
+      [NebulaVM.NativeConsoleInput]::GetClientRect($Process.MainWindowHandle, [ref]$rect) -and
+      [NebulaVM.NativeConsoleInput]::ClientToScreen($Process.MainWindowHandle, [ref]$origin)
+    if ($measured) {
+      break
+    }
+    Start-Sleep -Milliseconds 120
+  } while ((Get-Date) -lt $deadline)
+
+  if (-not $measured) {
     throw "The Hyper-V setup console content area could not be measured."
   }
 
@@ -246,7 +284,8 @@ function Get-ConsoleClientBounds {
     throw "The Hyper-V setup console content area is too small for pointer control."
   }
   $chromeTop = Get-VmConnectChromeTopPixels -ClientHeight $height
-  $guestHeight = [math]::Max(64, $height - $chromeTop)
+  $chromeBottom = Get-VmConnectChromeBottomPixels -ClientHeight $height
+  $guestHeight = [math]::Max(64, $height - $chromeTop - $chromeBottom)
 
   return [ordered]@{
     left = [int]$origin.X

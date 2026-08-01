@@ -96,6 +96,13 @@ function Get-VmConnectChromeTopPixels {
   return [math]::Min(96, [math]::Max(58, [math]::Round($ClientHeight * 0.075)))
 }
 
+function Get-VmConnectChromeBottomPixels {
+  param([int]$ClientHeight)
+
+  # Hide VMConnect's bottom status strip in fullscreen/browser-content mode.
+  return [math]::Min(36, [math]::Max(20, [math]::Round($ClientHeight * 0.03)))
+}
+
 function Get-TargetConsoleProcesses {
   $processIds = Get-CimInstance Win32_Process -Filter "Name = 'vmconnect.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -and $_.CommandLine -like "*$VmName*" } |
@@ -141,7 +148,22 @@ function Get-ConsoleBounds {
   param([object]$Process)
 
   $rect = New-Object NebulaVM.RECT
-  if (-not [NebulaVM.NativeConsoleFrame]::GetWindowRect($Process.MainWindowHandle, [ref]$rect)) {
+  $measured = $false
+  $deadline = (Get-Date).AddSeconds(3)
+  do {
+    try {
+      $Process.Refresh()
+    } catch {
+      # Best effort only.
+    }
+    $measured = [NebulaVM.NativeConsoleFrame]::GetWindowRect($Process.MainWindowHandle, [ref]$rect)
+    if ($measured) {
+      break
+    }
+    Start-Sleep -Milliseconds 120
+  } while ((Get-Date) -lt $deadline)
+
+  if (-not $measured) {
     throw "The Hyper-V setup console window could not be measured."
   }
 
@@ -176,10 +198,26 @@ function Get-ConsoleClientBounds {
 
   $rect = New-Object NebulaVM.RECT
   $origin = New-Object NebulaVM.POINT
-  if (
-    -not [NebulaVM.NativeConsoleFrame]::GetClientRect($Process.MainWindowHandle, [ref]$rect) -or
-    -not [NebulaVM.NativeConsoleFrame]::ClientToScreen($Process.MainWindowHandle, [ref]$origin)
-  ) {
+  $measured = $false
+  $deadline = (Get-Date).AddSeconds(3)
+  do {
+    try {
+      $Process.Refresh()
+    } catch {
+      # Best effort only.
+    }
+    $rect = New-Object NebulaVM.RECT
+    $origin = New-Object NebulaVM.POINT
+    $measured =
+      [NebulaVM.NativeConsoleFrame]::GetClientRect($Process.MainWindowHandle, [ref]$rect) -and
+      [NebulaVM.NativeConsoleFrame]::ClientToScreen($Process.MainWindowHandle, [ref]$origin)
+    if ($measured) {
+      break
+    }
+    Start-Sleep -Milliseconds 120
+  } while ((Get-Date) -lt $deadline)
+
+  if (-not $measured) {
     throw "The Hyper-V setup console content area could not be measured."
   }
 
@@ -191,13 +229,14 @@ function Get-ConsoleClientBounds {
     throw "The Hyper-V setup console content area is too small to mirror."
   }
   $chromeTop = Get-VmConnectChromeTopPixels -ClientHeight $height
-  $guestHeight = [math]::Max(64, $height - $chromeTop)
+  $chromeBottom = Get-VmConnectChromeBottomPixels -ClientHeight $height
+  $guestHeight = [math]::Max(64, $height - $chromeTop - $chromeBottom)
 
   return [ordered]@{
     offsetX = [math]::Max(0, $offsetX)
     offsetY = [math]::Max(0, $offsetY + $chromeTop)
     width = [math]::Min($width, [int]$WindowBounds.width - [math]::Max(0, $offsetX))
-    height = [math]::Min($guestHeight, [int]$WindowBounds.height - [math]::Max(0, $offsetY + $chromeTop))
+    height = [math]::Min($guestHeight, [int]$WindowBounds.height - [math]::Max(0, $offsetY + $chromeTop + $chromeBottom))
   }
 }
 
@@ -227,6 +266,7 @@ function Test-ConsoleBitmapLooksStuckConnecting {
   $stepY = [math]::Max(8, [math]::Floor(($bottom - $top) / 60))
   $total = 0
   $darkGray = 0
+  $midGray = 0
   $bright = 0
   $saturated = 0
 
@@ -241,6 +281,9 @@ function Test-ConsoleBitmapLooksStuckConnecting {
       if ($max -lt 75 -and $spread -lt 14) {
         $darkGray += 1
       }
+      if ($max -ge 22 -and $max -lt 75 -and $spread -lt 14) {
+        $midGray += 1
+      }
       if ($min -gt 170) {
         $bright += 1
       }
@@ -254,9 +297,10 @@ function Test-ConsoleBitmapLooksStuckConnecting {
     return $false
   }
 
-  return (($darkGray / $total) -gt 0.86) -and
-    (($bright / $total) -lt 0.035) -and
-    (($saturated / $total) -lt 0.035)
+  return (($darkGray / $total) -gt 0.62) -and
+    (($midGray / $total) -gt 0.42) -and
+    (($bright / $total) -lt 0.18) -and
+    (($saturated / $total) -lt 0.08)
 }
 
 function Get-RecoveryStatePath {
@@ -281,7 +325,7 @@ function Restart-StaleConsoleProcess {
     try {
       $lastTicks = [int64](Get-Content -LiteralPath $statePath -Raw)
       $secondsSinceLastRecovery = ([TimeSpan]::FromTicks($nowTicks - $lastTicks)).TotalSeconds
-      if ($secondsSinceLastRecovery -lt 18) {
+      if ($secondsSinceLastRecovery -lt 6) {
         return $false
       }
     } catch {
