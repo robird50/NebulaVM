@@ -114,7 +114,7 @@ function Focus-Console {
   if ($element) {
     try {
       $element.SetFocus()
-      Start-Sleep -Milliseconds 100
+      Start-Sleep -Milliseconds 8
     } catch {
       # The VMConnect surface may already be active enough for keyboard input.
     }
@@ -209,11 +209,11 @@ function Send-ConsoleClick {
   $screenY = [int][math]::Round($bounds.top + (($relativeY / $sourceHeight) * $bounds.height))
 
   [NebulaVM.NativeConsoleInput]::SetCursorPos($screenX, $screenY) | Out-Null
-  Start-Sleep -Milliseconds 85
+  Start-Sleep -Milliseconds 8
   [NebulaVM.NativeConsoleInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
-  Start-Sleep -Milliseconds 95
+  Start-Sleep -Milliseconds 8
   [NebulaVM.NativeConsoleInput]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
-  Start-Sleep -Milliseconds 80
+  Start-Sleep -Milliseconds 8
 }
 
 function ConvertTo-SendKeysLiteral {

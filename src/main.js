@@ -146,6 +146,7 @@ const state = {
   hyperVConsoleCleanup: null,
   hyperVConsoleFrameUrl: null,
   hyperVConsolePollNow: null,
+  hyperVConsoleFastUntil: 0,
   virtualKeyboardOpen: false,
   virtualKeyboardShift: false,
   guestResizeTimer: null,
@@ -3286,6 +3287,7 @@ const closeHyperVConsole = async () => {
 
 const stopHyperVSetupConsole = () => {
   state.hyperVConsoleActive = false;
+  state.hyperVConsoleFastUntil = 0;
   if (state.hyperVConsoleTimer) {
     window.clearTimeout(state.hyperVConsoleTimer);
     state.hyperVConsoleTimer = null;
@@ -3304,13 +3306,15 @@ const stopHyperVSetupConsole = () => {
 
 const sendHyperVConsoleInput = async (payload) => {
   if (!state.hyperVConsoleActive) return;
+  state.hyperVConsoleFastUntil = Date.now() + 1600;
+  state.hyperVConsolePollNow?.(8);
   try {
     await fetchHyperVJson("console-input", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    state.hyperVConsolePollNow?.(20);
+    state.hyperVConsolePollNow?.(8);
   } catch (error) {
     log(`Hyper-V setup input failed: ${error.message}`);
   }
@@ -3375,7 +3379,9 @@ const startHyperVSetupConsole = (base) => {
       id: event.pointerId,
       x: point.x,
       y: point.y,
+      sent: true,
     };
+    void sendHyperVConsoleInput(point);
   };
 
   const pointerUpHandler = (event) => {
@@ -3384,9 +3390,10 @@ const startHyperVSetupConsole = (base) => {
     event.preventDefault();
     image.releasePointerCapture?.(event.pointerId);
     const moved = Math.hypot(point.x - pointerStart.x, point.y - pointerStart.y);
+    if (moved > 18) {
+      state.hyperVConsoleFastUntil = Date.now() + 500;
+    }
     pointerStart = null;
-    if (moved > 18) return;
-    void sendHyperVConsoleInput(point);
   };
 
   const pointerCancelHandler = (event) => {
@@ -3470,10 +3477,11 @@ const startHyperVSetupConsole = (base) => {
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
       status.textContent = "Use Tab, arrows, Enter, and paste text here to control setup.";
-      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 450);
+      const nextDelay = Date.now() < state.hyperVConsoleFastUntil ? 83 : 280;
+      state.hyperVConsoleTimer = window.setTimeout(pollFrame, nextDelay);
     } catch (error) {
       status.textContent = `Hyper-V setup mirror waiting: ${error.message}`;
-      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 1200);
+      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 800);
     }
   };
   state.hyperVConsolePollNow = (delay = 80) => {

@@ -2920,6 +2920,7 @@ body.screen-app-fullscreen .screen-shell {
     radial-gradient(circle at 50% 0%, rgba(96, 220, 255, 0.11), transparent 36%),
     #02060a;
   cursor: crosshair;
+  touch-action: none;
 }
 
 .android-studio-bridge {
@@ -3064,6 +3065,7 @@ body.screen-app-fullscreen .screen-shell {
   max-height: 100%;
   object-fit: contain;
   user-select: none;
+  touch-action: none;
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.35);
 }
 

@@ -2174,16 +2174,23 @@ const runPowerShellJson = (label, args, timeoutMs = 30000) =>
     });
   });
 
-let hyperVConsoleQueue = Promise.resolve();
+let hyperVConsoleFrameQueue = Promise.resolve();
+let hyperVConsoleInputQueue = Promise.resolve();
 
-const runHyperVConsoleExclusive = (action) => {
-  const next = hyperVConsoleQueue.catch(() => {}).then(action);
-  hyperVConsoleQueue = next.catch(() => {});
+const runHyperVConsoleFrameExclusive = (action) => {
+  const next = hyperVConsoleFrameQueue.catch(() => {}).then(action);
+  hyperVConsoleFrameQueue = next.catch(() => {});
+  return next;
+};
+
+const runHyperVConsoleInputExclusive = (action) => {
+  const next = hyperVConsoleInputQueue.catch(() => {}).then(action);
+  hyperVConsoleInputQueue = next.catch(() => {});
   return next;
 };
 
 const runHyperVConsoleFrame = (contentOnly = false) =>
-  runHyperVConsoleExclusive(() =>
+  runHyperVConsoleFrameExclusive(() =>
     runPowerShellJson(
       "Hyper-V setup console frame",
       [
@@ -2203,7 +2210,7 @@ const runHyperVConsoleFrame = (contentOnly = false) =>
   );
 
 const runHyperVConsoleInput = (body) =>
-  runHyperVConsoleExclusive(() =>
+  runHyperVConsoleInputExclusive(() =>
     runPowerShellJson(
       "Hyper-V setup console input",
       [

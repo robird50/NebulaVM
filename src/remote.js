@@ -18,6 +18,7 @@ let mirrorBase = "";
 let mirrorToken = "";
 let mirrorPoll = null;
 let appFullscreen = false;
+let mirrorFastUntil = 0;
 
 const viewportChildren = (...children) => {
   viewport.replaceChildren(message, ...children.filter(Boolean), fullscreenExitButton);
@@ -116,6 +117,7 @@ const websocketUrl = (base, path, token) => {
 
 const clearMirror = () => {
   mirrorActive = false;
+  mirrorFastUntil = 0;
   if (mirrorTimer) {
     window.clearTimeout(mirrorTimer);
     mirrorTimer = null;
@@ -193,13 +195,15 @@ const fetchMirrorFrame = async (contentOnly = false) => {
 
 const sendMirrorInput = async (payload) => {
   if (!mirrorActive) return;
+  mirrorFastUntil = Date.now() + 1600;
+  pollMirrorFrame(8);
   try {
     await fetch(`${mirrorBase}/api/emustar-hyperv/console-input`, {
       method: "POST",
       headers: remoteHeaders(mirrorToken, { "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
     });
-    pollMirrorFrame(20);
+    pollMirrorFrame(8);
   } catch (error) {
     showMessage("Remote input failed", error.message || "Try again in a moment.", "Live");
   }
@@ -252,6 +256,7 @@ const startMirrorConsole = (base, token) => {
     shell.focus({ preventScroll: true });
     image.setPointerCapture?.(event.pointerId);
     pointerStart = { id: event.pointerId, x: point.x, y: point.y };
+    void sendMirrorInput(point);
   });
 
   image.addEventListener("pointerup", (event) => {
@@ -260,8 +265,8 @@ const startMirrorConsole = (base, token) => {
     event.preventDefault();
     image.releasePointerCapture?.(event.pointerId);
     const moved = Math.hypot(point.x - pointerStart.x, point.y - pointerStart.y);
+    if (moved > 18) mirrorFastUntil = Date.now() + 500;
     pointerStart = null;
-    if (moved <= 18) void sendMirrorInput(point);
   });
 
   image.addEventListener("pointercancel", (event) => {
@@ -326,10 +331,11 @@ const startMirrorConsole = (base, token) => {
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
       status.textContent = "Click, type, Tab, arrows, Enter, and paste to control this VM.";
-      mirrorTimer = window.setTimeout(poll, 450);
+      const nextDelay = Date.now() < mirrorFastUntil ? 83 : 280;
+      mirrorTimer = window.setTimeout(poll, nextDelay);
     } catch (error) {
       status.textContent = `Waiting for Hyper-V mirror: ${error.message}`;
-      mirrorTimer = window.setTimeout(poll, 1200);
+      mirrorTimer = window.setTimeout(poll, 800);
     }
   };
 
