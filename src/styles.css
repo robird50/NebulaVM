@@ -1184,6 +1184,31 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.nintendo-help-link {
+  width: fit-content;
+  margin: -6px auto 0;
+  padding: 2px 0;
+  border-radius: 0;
+  background: transparent;
+  color: #ffdd3d;
+  font-size: 0.84rem;
+  font-weight: 950;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+.nintendo-help-link:hover,
+.nintendo-help-link:focus-visible {
+  color: #fff4a3;
+  outline: none;
+  text-shadow: 0 0 14px rgba(255, 221, 61, 0.45);
+}
+
+.nintendo-help-link[hidden] {
+  display: none;
+}
+
 .media-warning {
   margin: -8px 0 0;
   padding: 11px 12px;
@@ -1211,6 +1236,7 @@ h2 {
 .pc-spec-control[hidden],
 .advanced-options[hidden],
 .drop-zone[hidden],
+.nintendo-help-link[hidden],
 .stored-images-control[hidden],
 .full-width[hidden] {
   display: none;
@@ -1920,6 +1946,131 @@ input[type="text"] {
 
 .faq-panel:focus {
   outline: none;
+}
+
+.nintendo-help-panel {
+  gap: 15px;
+  width: min(740px, 100%);
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  border-color: rgba(255, 221, 61, 0.5);
+  border-top: 4px solid #ffdd3d;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(255, 221, 61, 0.12), transparent 32%),
+    radial-gradient(circle at 92% 12%, rgba(96, 220, 255, 0.12), transparent 30%),
+    #0c141d;
+}
+
+.nintendo-help-panel:focus {
+  outline: none;
+}
+
+.nintendo-help-heading {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(96, 220, 255, 0.2);
+}
+
+.nintendo-help-heading img {
+  width: 62px;
+  height: 62px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 18px rgba(239, 68, 68, 0.22));
+}
+
+.nintendo-help-heading .kicker {
+  margin: 0 0 4px;
+  color: #60dcff;
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+}
+
+.nintendo-help-heading h2 {
+  color: #ffdd3d;
+  font-size: 1.55rem;
+}
+
+.nintendo-help-heading p {
+  margin: 6px 0 0;
+  color: #aeb9c8;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.nintendo-help-sections {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.nintendo-help-sections section {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(145, 217, 207, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.nintendo-help-sections h3 {
+  margin: 0;
+  color: #f5f8fb;
+  font-size: 1rem;
+}
+
+.nintendo-help-sections p {
+  margin: 0;
+  color: #aeb9c8;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.nintendo-help-sections ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.nintendo-help-sections li {
+  color: #ffdd3d;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.nintendo-help-sections a {
+  color: #ffdd3d;
+  font-weight: 900;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.nintendo-help-sections a:hover,
+.nintendo-help-sections a:focus-visible {
+  color: #fff4a3;
+  outline: none;
+}
+
+.nintendo-help-warning {
+  margin: 0;
+  padding: 11px 12px;
+  border: 1px solid rgba(248, 113, 113, 0.32);
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.1);
+  color: #fecaca;
+  font-size: 0.82rem;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+.nintendo-help-actions {
+  display: grid;
 }
 
 .faq-heading {
@@ -3962,6 +4113,7 @@ pre {
 
   .field-grid,
   .nintendo-spec-grid,
+  .nintendo-help-sections,
   .nintendo-runtime-specs,
   .button-row,
   .button-row.compact,

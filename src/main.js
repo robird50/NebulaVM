@@ -294,6 +294,9 @@ app.innerHTML = `
             </span>
           </span>
         </label>
+        <button class="nintendo-help-link" id="nintendoHelpLink" type="button" hidden>
+          Need help finding games?
+        </button>
         <p class="media-warning" id="mediaWarning" hidden></p>
 
         <button class="secondary full-width" id="demoButton" type="button">Demo boot image</button>
@@ -824,6 +827,55 @@ app.innerHTML = `
     </section>
   </div>
 
+  <div class="display-choice-overlay popup-motion-overlay" id="nintendoHelpDialog" role="dialog" aria-modal="true" aria-labelledby="nintendoHelpTitle" hidden>
+    <section class="display-choice-panel nintendo-help-panel popup-motion-panel" id="nintendoHelpPanel" tabindex="-1">
+      <header class="nintendo-help-heading">
+        <img src="/assets/nintendo-icon.webp" alt="" />
+        <div>
+          <p class="kicker">LEGAL HOMEBREW</p>
+          <h2 id="nintendoHelpTitle">Need help finding games?</h2>
+          <p>Use free homebrew, demos from the creator, or backups you legally made from games you own. NebulaVM does not provide commercial Nintendo games.</p>
+        </div>
+      </header>
+
+      <div class="nintendo-help-sections">
+        <section>
+          <h3>Game Boy</h3>
+          <p>Works with mGBA for Game Boy, Game Boy Color, and Game Boy Advance homebrew.</p>
+          <ul>
+            <li><a href="https://itch.io/games/free/tag-gameboy" target="_blank" rel="noreferrer">Free Game Boy homebrew on itch.io</a></li>
+            <li><a href="https://itch.io/games/free/tag-gameboy-color" target="_blank" rel="noreferrer">Free Game Boy Color homebrew on itch.io</a></li>
+            <li><a href="https://itch.io/games/free/tag-gameboy-advance" target="_blank" rel="noreferrer">Free Game Boy Advance homebrew on itch.io</a></li>
+            <li><a href="https://itch.io/c/3268267/all-homebrew-gba-roms" target="_blank" rel="noreferrer">All Homebrew GBA ROMs collection</a></li>
+          </ul>
+        </section>
+
+        <section>
+          <h3>Nintendo DS</h3>
+          <p>Works with melonDS for legal `.nds` homebrew.</p>
+          <ul>
+            <li><a href="https://www.gamebrew.org/wiki/List_of_DS_homebrew_games" target="_blank" rel="noreferrer">GameBrew DS homebrew games list</a></li>
+            <li><a href="https://itch.io/c/1565877/nds-homebrew" target="_blank" rel="noreferrer">NDS Homebrew collection on itch.io</a></li>
+          </ul>
+        </section>
+
+        <section>
+          <h3>Super Nintendo</h3>
+          <p>Works with Snes9x for legal `.sfc` and `.smc` homebrew.</p>
+          <ul>
+            <li><a href="https://itch.io/games/free/tag-homebrew/tag-snes-rom" target="_blank" rel="noreferrer">Free SNES ROM homebrew on itch.io</a></li>
+            <li><a href="https://itch.io/c/1537684/snes-homebrew" target="_blank" rel="noreferrer">SNES Homebrew collection on itch.io</a></li>
+          </ul>
+        </section>
+      </div>
+
+      <p class="nintendo-help-warning">Avoid sites offering free Mario, Pokemon, Zelda, or other commercial ROMs. Those are usually unauthorized copies.</p>
+      <div class="nintendo-help-actions">
+        <button class="primary" id="nintendoHelpOkButton" type="button">OK</button>
+      </div>
+    </section>
+  </div>
+
   <div class="display-choice-overlay popup-motion-overlay" id="nebulaConflictDialog" role="dialog" aria-modal="true" aria-labelledby="nebulaConflictTitle" hidden>
     <section class="display-choice-panel nebula-conflict-panel popup-motion-panel" id="nebulaConflictPanel" tabindex="-1">
       <img class="nebula-conflict-art" src="/assets/nebula-conflict.png" alt="NebulaVM is not connected with the unrelated Nebula astrology app" />
@@ -1046,6 +1098,10 @@ const els = {
   hostStagingProgressText: document.querySelector("#hostStagingProgressText"),
   hostStagingSpeed: document.querySelector("#hostStagingSpeed"),
   hostStagingEta: document.querySelector("#hostStagingEta"),
+  nintendoHelpLink: document.querySelector("#nintendoHelpLink"),
+  nintendoHelpDialog: document.querySelector("#nintendoHelpDialog"),
+  nintendoHelpPanel: document.querySelector("#nintendoHelpPanel"),
+  nintendoHelpOkButton: document.querySelector("#nintendoHelpOkButton"),
   mediaWarning: document.querySelector("#mediaWarning"),
   demoButton: document.querySelector("#demoButton"),
   emulatorMode: document.querySelector("#emulatorMode"),
@@ -5525,6 +5581,7 @@ const updateBackendUi = () => {
   els.storedImagesControl.hidden = androidMode || nintendoMode;
   els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || nintendoMode;
   els.dropZone.hidden = androidMode;
+  els.nintendoHelpLink.hidden = !nintendoMode || androidMode;
   els.mediaWarning.hidden = androidMode;
   els.demoButton.hidden = androidMode || nintendoMode;
   els.androidConfig.hidden = !androidMode;
@@ -5772,6 +5829,19 @@ els.emustarInfoOkButton.addEventListener("click", () => {
 els.emustarInfoDialog.addEventListener("click", (event) => {
   if (event.target === els.emustarInfoDialog) {
     closePopupTo(els.emustarInfoDialog, els.emustarInfoLink);
+  }
+});
+const closeNintendoHelpDialog = () => {
+  closePopupTo(els.nintendoHelpDialog, els.nintendoHelpLink);
+};
+els.nintendoHelpLink.addEventListener("click", () => {
+  els.nintendoHelpPanel.scrollTop = 0;
+  openPopupFrom(els.nintendoHelpDialog, els.nintendoHelpLink, els.nintendoHelpPanel);
+});
+els.nintendoHelpOkButton.addEventListener("click", closeNintendoHelpDialog);
+els.nintendoHelpDialog.addEventListener("click", (event) => {
+  if (event.target === els.nintendoHelpDialog) {
+    closeNintendoHelpDialog();
   }
 });
 let nebulaConflictTrigger = null;
