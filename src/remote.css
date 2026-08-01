@@ -93,6 +93,48 @@ header h1 {
   object-fit: contain;
 }
 
+.remote-console-bridge {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(96, 220, 255, 0.11), transparent 36%),
+    #02060a;
+  cursor: crosshair;
+}
+
+.remote-console-bridge:focus-visible {
+  outline: 2px solid #ffe45e;
+  outline-offset: -3px;
+}
+
+.remote-console-bridge img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.35);
+}
+
+.remote-console-status {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  padding: 9px 11px;
+  border: 1px solid rgba(96, 220, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(5, 9, 14, 0.84);
+  color: #c8f4ff;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+}
+
 #remoteMessage {
   position: absolute;
   z-index: 2;

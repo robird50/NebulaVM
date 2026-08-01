@@ -9,6 +9,12 @@ const reconnectButton = document.querySelector("#reconnectButton");
 const fullscreenButton = document.querySelector("#fullscreenButton");
 
 let rfb = null;
+let mirrorTimer = null;
+let mirrorFrameUrl = "";
+let mirrorActive = false;
+let mirrorBase = "";
+let mirrorToken = "";
+let mirrorPoll = null;
 
 const showMessage = (title, detail, state = "Waiting") => {
   message.hidden = false;
@@ -17,6 +23,12 @@ const showMessage = (title, detail, state = "Waiting") => {
   stateLabel.textContent = state;
 };
 
+const remoteHeaders = (token, extra = {}) => ({
+  ...extra,
+  Authorization: `Bearer ${token}`,
+  "X-NebulaVM-Client-Class": "remote-console",
+});
+
 const websocketUrl = (base, path, token) => {
   const url = new URL(path, base);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -24,70 +36,278 @@ const websocketUrl = (base, path, token) => {
   return url.toString();
 };
 
-const connect = async () => {
+const clearMirror = () => {
+  mirrorActive = false;
+  if (mirrorTimer) {
+    window.clearTimeout(mirrorTimer);
+    mirrorTimer = null;
+  }
+  if (mirrorFrameUrl) {
+    URL.revokeObjectURL(mirrorFrameUrl);
+    mirrorFrameUrl = "";
+  }
+  mirrorPoll = null;
+  viewport.querySelector(".remote-console-bridge")?.remove();
+};
+
+const clearRfb = () => {
   rfb?.disconnect();
   rfb = null;
-  showMessage(
-    "Finding your Windows VM…",
-    "Keep NebulaVM Host and the Windows guest running.",
-    "Connecting",
-  );
+  viewport.querySelector("canvas")?.remove();
+};
+
+const fetchHostRegistry = async () => {
+  const response = await fetch(registryUrl, { cache: "no-store" });
+  const registry = await response.json();
+  if (!response.ok || !registry.ok || !registry.host?.publicUrl) {
+    throw new Error("No active NebulaVM Host is registered.");
+  }
+  return {
+    base: String(registry.host.publicUrl).replace(/\/$/, ""),
+    token: String(registry.host.accessToken || ""),
+  };
+};
+
+const fetchHostStatus = async (base, token) => {
+  const response = await fetch(`${base}/api/emustar-hyperv/status`, {
+    cache: "no-store",
+    headers: remoteHeaders(token),
+  });
+  const status = await response.json();
+  if (!response.ok || !status.ok) {
+    throw new Error(status.error || "The Hyper-V host status could not be read.");
+  }
+  return status;
+};
+
+const fetchMirrorFrame = async (contentOnly = false) => {
+  const frameUrl = new URL("/api/emustar-hyperv/console-frame", mirrorBase);
+  if (contentOnly) frameUrl.searchParams.set("contentOnly", "1");
+  const response = await fetch(frameUrl, {
+    cache: "no-store",
+    headers: remoteHeaders(mirrorToken),
+  });
+  const contentType = response.headers.get("content-type") || "";
+  if (!response.ok || !contentType.toLowerCase().startsWith("image/")) {
+    let error = "The Hyper-V setup mirror is not ready yet.";
+    if (contentType.toLowerCase().includes("application/json")) {
+      const data = await response.json().catch(() => ({}));
+      error = data.error || error;
+    }
+    throw new Error(error);
+  }
+  return {
+    blob: await response.blob(),
+    width: Number(response.headers.get("X-NebulaVM-Frame-Width")) || 0,
+    height: Number(response.headers.get("X-NebulaVM-Frame-Height")) || 0,
+  };
+};
+
+const sendMirrorInput = async (payload) => {
+  if (!mirrorActive) return;
+  try {
+    await fetch(`${mirrorBase}/api/emustar-hyperv/console-input`, {
+      method: "POST",
+      headers: remoteHeaders(mirrorToken, { "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    pollMirrorFrame(80);
+  } catch (error) {
+    showMessage("Remote input failed", error.message || "Try again in a moment.", "Live");
+  }
+};
+
+const startMirrorConsole = (base, token) => {
+  clearRfb();
+  clearMirror();
+  mirrorActive = true;
+  mirrorBase = base;
+  mirrorToken = token;
+
+  const shell = document.createElement("div");
+  shell.className = "remote-console-bridge";
+  shell.tabIndex = 0;
+
+  const image = document.createElement("img");
+  image.alt = "Hyper-V remote setup console";
+  image.draggable = false;
+
+  const status = document.createElement("span");
+  status.className = "remote-console-status";
+  status.textContent = "Opening Hyper-V setup mirror...";
+
+  shell.append(image, status);
+  viewport.replaceChildren(message, shell);
+  message.hidden = true;
+  stateLabel.textContent = "Live";
+  reconnectButton.disabled = false;
+  shell.focus({ preventScroll: true });
+
+  let pointerStart = null;
+  const pointerToFramePoint = (event) => {
+    const rect = image.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      type: "click",
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+      contentOnly: document.fullscreenElement === viewport,
+    };
+  };
+
+  image.addEventListener("pointerdown", (event) => {
+    const point = pointerToFramePoint(event);
+    if (!point) return;
+    event.preventDefault();
+    shell.focus({ preventScroll: true });
+    image.setPointerCapture?.(event.pointerId);
+    pointerStart = { id: event.pointerId, x: point.x, y: point.y };
+  });
+
+  image.addEventListener("pointerup", (event) => {
+    const point = pointerToFramePoint(event);
+    if (!point || !pointerStart || pointerStart.id !== event.pointerId) return;
+    event.preventDefault();
+    image.releasePointerCapture?.(event.pointerId);
+    const moved = Math.hypot(point.x - pointerStart.x, point.y - pointerStart.y);
+    pointerStart = null;
+    if (moved <= 18) void sendMirrorInput(point);
+  });
+
+  image.addEventListener("pointercancel", (event) => {
+    if (pointerStart?.id === event.pointerId) pointerStart = null;
+  });
+
+  shell.addEventListener("keydown", (event) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const specialKeys = new Set([
+      "Enter",
+      "Escape",
+      "Backspace",
+      "Delete",
+      "Tab",
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "Home",
+      "End",
+      "PageUp",
+      "PageDown",
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5",
+      "F6",
+      "F7",
+      "F8",
+      "F9",
+      "F10",
+      "F11",
+      "F12",
+    ]);
+    if (event.key.length === 1) {
+      event.preventDefault();
+      void sendMirrorInput({ type: "text", text: event.key });
+      return;
+    }
+    if (specialKeys.has(event.key)) {
+      event.preventDefault();
+      void sendMirrorInput({ type: "key", key: event.key, shiftKey: event.shiftKey });
+    }
+  });
+
+  shell.addEventListener("paste", (event) => {
+    const text = event.clipboardData?.getData("text") || "";
+    if (!text) return;
+    event.preventDefault();
+    void sendMirrorInput({ type: "text", text });
+  });
+
+  const poll = async () => {
+    if (!mirrorActive) return;
+    try {
+      const frame = await fetchMirrorFrame(document.fullscreenElement === viewport);
+      const nextUrl = URL.createObjectURL(frame.blob);
+      if (mirrorFrameUrl) URL.revokeObjectURL(mirrorFrameUrl);
+      mirrorFrameUrl = nextUrl;
+      image.src = nextUrl;
+      if (frame.width) image.width = frame.width;
+      if (frame.height) image.height = frame.height;
+      status.textContent = "Click, type, Tab, arrows, Enter, and paste to control this VM.";
+      mirrorTimer = window.setTimeout(poll, 650);
+    } catch (error) {
+      status.textContent = `Waiting for Hyper-V mirror: ${error.message}`;
+      mirrorTimer = window.setTimeout(poll, 1200);
+    }
+  };
+
+  mirrorPoll = poll;
+  pollMirrorFrame(0);
+};
+
+const pollMirrorFrame = (delay = 0) => {
+  if (!mirrorActive) return;
+  if (mirrorTimer) window.clearTimeout(mirrorTimer);
+  mirrorTimer = window.setTimeout(() => mirrorPoll?.(), delay);
+};
+
+const connectVnc = (base, token, status) => {
+  clearMirror();
+  clearRfb();
+  message.hidden = false;
+  viewport.replaceChildren(message);
+
+  rfb = new RFB(viewport, websocketUrl(base, status.vncPath, token));
+  rfb.background = "#05070a";
+  rfb.scaleViewport = true;
+  rfb.resizeSession = true;
+  rfb.viewOnly = false;
+  rfb.focusOnClick = true;
+  rfb.addEventListener("credentialsrequired", () => {
+    rfb?.sendCredentials({ password: status.vncPassword || "" });
+  });
+  rfb.addEventListener("connect", () => {
+    message.hidden = true;
+    stateLabel.textContent = "Live";
+    reconnectButton.disabled = false;
+  });
+  rfb.addEventListener("disconnect", () => {
+    showMessage(
+      "Remote display disconnected",
+      "Press Reconnect after checking the Windows host.",
+      "Offline",
+    );
+    reconnectButton.disabled = false;
+  });
+};
+
+const connect = async () => {
+  clearRfb();
+  clearMirror();
+  viewport.replaceChildren(message);
+  showMessage("Finding your Hyper-V VM...", "Keep NebulaVM Host running on the Windows host.", "Connecting");
   reconnectButton.disabled = true;
 
   try {
-    const registryResponse = await fetch(registryUrl, { cache: "no-store" });
-    const registry = await registryResponse.json();
-    if (!registryResponse.ok || !registry.ok || !registry.host?.publicUrl) {
-      throw new Error("No active NebulaVM Host is registered.");
+    const { base, token } = await fetchHostRegistry();
+    const status = await fetchHostStatus(base, token);
+    if (status.vncReady && status.vncPath) {
+      connectVnc(base, token, status);
+      return;
     }
-
-    const base = String(registry.host.publicUrl).replace(/\/$/, "");
-    const token = String(registry.host.accessToken || "");
-    const statusResponse = await fetch(`${base}/api/emustar-hyperv/status`, {
-      cache: "no-store",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-NebulaVM-Client-Class": "remote-console",
-      },
-    });
-    const status = await statusResponse.json();
-    if (!statusResponse.ok || !status.ok) {
-      throw new Error(status.error || "The Windows VM status could not be read.");
+    if (status.running || status.vm?.state === "Running") {
+      startMirrorConsole(base, token);
+      return;
     }
-    if (!status.vncReady || !status.vncPath) {
-      throw new Error(
-        status.running
-          ? "The Windows VM is running, but its browser display is not ready yet."
-          : "Start the Windows VM with Hyper-V on the host first.",
-      );
-    }
-
-    rfb = new RFB(viewport, websocketUrl(base, status.vncPath, token));
-    rfb.background = "#05070a";
-    rfb.scaleViewport = true;
-    rfb.resizeSession = true;
-    rfb.viewOnly = false;
-    rfb.focusOnClick = true;
-    rfb.addEventListener("credentialsrequired", () => {
-      rfb?.sendCredentials({ password: status.vncPassword || "" });
-    });
-    rfb.addEventListener("connect", () => {
-      message.hidden = true;
-      stateLabel.textContent = "Live";
-      reconnectButton.disabled = false;
-    });
-    rfb.addEventListener("disconnect", () => {
-      showMessage(
-        "Windows display disconnected",
-        "Press Reconnect after checking the Windows host.",
-        "Offline",
-      );
-      reconnectButton.disabled = false;
-    });
+    throw new Error("Start a Hyper-V VM on NebulaVM first, then reconnect.");
   } catch (error) {
     showMessage(
-      error.message || "The Windows console could not connect.",
-      "The host must stay online and its Windows VM must already be running.",
+      error.message || "The Hyper-V console could not connect.",
+      "The host must stay online and a Hyper-V VM must be running.",
       "Offline",
     );
     reconnectButton.disabled = false;
@@ -103,5 +323,8 @@ fullscreenButton.addEventListener("click", async () => {
   }
 });
 
-window.addEventListener("pagehide", () => rfb?.disconnect());
+window.addEventListener("pagehide", () => {
+  clearRfb();
+  clearMirror();
+});
 void connect();

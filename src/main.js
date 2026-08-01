@@ -2770,10 +2770,10 @@ const updateEmustarHostInfo = async () => {
 
   if (isNetlifyLauncher) {
     const host = state.nativeQemuApiBase && state.nativeHostToken ? { publicUrl: state.nativeQemuApiBase } : await fetchNetlifyHostRegistry();
-    els.emustarShareUrl.value = window.location.origin;
+    els.emustarShareUrl.value = new URL("/remote.html", window.location.origin).toString();
     els.emustarCopyShareButton.disabled = false;
     els.emustarShareStatus.textContent = host
-      ? "Stable launcher ready. This browser will use the registered Windows Hyper-V host."
+      ? "Remote console link ready. Share this link to view the active Hyper-V session."
       : "Waiting for the Windows Hyper-V host to register.";
     return;
   }

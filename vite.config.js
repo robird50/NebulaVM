@@ -2902,11 +2902,19 @@ const nativeQemuPlugin = () => ({
         return;
       }
 
+      const remoteConsoleRequest =
+        String(req.headers["x-nebulavm-client-class"] || "") === "remote-console";
+      const publicRemoteConsoleHyperVRequest =
+        remoteConsoleRequest &&
+        isHyperVApi &&
+        ((req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") ||
+          (req.method === "GET" && url.pathname === "/api/emustar-hyperv/console-frame") ||
+          (req.method === "POST" && url.pathname === "/api/emustar-hyperv/console-input"));
+
       if (
         publicMobileRequest &&
         (isNativeQemuApi ||
-          (isHyperVApi &&
-            !(req.method === "GET" && url.pathname === "/api/emustar-hyperv/status")) ||
+          (isHyperVApi && !publicRemoteConsoleHyperVRequest) ||
           isAndroidStudioApi ||
           (isHostApi && url.pathname !== "/api/emustar-host/info"))
       ) {
