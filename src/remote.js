@@ -7,6 +7,7 @@ const message = document.querySelector("#remoteMessage");
 const stateLabel = document.querySelector("#remoteState");
 const reconnectButton = document.querySelector("#reconnectButton");
 const fullscreenButton = document.querySelector("#fullscreenButton");
+const fullscreenExitButton = document.querySelector("#fullscreenExitButton");
 const expectedSessionId = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("session") || "";
 
 let rfb = null;
@@ -16,6 +17,82 @@ let mirrorActive = false;
 let mirrorBase = "";
 let mirrorToken = "";
 let mirrorPoll = null;
+let appFullscreen = false;
+
+const viewportChildren = (...children) => {
+  viewport.replaceChildren(message, ...children.filter(Boolean), fullscreenExitButton);
+};
+
+const nativeFullscreenElement = () =>
+  document.fullscreenElement ||
+  document.webkitFullscreenElement ||
+  document.msFullscreenElement ||
+  null;
+
+const isNativeFullscreen = () => nativeFullscreenElement() === viewport;
+const isRemoteFullscreen = () => isNativeFullscreen() || appFullscreen;
+
+const setVisualViewportSize = () => {
+  const visual = window.visualViewport;
+  const width = Math.max(
+    320,
+    Math.round(visual?.width || window.innerWidth || document.documentElement.clientWidth || 0),
+  );
+  const height = Math.max(
+    320,
+    Math.round(visual?.height || window.innerHeight || document.documentElement.clientHeight || 0),
+  );
+  document.documentElement.style.setProperty("--remote-visual-width", `${width}px`);
+  document.documentElement.style.setProperty("--remote-visual-height", `${height}px`);
+};
+
+const refreshRemoteViewport = () => {
+  setVisualViewportSize();
+  if (mirrorActive) pollMirrorFrame(20);
+};
+
+const updateFullscreenUi = () => {
+  const active = isRemoteFullscreen();
+  viewport.classList.toggle("is-remote-fullscreen", active);
+  fullscreenButton.textContent = active ? "Exit fullscreen" : "Fullscreen";
+  fullscreenButton.setAttribute("aria-pressed", String(active));
+  fullscreenExitButton.hidden = !active;
+  refreshRemoteViewport();
+};
+
+const enterAppFullscreen = () => {
+  appFullscreen = true;
+  document.body.classList.add("remote-app-fullscreen");
+  window.scrollTo(0, 0);
+  updateFullscreenUi();
+};
+
+const exitAppFullscreen = () => {
+  appFullscreen = false;
+  document.body.classList.remove("remote-app-fullscreen");
+  updateFullscreenUi();
+};
+
+const requestNativeFullscreen = async () => {
+  const request =
+    viewport.requestFullscreen ||
+    viewport.webkitRequestFullscreen ||
+    viewport.msRequestFullscreen;
+  if (!request) return false;
+  await request.call(viewport);
+  return true;
+};
+
+const exitNativeFullscreen = async () => {
+  const exit =
+    document.exitFullscreen ||
+    document.webkitExitFullscreen ||
+    document.msExitFullscreen;
+  if (exit) await exit.call(document);
+};
+
+const isMobileViewport = () =>
+  window.matchMedia?.("(pointer: coarse), (max-width: 760px)")?.matches || false;
 
 const showMessage = (title, detail, state = "Waiting") => {
   message.hidden = false;
@@ -148,7 +225,7 @@ const startMirrorConsole = (base, token) => {
   status.textContent = "Opening Hyper-V setup mirror...";
 
   shell.append(image, status);
-  viewport.replaceChildren(message, shell);
+  viewportChildren(shell);
   message.hidden = true;
   stateLabel.textContent = "Live";
   reconnectButton.disabled = false;
@@ -164,7 +241,7 @@ const startMirrorConsole = (base, token) => {
       y: event.clientY - rect.top,
       width: rect.width,
       height: rect.height,
-      contentOnly: document.fullscreenElement === viewport,
+      contentOnly: isRemoteFullscreen(),
     };
   };
 
@@ -241,7 +318,7 @@ const startMirrorConsole = (base, token) => {
   const poll = async () => {
     if (!mirrorActive) return;
     try {
-      const frame = await fetchMirrorFrame(document.fullscreenElement === viewport);
+      const frame = await fetchMirrorFrame(isRemoteFullscreen());
       const nextUrl = URL.createObjectURL(frame.blob);
       if (mirrorFrameUrl) URL.revokeObjectURL(mirrorFrameUrl);
       mirrorFrameUrl = nextUrl;
@@ -270,7 +347,7 @@ const connectVnc = (base, token, status) => {
   clearMirror();
   clearRfb();
   message.hidden = false;
-  viewport.replaceChildren(message);
+  viewportChildren();
 
   rfb = new RFB(viewport, websocketUrl(base, status.vncPath, token));
   rfb.background = "#05070a";
@@ -299,7 +376,7 @@ const connectVnc = (base, token, status) => {
 const connect = async () => {
   clearRfb();
   clearMirror();
-  viewport.replaceChildren(message);
+  viewportChildren();
   showMessage("Finding your Hyper-V VM...", "Keep NebulaVM Host running on the Windows host.", "Connecting");
   reconnectButton.disabled = true;
 
@@ -326,16 +403,52 @@ const connect = async () => {
 };
 
 reconnectButton.addEventListener("click", connect);
-fullscreenButton.addEventListener("click", async () => {
+const toggleFullscreen = async () => {
   try {
-    await viewport.requestFullscreen();
-  } catch {
-    showMessage("Fullscreen was blocked", "Use your browser menu to enter fullscreen.", "Live");
+    if (appFullscreen) {
+      exitAppFullscreen();
+      return;
+    }
+    if (isNativeFullscreen()) {
+      await exitNativeFullscreen();
+      return;
+    }
+    if (isMobileViewport()) {
+      enterAppFullscreen();
+      return;
+    }
+    const nativeStarted = await requestNativeFullscreen();
+    if (!nativeStarted || !isNativeFullscreen()) enterAppFullscreen();
+  } catch (error) {
+    enterAppFullscreen();
+    if (!isRemoteFullscreen()) {
+      showMessage(
+        "Fullscreen was blocked",
+        error.message || "Use your browser menu to enter fullscreen.",
+        "Live",
+      );
+    }
   }
+};
+
+fullscreenButton.addEventListener("click", toggleFullscreen);
+fullscreenExitButton.addEventListener("click", toggleFullscreen);
+document.addEventListener("fullscreenchange", () => {
+  if (!isNativeFullscreen()) appFullscreen = false;
+  updateFullscreenUi();
 });
+document.addEventListener("webkitfullscreenchange", updateFullscreenUi);
+window.addEventListener("resize", refreshRemoteViewport);
+window.addEventListener("orientationchange", refreshRemoteViewport);
+window.visualViewport?.addEventListener("resize", refreshRemoteViewport);
+window.visualViewport?.addEventListener("scroll", refreshRemoteViewport);
 
 window.addEventListener("pagehide", () => {
+  exitAppFullscreen();
   clearRfb();
   clearMirror();
 });
+setVisualViewportSize();
+viewportChildren();
+updateFullscreenUi();
 void connect();

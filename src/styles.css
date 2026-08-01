@@ -2672,6 +2672,7 @@ input[type="text"] {
 .screen-shell.is-fullscreen {
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
   border: 0;
   border-radius: 0;
@@ -2682,6 +2683,7 @@ input[type="text"] {
 .screen-shell.is-fullscreen .screen-container {
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
 }
 
@@ -2689,6 +2691,76 @@ input[type="text"] {
 .screen-shell.is-fullscreen .qemu-terminal {
   padding: 26px;
   font-size: 1rem;
+}
+
+.screen-fullscreen-exit {
+  position: absolute;
+  z-index: 80;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  min-height: 40px;
+  border: 1px solid rgba(255, 228, 94, 0.72);
+  border-radius: 999px;
+  padding: 9px 13px;
+  background: rgba(5, 9, 14, 0.84);
+  color: #ffe45e;
+  font-weight: 900;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36);
+}
+
+.screen-fullscreen-exit[hidden] {
+  display: none;
+}
+
+.screen-shell:fullscreen .screen-fullscreen-exit,
+.screen-shell.is-fullscreen .screen-fullscreen-exit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.screen-app-fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+body.screen-app-fullscreen .shell {
+  width: 100vw;
+  min-height: 100dvh;
+  padding: 0;
+}
+
+body.screen-app-fullscreen .hero,
+body.screen-app-fullscreen .controls,
+body.screen-app-fullscreen .machine-topbar,
+body.screen-app-fullscreen .terminal-panel,
+body.screen-app-fullscreen .commit-id {
+  display: none;
+}
+
+body.screen-app-fullscreen .workspace,
+body.screen-app-fullscreen .console-area {
+  display: block;
+  width: 100vw;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: #000;
+}
+
+body.screen-app-fullscreen .screen-shell {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
+  border: 0;
+  border-radius: 0;
 }
 
 .screen-container {

@@ -185,6 +185,7 @@ const state = {
   androidStudioTimer: null,
   androidStudioFrameUrl: null,
   androidStudioCleanup: null,
+  screenAppFullscreen: false,
 };
 
 app.innerHTML = `
@@ -746,6 +747,9 @@ app.innerHTML = `
         </div>
 
         <div class="screen-shell" id="screenShell">
+          <button class="screen-fullscreen-exit" id="screenFullscreenExitButton" type="button" hidden>
+            Exit
+          </button>
           <div id="screenContainer" class="screen-container">
             <div class="vga-text"></div>
             <canvas class="vga-canvas"></canvas>
@@ -1204,6 +1208,7 @@ const els = {
   saveStateButton: document.querySelector("#saveStateButton"),
   loadStateButton: document.querySelector("#loadStateButton"),
   fullscreenButton: document.querySelector("#fullscreenButton"),
+  screenFullscreenExitButton: document.querySelector("#screenFullscreenExitButton"),
   virtualKeyboardButton: document.querySelector("#virtualKeyboardButton"),
   virtualKeyboard: document.querySelector("#virtualKeyboard"),
   virtualKeyboardClose: document.querySelector("#virtualKeyboardClose"),
@@ -3356,7 +3361,7 @@ const startHyperVSetupConsole = (base) => {
       y: event.clientY - rect.top,
       width: rect.width,
       height: rect.height,
-      contentOnly: document.fullscreenElement === els.screenShell,
+      contentOnly: isScreenFullscreen(),
     };
   };
 
@@ -3455,7 +3460,7 @@ const startHyperVSetupConsole = (base) => {
   const pollFrame = async () => {
     if (!state.hyperVConsoleActive) return;
     try {
-      const frame = await fetchHyperVFrame(document.fullscreenElement === els.screenShell);
+      const frame = await fetchHyperVFrame(isScreenFullscreen());
       const nextFrameUrl = URL.createObjectURL(frame.blob);
       if (state.hyperVConsoleFrameUrl) {
         URL.revokeObjectURL(state.hyperVConsoleFrameUrl);
@@ -6284,28 +6289,78 @@ els.nativeResetFirmwareButton.addEventListener("click", resetNativeFirmware);
 els.nativeConsoleButton.addEventListener("click", openHyperVConsole);
 els.remoteVmUrl.addEventListener("input", () => updateButtons());
 
+const screenNativeFullscreenElement = () =>
+  document.fullscreenElement ||
+  document.webkitFullscreenElement ||
+  document.msFullscreenElement ||
+  null;
+
+const isScreenNativeFullscreen = () => screenNativeFullscreenElement() === els.screenShell;
+const isScreenFullscreen = () => isScreenNativeFullscreen() || state.screenAppFullscreen;
+const prefersScreenAppFullscreen = () =>
+  isRemoteMode() && (isPublicMobileClient || window.matchMedia?.("(pointer: coarse), (max-width: 760px)")?.matches);
+
 const updateFullscreenButton = () => {
-  const isFullscreen = document.fullscreenElement === els.screenShell;
+  const isFullscreen = isScreenFullscreen();
   els.fullscreenButton.textContent = isFullscreen ? "Exit fullscreen" : "Fullscreen";
   els.screenShell.classList.toggle("is-fullscreen", isFullscreen);
+  document.body.classList.toggle("screen-app-fullscreen", state.screenAppFullscreen);
+  els.screenFullscreenExitButton.hidden = !isFullscreen;
   requestGuestDesktopResize(isFullscreen ? "fullscreen" : "windowed viewport");
+};
+
+const enterScreenAppFullscreen = () => {
+  state.screenAppFullscreen = true;
+  window.scrollTo(0, 0);
+  updateFullscreenButton();
+};
+
+const exitScreenAppFullscreen = () => {
+  state.screenAppFullscreen = false;
+  updateFullscreenButton();
+};
+
+const requestScreenNativeFullscreen = async () => {
+  const request =
+    els.screenShell.requestFullscreen ||
+    els.screenShell.webkitRequestFullscreen ||
+    els.screenShell.msRequestFullscreen;
+  if (!request) return false;
+  await request.call(els.screenShell);
+  return true;
+};
+
+const exitScreenNativeFullscreen = async () => {
+  const exit =
+    document.exitFullscreen ||
+    document.webkitExitFullscreen ||
+    document.msExitFullscreen;
+  if (exit) await exit.call(document);
 };
 
 const toggleFullscreen = async () => {
   try {
-    if (document.fullscreenElement === els.screenShell) {
-      await document.exitFullscreen();
+    if (state.screenAppFullscreen) {
+      exitScreenAppFullscreen();
+    } else if (isScreenNativeFullscreen()) {
+      await exitScreenNativeFullscreen();
+    } else if (prefersScreenAppFullscreen()) {
+      enterScreenAppFullscreen();
     } else {
-      await els.screenShell.requestFullscreen();
+      const nativeStarted = await requestScreenNativeFullscreen();
+      if (!nativeStarted || !isScreenNativeFullscreen()) enterScreenAppFullscreen();
     }
   } catch (error) {
-    log(`Fullscreen unavailable: ${error.message}`);
+    enterScreenAppFullscreen();
+    log(`Fullscreen used mobile fallback: ${error.message}`);
   }
   updateFullscreenButton();
 };
 
 els.fullscreenButton.addEventListener("click", toggleFullscreen);
+els.screenFullscreenExitButton.addEventListener("click", toggleFullscreen);
 document.addEventListener("fullscreenchange", updateFullscreenButton);
+document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
 window.addEventListener("resize", () => requestGuestDesktopResize("browser resize"));
 els.virtualKeyboardButton.addEventListener("click", () => {
   setVirtualKeyboardOpen(!state.virtualKeyboardOpen);

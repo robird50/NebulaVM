@@ -9,6 +9,8 @@
   font-family: "NebulaVM Main", system-ui, sans-serif;
   background: #071019;
   color: #f4f8fc;
+  --remote-visual-width: 100vw;
+  --remote-visual-height: 100dvh;
 }
 
 * {
@@ -20,6 +22,7 @@ body {
   min-height: 100dvh;
   margin: 0;
   background: #071019;
+  overscroll-behavior: none;
 }
 
 button,
@@ -85,6 +88,18 @@ header h1 {
   border: 1px solid #43d8ff;
   border-radius: 7px;
   background: #05070a;
+  touch-action: none;
+}
+
+#remoteViewport:fullscreen,
+#remoteViewport:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: #05070a;
 }
 
 #remoteViewport canvas {
@@ -133,6 +148,33 @@ header h1 {
   line-height: 1.35;
   text-align: center;
   pointer-events: none;
+}
+
+.remote-fullscreen-exit {
+  position: absolute;
+  z-index: 8;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  min-height: 40px;
+  border: 1px solid rgba(255, 228, 94, 0.72);
+  border-radius: 999px;
+  padding: 9px 13px;
+  background: rgba(5, 9, 14, 0.84);
+  color: #ffe45e;
+  font-weight: 900;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36);
+}
+
+.remote-fullscreen-exit[hidden] {
+  display: none;
+}
+
+#remoteViewport:fullscreen .remote-fullscreen-exit,
+#remoteViewport:-webkit-full-screen .remote-fullscreen-exit,
+body.remote-app-fullscreen .remote-fullscreen-exit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #remoteMessage {
@@ -186,6 +228,71 @@ footer a {
 
 footer button:disabled {
   opacity: 0.5;
+}
+
+body.remote-app-fullscreen {
+  position: fixed;
+  inset: 0;
+  width: var(--remote-visual-width);
+  height: var(--remote-visual-height);
+  overflow: hidden;
+}
+
+body.remote-app-fullscreen .remote-console {
+  display: block;
+  width: var(--remote-visual-width);
+  height: var(--remote-visual-height);
+  min-height: 0;
+  padding: 0;
+}
+
+body.remote-app-fullscreen header,
+body.remote-app-fullscreen footer {
+  display: none;
+}
+
+body.remote-app-fullscreen #remoteViewport {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  width: var(--remote-visual-width);
+  height: var(--remote-visual-height);
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+body.remote-app-fullscreen .remote-console-status,
+#remoteViewport:fullscreen .remote-console-status,
+#remoteViewport:-webkit-full-screen .remote-console-status {
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: max(10px, env(safe-area-inset-left));
+}
+
+@media (max-width: 760px) {
+  .remote-console {
+    min-height: var(--remote-visual-height);
+    padding:
+      max(10px, env(safe-area-inset-top))
+      max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
+  }
+
+  #remoteViewport {
+    min-height: min(68dvh, calc(var(--remote-visual-height) - 190px));
+  }
+
+  footer {
+    gap: 8px;
+  }
+
+  footer button,
+  footer a {
+    flex: 1 1 130px;
+    text-align: center;
+  }
 }
 
 @media (orientation: landscape) and (max-height: 600px) {
