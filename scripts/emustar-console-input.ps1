@@ -56,11 +56,69 @@ namespace NebulaVM {
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(
+      IntPtr hWnd,
+      IntPtr hWndInsertAfter,
+      int X,
+      int Y,
+      int cx,
+      int cy,
+      uint uFlags
+    );
+
+    [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int X, int Y);
 
     [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
   }
+}
+
+function Move-ConsoleOffscreen {
+  param([object]$Process)
+
+  $swShownoactivate = 4
+  $swpNoSize = 0x0001
+  $swpNoZOrder = 0x0004
+  $swpNoActivate = 0x0010
+
+  if ([NebulaVM.NativeConsoleInput]::IsIconic($Process.MainWindowHandle)) {
+    [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, $swShownoactivate) | Out-Null
+    Start-Sleep -Milliseconds 80
+  }
+
+  [NebulaVM.NativeConsoleInput]::SetWindowPos(
+    $Process.MainWindowHandle,
+    [IntPtr]::Zero,
+    -32000,
+    -32000,
+    0,
+    0,
+    ($swpNoSize -bor $swpNoZOrder -bor $swpNoActivate)
+  ) | Out-Null
+}
+
+function Move-ConsoleOnscreen {
+  param([object]$Process)
+
+  $swRestore = 9
+  $swpNoSize = 0x0001
+  $swpNoZOrder = 0x0004
+
+  [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, $swRestore) | Out-Null
+  [NebulaVM.NativeConsoleInput]::SetWindowPos(
+    $Process.MainWindowHandle,
+    [IntPtr]::Zero,
+    24,
+    24,
+    0,
+    0,
+    ($swpNoSize -bor $swpNoZOrder)
+  ) | Out-Null
+  Start-Sleep -Milliseconds 40
 }
 "@
   }
@@ -108,7 +166,7 @@ function Get-ConsoleProcess {
 function Focus-Console {
   param([object]$Process)
 
-  [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, 9) | Out-Null
+  Move-ConsoleOnscreen -Process $Process
   [NebulaVM.NativeConsoleInput]::SetForegroundWindow($Process.MainWindowHandle) | Out-Null
   $element = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
   if ($element) {
@@ -125,8 +183,8 @@ function Hide-ConsoleFromHost {
   param([object]$Process)
 
   try {
-    # Keep one reusable input console minimized after browser interaction.
-    [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, 2) | Out-Null
+    # Keep VMConnect repainting for the browser mirror without leaving it visible on the host.
+    Move-ConsoleOffscreen -Process $Process
   } catch {
     # Hiding is best-effort; the browser control path still works without it.
   }
@@ -350,7 +408,6 @@ try {
     throw "The Hyper-V setup console could not be opened."
   }
 
-  Focus-Console -Process $process
   $type = [string]$config.type
   $sequence = ""
 
@@ -363,6 +420,7 @@ try {
       } | ConvertTo-Json -Depth 4 -Compress
       exit 0
     }
+    Focus-Console -Process $process
     $sequence = ConvertTo-SendKeysLiteral -Text ([string]$config.text)
   } elseif ($type -eq "key") {
     if (Send-VirtualKeyboardInput -Config $config -Type $type) {
@@ -373,6 +431,7 @@ try {
       } | ConvertTo-Json -Depth 4 -Compress
       exit 0
     }
+    Focus-Console -Process $process
     $sequence = ConvertTo-SendKeysKey -Key ([string]$config.key)
     if ([bool]$config.shiftKey -and -not [string]::IsNullOrEmpty($sequence)) {
       $sequence = "+$sequence"

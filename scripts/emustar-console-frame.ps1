@@ -45,10 +45,48 @@ namespace NebulaVM {
 
     [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(
+      IntPtr hWnd,
+      IntPtr hWndInsertAfter,
+      int X,
+      int Y,
+      int cx,
+      int cy,
+      uint uFlags
+    );
   }
 }
 "@
   }
+}
+
+function Move-ConsoleOffscreen {
+  param([object]$Process)
+
+  $swShownoactivate = 4
+  $swpNoSize = 0x0001
+  $swpNoZOrder = 0x0004
+  $swpNoActivate = 0x0010
+
+  if ([NebulaVM.NativeConsoleFrame]::IsIconic($Process.MainWindowHandle)) {
+    [NebulaVM.NativeConsoleFrame]::ShowWindow($Process.MainWindowHandle, $swShownoactivate) | Out-Null
+    Start-Sleep -Milliseconds 80
+  }
+
+  [NebulaVM.NativeConsoleFrame]::SetWindowPos(
+    $Process.MainWindowHandle,
+    [IntPtr]::Zero,
+    -32000,
+    -32000,
+    0,
+    0,
+    ($swpNoSize -bor $swpNoZOrder -bor $swpNoActivate)
+  ) | Out-Null
 }
 
 function Get-TargetConsoleProcesses {
@@ -158,8 +196,8 @@ function Hide-ConsoleFromHost {
   param([object]$Process)
 
   try {
-    # Keep one reusable capture console minimized while the requester uses the browser viewport.
-    [NebulaVM.NativeConsoleFrame]::ShowWindow($Process.MainWindowHandle, 2) | Out-Null
+    # Keep VMConnect alive and repainting, but offscreen so PrintWindow returns fresh frames.
+    Move-ConsoleOffscreen -Process $Process
   } catch {
     # Best effort only.
   }
@@ -195,6 +233,7 @@ try {
     throw "The Hyper-V setup console could not be opened."
   }
 
+  Move-ConsoleOffscreen -Process $process
   $bounds = Get-ConsoleBounds -Process $process
   $bitmap = New-Object System.Drawing.Bitmap $bounds.width, $bounds.height
   try {
