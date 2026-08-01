@@ -2719,6 +2719,15 @@ const fetchNetlifyHostRegistry = async () => {
   }
 };
 
+const remoteConsoleUrl = (sessionId = "") => {
+  const url = new URL("/remote.html", window.location.origin);
+  const safeSessionId = String(sessionId || "").trim();
+  if (/^[a-f0-9]{16,64}$/i.test(safeSessionId)) {
+    url.hash = `session=${encodeURIComponent(safeSessionId)}`;
+  }
+  return url.toString();
+};
+
 const setHostedHostWaitingStatus = () => {
   state.nativeQemuApiAvailable = false;
   state.nativeQemuReady = false;
@@ -2770,10 +2779,21 @@ const updateEmustarHostInfo = async () => {
 
   if (isNetlifyLauncher) {
     const host = state.nativeQemuApiBase && state.nativeHostToken ? { publicUrl: state.nativeQemuApiBase } : await fetchNetlifyHostRegistry();
-    els.emustarShareUrl.value = new URL("/remote.html", window.location.origin).toString();
+    let sessionId = "";
+    if (host?.publicUrl) {
+      try {
+        const { data: status } = await requestHyperVJsonFromBases("status", {}, [host.publicUrl]);
+        sessionId = status.remoteSessionId || "";
+      } catch {
+        sessionId = "";
+      }
+    }
+    els.emustarShareUrl.value = remoteConsoleUrl(sessionId);
     els.emustarCopyShareButton.disabled = false;
     els.emustarShareStatus.textContent = host
-      ? "Remote console link ready. Share this link to view the active Hyper-V session."
+      ? sessionId
+        ? "Remote console link ready for this active Hyper-V session."
+        : "Remote console link ready. Start Hyper-V to generate a session-specific link."
       : "Waiting for the Windows Hyper-V host to register.";
     return;
   }
@@ -3014,7 +3034,7 @@ const sendHyperVConsoleInput = async (payload) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    state.hyperVConsolePollNow?.(80);
+    state.hyperVConsolePollNow?.(20);
   } catch (error) {
     log(`Hyper-V setup input failed: ${error.message}`);
   }
@@ -3174,7 +3194,7 @@ const startHyperVSetupConsole = (base) => {
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
       status.textContent = "Use Tab, arrows, Enter, and paste text here to control setup.";
-      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 650);
+      state.hyperVConsoleTimer = window.setTimeout(pollFrame, 450);
     } catch (error) {
       status.textContent = `Hyper-V setup mirror waiting: ${error.message}`;
       state.hyperVConsoleTimer = window.setTimeout(pollFrame, 1200);
@@ -3242,6 +3262,7 @@ const adoptRunningHyperVViewport = async (status, base) => {
   setPowerState("Hyper-V", "running");
   updateUptime();
   updateButtons();
+  void updateEmustarHostInfo();
   monitorNativeVm();
   if (status.vncReady) {
     await closeHyperVConsole();
@@ -4007,6 +4028,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   setPowerState("Hyper-V", state.running ? "running" : "booting");
   updateButtons();
   monitorNativeVm();
+  void updateEmustarHostInfo();
 
   const vm = result.vm || {};
   log(`Hyper-V started ${vm.name || "the Windows VM"}.`);

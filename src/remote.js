@@ -7,6 +7,7 @@ const message = document.querySelector("#remoteMessage");
 const stateLabel = document.querySelector("#remoteState");
 const reconnectButton = document.querySelector("#reconnectButton");
 const fullscreenButton = document.querySelector("#fullscreenButton");
+const expectedSessionId = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("session") || "";
 
 let rfb = null;
 let mirrorTimer = null;
@@ -77,6 +78,16 @@ const fetchHostStatus = async (base, token) => {
   if (!response.ok || !status.ok) {
     throw new Error(status.error || "The Hyper-V host status could not be read.");
   }
+  if (
+    expectedSessionId &&
+    status.remoteSessionId &&
+    status.remoteSessionId !== expectedSessionId
+  ) {
+    throw new Error("This remote link belongs to a different Hyper-V session. Copy a fresh browser link.");
+  }
+  if (expectedSessionId && !status.remoteSessionId) {
+    throw new Error("This remote link is no longer active. Start Hyper-V again and copy a fresh link.");
+  }
   return status;
 };
 
@@ -111,7 +122,7 @@ const sendMirrorInput = async (payload) => {
       headers: remoteHeaders(mirrorToken, { "Content-Type": "application/json" }),
       body: JSON.stringify(payload),
     });
-    pollMirrorFrame(80);
+    pollMirrorFrame(20);
   } catch (error) {
     showMessage("Remote input failed", error.message || "Try again in a moment.", "Live");
   }
@@ -238,7 +249,7 @@ const startMirrorConsole = (base, token) => {
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
       status.textContent = "Click, type, Tab, arrows, Enter, and paste to control this VM.";
-      mirrorTimer = window.setTimeout(poll, 650);
+      mirrorTimer = window.setTimeout(poll, 450);
     } catch (error) {
       status.textContent = `Waiting for Hyper-V mirror: ${error.message}`;
       mirrorTimer = window.setTimeout(poll, 1200);

@@ -1031,6 +1031,8 @@ let nativeVm = null;
 let nativeVmOutput = "";
 let lastNativeExit = null;
 let activeNativeRuntimeName = null;
+let hyperVRemoteSessionId = "";
+let hyperVRemoteSessionStartedAt = "";
 let androidRuntime = null;
 let androidImageCache = { expiresAt: 0, items: [] };
 let lastAndroidEmulatorExit = null;
@@ -2282,13 +2284,29 @@ const withHyperVDisplayStatus = async (status) => {
       vncPassword = "";
     }
   }
-  return {
+  const enrichedStatus = {
     ...status,
     guestAddress,
     vncPath: hyperVGuestVncPath,
     vncReady,
     vncPassword,
   };
+
+  if (enrichedStatus.vm?.state === "Running") {
+    if (!hyperVRemoteSessionId) {
+      hyperVRemoteSessionId = randomBytes(12).toString("hex");
+      hyperVRemoteSessionStartedAt = new Date().toISOString();
+    }
+    enrichedStatus.remoteSessionId = hyperVRemoteSessionId;
+    enrichedStatus.remoteSessionStartedAt = hyperVRemoteSessionStartedAt;
+  } else {
+    hyperVRemoteSessionId = "";
+    hyperVRemoteSessionStartedAt = "";
+    enrichedStatus.remoteSessionId = "";
+    enrichedStatus.remoteSessionStartedAt = "";
+  }
+
+  return enrichedStatus;
 };
 
 const normalizeArch = (arch) => (arch === "aarch64" ? "aarch64" : "x86_64");
@@ -2399,6 +2417,8 @@ const startNativeVm = async (body) => {
   if (hyperVStatus?.vm?.state === "Running") {
     await runHyperVAction("Stop", {}, 120000);
     replacedRuntime = "Hyper-V";
+    hyperVRemoteSessionId = "";
+    hyperVRemoteSessionStartedAt = "";
   }
 
   const arch = normalizeArch(body.arch);
@@ -3025,13 +3045,18 @@ const nativeQemuPlugin = () => ({
               storageOwnerId,
               vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
             }, 120000);
+          hyperVRemoteSessionId = randomBytes(12).toString("hex");
+          hyperVRemoteSessionStartedAt = new Date().toISOString();
           result.replacedRuntime = replacedRuntime;
           json(res, 200, await withHyperVDisplayStatus(result));
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/stop") {
-          json(res, 200, await runHyperVAction("Stop"));
+          const result = await runHyperVAction("Stop");
+          hyperVRemoteSessionId = "";
+          hyperVRemoteSessionStartedAt = "";
+          json(res, 200, result);
           return;
         }
 
