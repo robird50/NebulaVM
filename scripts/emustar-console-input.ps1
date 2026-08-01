@@ -108,7 +108,7 @@ function Get-ConsoleProcess {
 function Focus-Console {
   param([object]$Process)
 
-  [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, 4) | Out-Null
+  [NebulaVM.NativeConsoleInput]::ShowWindow($Process.MainWindowHandle, 9) | Out-Null
   [NebulaVM.NativeConsoleInput]::SetForegroundWindow($Process.MainWindowHandle) | Out-Null
   $element = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
   if ($element) {
@@ -209,10 +209,11 @@ function Send-ConsoleClick {
   $screenY = [int][math]::Round($bounds.top + (($relativeY / $sourceHeight) * $bounds.height))
 
   [NebulaVM.NativeConsoleInput]::SetCursorPos($screenX, $screenY) | Out-Null
-  Start-Sleep -Milliseconds 35
+  Start-Sleep -Milliseconds 85
   [NebulaVM.NativeConsoleInput]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
-  Start-Sleep -Milliseconds 45
+  Start-Sleep -Milliseconds 95
   [NebulaVM.NativeConsoleInput]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 80
 }
 
 function ConvertTo-SendKeysLiteral {

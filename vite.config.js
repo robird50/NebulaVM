@@ -2095,50 +2095,51 @@ const runPowerShellJson = (label, args, timeoutMs = 30000) =>
     });
   });
 
-let hyperVConsoleFramePromise = null;
+let hyperVConsoleQueue = Promise.resolve();
 
-const runHyperVConsoleFrame = (contentOnly = false) => {
-  if (hyperVConsoleFramePromise) {
-    return hyperVConsoleFramePromise;
-  }
-
-  hyperVConsoleFramePromise = runPowerShellJson(
-    "Hyper-V setup console frame",
-    [
-      "-NoLogo",
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      hyperVConsoleFrameScriptPath,
-      "-OutputPath",
-      hyperVConsoleFramePath,
-      ...(contentOnly ? ["-ContentOnly"] : []),
-    ],
-    45000,
-  ).finally(() => {
-    hyperVConsoleFramePromise = null;
-  });
-
-  return hyperVConsoleFramePromise;
+const runHyperVConsoleExclusive = (action) => {
+  const next = hyperVConsoleQueue.catch(() => {}).then(action);
+  hyperVConsoleQueue = next.catch(() => {});
+  return next;
 };
 
+const runHyperVConsoleFrame = (contentOnly = false) =>
+  runHyperVConsoleExclusive(() =>
+    runPowerShellJson(
+      "Hyper-V setup console frame",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        hyperVConsoleFrameScriptPath,
+        "-OutputPath",
+        hyperVConsoleFramePath,
+        ...(contentOnly ? ["-ContentOnly"] : []),
+      ],
+      45000,
+    ),
+  );
+
 const runHyperVConsoleInput = (body) =>
-  runPowerShellJson(
-    "Hyper-V setup console input",
-    [
-      "-NoLogo",
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      hyperVConsoleInputScriptPath,
-      "-ConfigBase64",
-      Buffer.from(JSON.stringify(body || {}), "utf8").toString("base64"),
-    ],
-    45000,
+  runHyperVConsoleExclusive(() =>
+    runPowerShellJson(
+      "Hyper-V setup console input",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        hyperVConsoleInputScriptPath,
+        "-ConfigBase64",
+        Buffer.from(JSON.stringify(body || {}), "utf8").toString("base64"),
+      ],
+      45000,
+    ),
   );
 
 const runAndroidStudioFrame = (sessionId) => {

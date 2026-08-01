@@ -1534,11 +1534,10 @@ const fetchNativeQemuJson = async (path, options) => {
   throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
-const fetchHyperVJson = async (path, options) => {
-  const uniqueBridgeBases = nativeBridgeBases();
+const requestHyperVJsonFromBases = async (path, options, bridgeBases) => {
   let lastError = new Error(nativeQemuBridgeMessage);
 
-  for (const base of uniqueBridgeBases) {
+  for (const base of bridgeBases) {
     try {
       const headers = new Headers(options?.headers || {});
       if (state.nativeHostToken) {
@@ -1566,11 +1565,28 @@ const fetchHyperVJson = async (path, options) => {
   throw new Error(lastError.message || nativeQemuBridgeMessage);
 };
 
-const fetchHyperVFrame = async (contentOnly = false) => {
+const fetchHyperVJson = async (path, options) => {
   const uniqueBridgeBases = nativeBridgeBases();
+  const previousBase = state.nativeQemuApiBase;
+
+  try {
+    return await requestHyperVJsonFromBases(path, options, uniqueBridgeBases);
+  } catch (error) {
+    if (!isNetlifyLauncher) throw error;
+
+    state.nativeQemuApiBase = null;
+    const refreshedHost = await fetchNetlifyHostRegistry();
+    if (!refreshedHost?.publicUrl || refreshedHost.publicUrl === previousBase) {
+      throw error;
+    }
+    return requestHyperVJsonFromBases(path, options, [refreshedHost.publicUrl]);
+  }
+};
+
+const requestHyperVFrameFromBases = async (contentOnly, bridgeBases) => {
   let lastError = new Error(nativeQemuBridgeMessage);
 
-  for (const base of uniqueBridgeBases) {
+  for (const base of bridgeBases) {
     try {
       const headers = new Headers();
       if (state.nativeHostToken) {
@@ -1610,6 +1626,24 @@ const fetchHyperVFrame = async (contentOnly = false) => {
   }
 
   throw new Error(lastError.message || nativeQemuBridgeMessage);
+};
+
+const fetchHyperVFrame = async (contentOnly = false) => {
+  const uniqueBridgeBases = nativeBridgeBases();
+  const previousBase = state.nativeQemuApiBase;
+
+  try {
+    return await requestHyperVFrameFromBases(contentOnly, uniqueBridgeBases);
+  } catch (error) {
+    if (!isNetlifyLauncher) throw error;
+
+    state.nativeQemuApiBase = null;
+    const refreshedHost = await fetchNetlifyHostRegistry();
+    if (!refreshedHost?.publicUrl || refreshedHost.publicUrl === previousBase) {
+      throw error;
+    }
+    return requestHyperVFrameFromBases(contentOnly, [refreshedHost.publicUrl]);
+  }
 };
 
 const androidBridgeMessage = isNetlifyLauncher
@@ -3020,18 +3054,49 @@ const startHyperVSetupConsole = (base) => {
   els.nativeDisplay.replaceChildren(shell);
   shell.focus({ preventScroll: true });
 
-  const clickHandler = (event) => {
+  let pointerStart = null;
+
+  const pointerToFramePoint = (event) => {
     const rect = image.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    shell.focus();
-    void sendHyperVConsoleInput({
+    if (!rect.width || !rect.height) return null;
+    return {
       type: "click",
       x: event.clientX - rect.left,
       y: event.clientY - rect.top,
       width: rect.width,
       height: rect.height,
       contentOnly: document.fullscreenElement === els.screenShell,
-    });
+    };
+  };
+
+  const pointerDownHandler = (event) => {
+    const point = pointerToFramePoint(event);
+    if (!point) return;
+    event.preventDefault();
+    shell.focus({ preventScroll: true });
+    image.setPointerCapture?.(event.pointerId);
+    pointerStart = {
+      id: event.pointerId,
+      x: point.x,
+      y: point.y,
+    };
+  };
+
+  const pointerUpHandler = (event) => {
+    const point = pointerToFramePoint(event);
+    if (!point || !pointerStart || pointerStart.id !== event.pointerId) return;
+    event.preventDefault();
+    image.releasePointerCapture?.(event.pointerId);
+    const moved = Math.hypot(point.x - pointerStart.x, point.y - pointerStart.y);
+    pointerStart = null;
+    if (moved > 18) return;
+    void sendHyperVConsoleInput(point);
+  };
+
+  const pointerCancelHandler = (event) => {
+    if (pointerStart?.id === event.pointerId) {
+      pointerStart = null;
+    }
   };
 
   const keyHandler = (event) => {
@@ -3083,11 +3148,15 @@ const startHyperVSetupConsole = (base) => {
     void sendHyperVConsoleInput({ type: "text", text });
   };
 
-  image.addEventListener("click", clickHandler);
+  image.addEventListener("pointerdown", pointerDownHandler);
+  image.addEventListener("pointerup", pointerUpHandler);
+  image.addEventListener("pointercancel", pointerCancelHandler);
   shell.addEventListener("keydown", keyHandler);
   shell.addEventListener("paste", pasteHandler);
   state.hyperVConsoleCleanup = () => {
-    image.removeEventListener("click", clickHandler);
+    image.removeEventListener("pointerdown", pointerDownHandler);
+    image.removeEventListener("pointerup", pointerUpHandler);
+    image.removeEventListener("pointercancel", pointerCancelHandler);
     shell.removeEventListener("keydown", keyHandler);
     shell.removeEventListener("paste", pasteHandler);
   };
