@@ -155,6 +155,23 @@ function Send-BootPromptKeys {
   return $sent
 }
 
+function Start-WindowsSetupLabConfigAutomation {
+  $scriptPath = Join-Path $PSScriptRoot "emustar-windows-labconfig.ps1"
+  if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+    $warnings.Add("Windows setup LabConfig automation was skipped because the helper script is missing.")
+    return
+  }
+
+  $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+  $argumentLine = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$scriptPath`" -VmName `"$vmName`""
+  try {
+    Start-Process -FilePath $powershellPath -ArgumentList $argumentLine -WindowStyle Hidden | Out-Null
+    $warnings.Add("Windows setup LabConfig automation is armed for the language selection screen.")
+  } catch {
+    $warnings.Add("Windows setup LabConfig automation could not be started: $($_.Exception.Message)")
+  }
+}
+
 function Get-BootDevice {
   param(
     [object]$Vm,
@@ -504,6 +521,9 @@ function Start-Emustar {
     $bootKeyCount = Send-BootPromptKeys
     if ($bootKeyCount -gt 0) {
       $warnings.Add("Sent boot prompt keys so CD-ROM setup can start automatically.")
+    }
+    if ($isWindowsGuest) {
+      Start-WindowsSetupLabConfigAutomation
     }
   }
 
