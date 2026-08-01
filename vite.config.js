@@ -1906,16 +1906,22 @@ const androidEmulatorFrame = async (sessionId) => {
     // /sdcard read-only, but /data/local/tmp remains available over ADB.
     const remoteFramePath = "/data/local/tmp/nebulavm-frame.png";
     const localFramePath = join(runtime.sessionDirectory, "android-frame.png");
-    await runAndroidToolAsync("adb", ["-s", serial, "shell", "screencap", remoteFramePath], {
-      timeout: 20000,
-    });
-    await runAndroidToolAsync("adb", ["-s", serial, "pull", remoteFramePath, localFramePath], {
-      timeout: 20000,
-    });
+    try {
+      await runAndroidToolAsync("adb", ["-s", serial, "shell", "screencap", remoteFramePath], {
+        timeout: 20000,
+      });
+      await runAndroidToolAsync("adb", ["-s", serial, "pull", remoteFramePath, localFramePath], {
+        timeout: 20000,
+      });
+      void runAndroidToolAsync("adb", ["-s", serial, "shell", "rm", "-f", remoteFramePath], {
+        timeout: 5000,
+      }).catch(() => {});
+    } catch {
+      await runAndroidToolAsync("adb", ["-s", serial, "emu", "screenrecord", "screenshot", localFramePath], {
+        timeout: 20000,
+      });
+    }
     image = readFileSync(localFramePath);
-    void runAndroidToolAsync("adb", ["-s", serial, "shell", "rm", "-f", remoteFramePath], {
-      timeout: 5000,
-    }).catch(() => {});
   }
   if (!image?.length) throw new Error("The Android Emulator returned an empty frame.");
   runtime.frameCaptureFailureCount = 0;
