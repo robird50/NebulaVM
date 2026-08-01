@@ -3851,7 +3851,7 @@ const updateButtons = (busy = false) => {
   els.nativeResetFirmwareButton.disabled =
     busy || !isNativeMode() || Boolean(state.emulator) || nativeUnavailable;
   els.nativeConsoleButton.disabled = busy || !isHyperVMode() || nativeUnavailable;
-  els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || nintendoMode;
+  els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || !emustarMode;
   els.windowsTemplateButton.disabled =
     busy || Boolean(state.emulator) || state.hostStagedIsoUploading || state.windowsTemplateLoading;
   els.windowsTemplateButton.classList.toggle("is-active", state.windowsTemplateSelected);
@@ -5592,7 +5592,7 @@ const updateBackendUi = () => {
   els.experimentalWarningPill.hidden = !emustarMode && !androidMode && !remoteMode;
   els.emustarInfoLink.hidden = !emustarMode;
   els.storedImagesControl.hidden = androidMode || nintendoMode;
-  els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || nintendoMode;
+  els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || !emustarMode;
   els.dropZone.hidden = androidMode;
   els.nintendoHelpLink.hidden = !nintendoMode || androidMode;
   els.mediaWarning.hidden = androidMode;
