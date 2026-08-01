@@ -1281,6 +1281,9 @@ const androidReleaseMajor = (release) => {
   return Number.isInteger(major) && major >= 1 && major <= 17 ? major : null;
 };
 
+const curatedAndroidVersions = [2, 4, 5, 6, 8, 9, 12, 16, 17];
+const curatedAndroidVersionSet = new Set(curatedAndroidVersions);
+
 const androidImageLabel = (image) => {
   if (!image) return "";
   const release = image.release && image.release !== String(image.version) ? ` ${image.release}` : "";
@@ -1403,8 +1406,7 @@ const androidProperty = (serial, property) => {
 
 const androidVersionCatalog = () => {
   const images = installedAndroidImages();
-  return Array.from({ length: 17 }, (_, index) => {
-    const version = index + 1;
+  return curatedAndroidVersions.map((version) => {
     const image = images.find((candidate) => candidate.version === version);
     return {
       version,
@@ -1480,16 +1482,17 @@ const androidEmulatorStatus = (sessionId) => {
   const emulatorPath = androidToolPath("emulator");
   const adbPath = androidToolPath("adb");
   const images = installedAndroidImages();
+  const curatedImages = images.filter((image) => curatedAndroidVersionSet.has(image.version));
   const ownsRuntime = Boolean(androidRuntime && androidRuntime.sessionId === sessionId);
   if (ownsRuntime) renewAndroidLease(androidRuntime);
   const serial = ownsRuntime ? connectedAndroidSerial() : null;
   const release = ownsRuntime ? androidProperty(serial, "ro.build.version.release") : "";
   return {
     ok: true,
-    available: Boolean(emulatorPath && adbPath && images.length),
+    available: Boolean(emulatorPath && adbPath && curatedImages.length),
     sdkRoot: androidSdkRoot(),
     versions: androidVersionCatalog(),
-    installedVersions: [...new Set(images.map((image) => image.version))],
+    installedVersions: [...new Set(curatedImages.map((image) => image.version))],
     busy: Boolean(androidRuntime && !ownsRuntime),
     running: Boolean(ownsRuntime && androidRuntime),
     booted: androidProperty(serial, "sys.boot_completed") === "1",
@@ -1627,7 +1630,14 @@ const startAndroidEmulator = (sessionId, body = {}, { publicMobile = false } = {
   killAndroidPortProcess();
 
   const requestedVersion = Number(body.version);
-  const image = installedAndroidImages().find((candidate) => candidate.version === requestedVersion);
+  if (!curatedAndroidVersionSet.has(requestedVersion)) {
+    const error = new Error(`Android ${requestedVersion || ""} is not part of NebulaVM's curated Android test set.`.trim());
+    error.statusCode = 400;
+    throw error;
+  }
+  const image = installedAndroidImages().find(
+    (candidate) => candidate.version === requestedVersion && curatedAndroidVersionSet.has(candidate.version),
+  );
   if (!image) {
     const error = new Error(`A genuine Android ${requestedVersion || ""} system image is not installed on this host.`.trim());
     error.statusCode = 400;

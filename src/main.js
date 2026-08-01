@@ -22,6 +22,7 @@ const MOBILE_DEV_MAX_ATTEMPTS = 5;
 const MOBILE_DEV_LOCK_MS = 5 * 60 * 1000;
 const MOBILE_PUBLIC_RELEASE = true;
 const MOBILE_DEV_GATE_ENABLED = !MOBILE_PUBLIC_RELEASE;
+const ANDROID_CURATED_VERSIONS = [2, 4, 5, 6, 8, 9, 12, 16, 17];
 const hostedLauncherHostnames = new Set(["nebulavm.online", "www.nebulavm.online"]);
 const isHistoricalNetlifyDeploy =
   /\.netlify\.app$/i.test(window.location.hostname) &&
@@ -331,8 +332,7 @@ app.innerHTML = `
             <label class="field full-span">
               <span>Genuine Android system image</span>
               <select id="androidVersion">
-                ${Array.from({ length: 17 }, (_, index) => {
-                  const version = index + 1;
+                ${ANDROID_CURATED_VERSIONS.map((version) => {
                   return `<option value="${version}"${version === 16 ? " selected" : ""}>Android ${version}</option>`;
                 }).join("")}
               </select>
@@ -4112,8 +4112,8 @@ const applyAndroidVersionCatalog = (versions = []) => {
   }
   const installed = versions.filter((entry) => entry.available).map((entry) => `Android ${entry.version}`);
   els.androidImageNote.textContent = installed.length
-    ? `Installed genuine images: ${installed.join(", ")}. Unavailable versions need their real system image installed in Android Studio.`
-    : "No genuine Android system images are installed on the host.";
+    ? `Curated genuine images: ${installed.join(", ")}. NebulaVM only exposes these focused test versions for now.`
+    : "No curated Android system images are installed on the host.";
 };
 
 const androidEra = () => {
