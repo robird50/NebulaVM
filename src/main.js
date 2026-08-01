@@ -1265,8 +1265,6 @@ const els = {
 
 const MEMORY_STEPS = [64, 128, 256, 512, 1024, 2048, 4096, 6144];
 const BYTES_PER_MEGABYTE = 1024 * 1024;
-const WINDOWS_TEMPLATE_MEMORY_MB = 4096;
-const WINDOWS_TEMPLATE_MEMORY_BYTES = String(WINDOWS_TEMPLATE_MEMORY_MB * BYTES_PER_MEGABYTE);
 
 const updateSliderTrack = (slider) => {
   const minimum = Number(slider.min) || 0;
@@ -1277,8 +1275,6 @@ const updateSliderTrack = (slider) => {
 
 const selectedProcessorSpeedGhz = () => Number(els.processorSpeed.value) || 2;
 const selectedMemoryMb = () => Number(els.memorySize.value) / BYTES_PER_MEGABYTE;
-const selectedHyperVMemoryMb = () =>
-  state.windowsTemplateSelected ? WINDOWS_TEMPLATE_MEMORY_MB : selectedMemoryMb();
 
 const syncProcessorSpeedSlider = () => {
   const ghz = selectedProcessorSpeedGhz();
@@ -2212,8 +2208,6 @@ const applyWindowsTemplateBootLocks = () => {
   if (!state.windowsTemplateSelected) return;
   els.mediaType.value = WINDOWS_TEMPLATE_MEDIA_TYPE;
   els.bootOrder.value = WINDOWS_TEMPLATE_BOOT_ORDER;
-  els.memorySize.value = WINDOWS_TEMPLATE_MEMORY_BYTES;
-  syncMemorySliderFromSelect();
 };
 
 const clearWindowsTemplateSelection = () => {
@@ -2380,8 +2374,6 @@ const selectWindows11Template = async ({ boot = false } = {}) => {
     state.windowsTemplateSelected = true;
     els.emulatorMode.value = "emustar-hyperv";
     els.processorMode.value = "x64";
-    els.memorySize.value = WINDOWS_TEMPLATE_MEMORY_BYTES;
-    syncMemorySliderFromSelect();
     els.nativeIsoPath.value = template.isoPath;
     els.windowsPasswordOff.checked = true;
     els.windowsPassword.value = "";
@@ -4138,7 +4130,7 @@ const prepareBootUi = () => {
   els.screenPlaceholder.hidden = true;
   els.ramMetric.textContent = isNintendoMode()
     ? `${selectedNintendoRamGb()} GB RAM`
-    : `${isHyperVMode() ? selectedHyperVMemoryMb() : selectedMemoryMb()} MB RAM`;
+    : `${selectedMemoryMb()} MB RAM`;
   setPowerState("Booting", "booting");
   state.startedAt = Date.now();
   clearStatsTimer();
@@ -4430,7 +4422,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
       isoPath: els.nativeIsoPath.value.trim(),
       guestType: selectedIsoLooksLikeWindows() ? "windows" : "other",
       cpuGhz: selectedProcessorSpeedGhz(),
-      memoryMb: selectedHyperVMemoryMb(),
+      memoryMb: selectedMemoryMb(),
       bootOrder: els.bootOrder.value,
       createDisk: els.nativeCreateDisk.checked,
       diskSizeGb: Number(els.nativeDiskSize.value),
@@ -5299,8 +5291,7 @@ const bootEmulator = async () => {
   prepareBootUi();
   log("Creating virtual machine.");
   if (!isRemoteMode() && !isAndroidMode() && !isNintendoMode()) {
-    const requestedMemoryMb = isHyperVMode() ? selectedHyperVMemoryMb() : selectedMemoryMb();
-    log(`Hardware request: ${selectedProcessorSpeedGhz()} GHz CPU target, ${requestedMemoryMb} MB RAM.`);
+    log(`Hardware request: ${selectedProcessorSpeedGhz()} GHz CPU target, ${selectedMemoryMb()} MB RAM.`);
   }
 
   try {
@@ -5685,9 +5676,7 @@ const updateBackendUi = () => {
   els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode || emustarMode ? "x64" : "x86";
   els.processorMode.disabled = emustarMode;
   const currentMemoryMb = selectedMemoryMb();
-  if (state.windowsTemplateSelected) {
-    els.memorySize.value = WINDOWS_TEMPLATE_MEMORY_BYTES;
-  } else if (isNativeWindowsArm64Mode() && currentMemoryMb < 4096) {
+  if (isNativeWindowsArm64Mode() && currentMemoryMb < 4096) {
     els.memorySize.value = "4294967296";
   } else if (nativeMode && currentMemoryMb < 2048) {
     els.memorySize.value = "2147483648";
@@ -5737,8 +5726,6 @@ const updateBackendUi = () => {
   els.vgaSize.disabled = externalMode;
   applyWindowsTemplateBootLocks();
   els.mediaType.disabled = state.windowsTemplateSelected;
-  els.memorySize.disabled = state.windowsTemplateSelected;
-  els.memorySlider.disabled = state.windowsTemplateSelected;
   els.bootOrder.disabled = remoteMode || state.emulator || state.windowsTemplateSelected;
   els.nativeDisplayMode.disabled = (emustarMode && isNetlifyLauncher) || Boolean(state.emulator);
   els.demoButton.disabled = externalMode;
@@ -5785,7 +5772,7 @@ const updateBackendUi = () => {
       : `${els.androidMemory.value} MB RAM`
     : nintendoMode
     ? `${selectedNintendoRamGb()} GB RAM`
-    : `${isHyperVMode() ? selectedHyperVMemoryMb() : selectedMemoryMb()} MB RAM`;
+    : `${selectedMemoryMb()} MB RAM`;
   updateMediaWarning();
   updateButtons();
   void updateEmustarHostInfo();
