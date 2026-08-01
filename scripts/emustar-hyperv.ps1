@@ -205,8 +205,19 @@ function Get-IsolatedDiskPath {
 function Set-LowHostMemoryProfile {
   param(
     [object]$Vm,
-    [int]$MemoryMb
+    [int]$MemoryMb,
+    [bool]$FixedStartup = $false
   )
+
+  if ($FixedStartup) {
+    $freeMemoryMb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
+    $reserveMb = 512
+    if ($freeMemoryMb -lt ($MemoryMb + $reserveMb)) {
+      throw "Hyper-V needs about $($MemoryMb + $reserveMb) MB of free host memory to boot this Windows guest with a fixed $MemoryMb MB startup allocation, but only $freeMemoryMb MB is currently free. Close a few applications or browser tabs, then launch it again."
+    }
+    Set-VMMemory -VM $Vm -DynamicMemoryEnabled $false -StartupBytes ($MemoryMb * 1MB)
+    return
+  }
 
   $hostMemoryBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
   if ($hostMemoryBytes -le 10GB) {
@@ -365,8 +376,13 @@ function Start-Emustar {
       $configuredMemory = Get-VMMemory -VM $vm
       $requestedMaximumBytes = $memoryMb * 1MB
       $requiredStartupBytes = [math]::Min($memoryMb, 768) * 1MB
-      $memoryMatches = [int64]$configuredMemory.Maximum -eq [int64]$requestedMaximumBytes -and
-        [int64]$configuredMemory.Startup -ge [int64]$requiredStartupBytes
+      $memoryMatches = if ($isWindowsGuest) {
+        -not [bool]$configuredMemory.DynamicMemoryEnabled -and
+          [int64]$configuredMemory.Startup -eq [int64]$requestedMaximumBytes
+      } else {
+        [int64]$configuredMemory.Maximum -eq [int64]$requestedMaximumBytes -and
+          [int64]$configuredMemory.Startup -ge [int64]$requiredStartupBytes
+      }
       if ($memoryMatches) {
         if ([string]$config.displayMode -eq "external") {
           Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
@@ -433,7 +449,7 @@ function Start-Emustar {
   }
 
   Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown -CheckpointType Disabled
-  Set-LowHostMemoryProfile -Vm $vm -MemoryMb $memoryMb
+  Set-LowHostMemoryProfile -Vm $vm -MemoryMb $memoryMb -FixedStartup $isWindowsGuest
   Set-VMProcessor -VM $vm -Count $processorCount
 
   $dvd = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1
