@@ -1281,6 +1281,61 @@ const androidReleaseMajor = (release) => {
   return Number.isInteger(major) && major >= 1 && major <= 17 ? major : null;
 };
 
+const androidImageLabel = (image) => {
+  if (!image) return "";
+  const release = image.release && image.release !== String(image.version) ? ` ${image.release}` : "";
+  const flavor = image.playStore ? "Google Play" : image.tag === "google_apis" ? "Google APIs" : "AOSP";
+  return `Android ${image.version}${release} (API ${image.api}, ${flavor}, ${image.abi})`;
+};
+
+const androidCompatibilityProfile = (image, specs = {}, orientation = "portrait") => {
+  const version = Number(image?.version) || 16;
+  const api = Number(image?.api) || 36;
+  const memoryMb = Number(specs.memoryMb) || 1024;
+  const landscape = orientation === "landscape";
+  const classic = api <= 10 || version <= 2;
+  const legacy = api <= 19 || version <= 4;
+  const earlyMaterial = api <= 25 || version <= 7;
+
+  const basePortrait = classic
+    ? { width: 320, height: 480, density: 160 }
+    : legacy
+      ? { width: 480, height: 800, density: 240 }
+      : earlyMaterial
+        ? { width: 540, height: 960, density: 280 }
+        : memoryMb <= 512
+          ? { width: 360, height: 640, density: 240 }
+          : memoryMb <= 1280
+            ? { width: 432, height: 768, density: 280 }
+            : memoryMb <= 1536
+              ? { width: 540, height: 960, density: 300 }
+              : { width: 1080, height: 1920, density: 420 };
+
+  const maxCores = classic ? 1 : legacy ? 2 : memoryMb <= 1536 ? 2 : 4;
+  const heapMb = classic
+    ? Math.min(128, Math.max(64, Math.floor(memoryMb / 4)))
+    : memoryMb <= 512
+      ? 128
+      : memoryMb <= 1024
+        ? 192
+        : Math.min(512, Math.floor(memoryMb / 4));
+
+  return {
+    classic,
+    legacy,
+    earlyMaterial,
+    lowMemory: memoryMb <= 1024 || classic,
+    width: landscape ? basePortrait.height : basePortrait.width,
+    height: landscape ? basePortrait.width : basePortrait.height,
+    density: basePortrait.density,
+    heapMb,
+    gpuMode: classic || legacy ? "swiftshader_indirect" : "host",
+    maxCores,
+    deviceName: classic ? "Nexus One" : legacy ? "Nexus 4" : earlyMaterial ? "Nexus 5" : "pixel_6",
+    mainKeys: classic ? "yes" : "no",
+  };
+};
+
 const installedAndroidImages = () => {
   if (androidImageCache.expiresAt > Date.now()) return androidImageCache.items;
   const systemImagesRoot = join(androidSdkRoot(), "system-images");
@@ -1356,7 +1411,10 @@ const androidVersionCatalog = () => {
       available: Boolean(image),
       api: image?.api || null,
       release: image?.release || null,
-      label: image ? `Android ${version} (API ${image.api})` : `Android ${version} (not installed)`,
+      label: image ? androidImageLabel(image) : `Android ${version} (not installed)`,
+      abi: image?.abi || null,
+      tag: image?.tag || null,
+      playStore: Boolean(image?.playStore),
     };
   });
 };
@@ -1451,12 +1509,12 @@ const androidEmulatorStatus = (sessionId) => {
 const configureAndroidViewport = (runtime) => {
   const { serial, orientation } = runtime;
   if (!serial) return;
-  const landscape = orientation === "landscape";
-  const width = runtime.displayWidth || (landscape ? 1920 : 1080);
-  const height = runtime.displayHeight || (landscape ? 1080 : 1920);
+  const profile = androidCompatibilityProfile(runtime.image, runtime.specs, orientation);
+  const width = runtime.displayWidth || profile.width;
+  const height = runtime.displayHeight || profile.height;
   try {
     runAndroidTool("adb", ["-s", serial, "shell", "wm", "size", `${width}x${height}`]);
-    runAndroidTool("adb", ["-s", serial, "shell", "wm", "density", String(runtime.displayDensity || 420)]);
+    runAndroidTool("adb", ["-s", serial, "shell", "wm", "density", String(runtime.displayDensity || profile.density)]);
   } catch {
     // The device can still be used if Android rejects a temporary display override.
   } finally {
@@ -1479,18 +1537,9 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
   const avdPath = join(avdHome, `${avdName}.avd`);
   mkdirSync(avdPath, { recursive: true });
   mkdirSync(emulatorHome, { recursive: true });
-  const landscape = orientation === "landscape";
-  const lowMemory = specs.memoryMb <= 1024;
-  const portraitWidth =
-    specs.memoryMb <= 512 ? 360 : specs.memoryMb <= 1280 ? 432 : specs.memoryMb <= 1536 ? 540 : 1080;
-  const portraitHeight =
-    specs.memoryMb <= 512 ? 640 : specs.memoryMb <= 1280 ? 768 : specs.memoryMb <= 1536 ? 960 : 1920;
-  const density =
-    specs.memoryMb <= 512 ? 240 : specs.memoryMb <= 1280 ? 280 : specs.memoryMb <= 1536 ? 300 : 420;
-  const width = landscape ? portraitHeight : portraitWidth;
-  const height = landscape ? portraitWidth : portraitHeight;
-  const heapMb =
-    specs.memoryMb <= 512 ? 128 : specs.memoryMb <= 1024 ? 192 : Math.min(512, Math.floor(specs.memoryMb / 4));
+  const profile = androidCompatibilityProfile(image, specs, orientation);
+  const width = profile.width;
+  const height = profile.height;
   writeFileSync(
     join(avdHome, `${avdName}.ini`),
     `avd.ini.encoding=UTF-8\npath=${avdPath}\ntarget=${image.targetId || `android-${image.api}`}\n`,
@@ -1511,22 +1560,22 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
       "hw.accelerometer=yes",
       "hw.audioInput=yes",
       "hw.battery=yes",
-      `hw.camera.back=${lowMemory ? "none" : "emulated"}`,
-      `hw.camera.front=${lowMemory ? "none" : "emulated"}`,
+      `hw.camera.back=${profile.lowMemory ? "none" : "emulated"}`,
+      `hw.camera.front=${profile.lowMemory ? "none" : "emulated"}`,
       `hw.cpu.arch=${image.abi}`,
-      `hw.cpu.ncore=${specs.cores}`,
+      `hw.cpu.ncore=${Math.min(specs.cores, profile.maxCores)}`,
       "hw.dPad=no",
       "hw.device.manufacturer=Google",
-      "hw.device.name=pixel_6",
+      `hw.device.name=${profile.deviceName}`,
       "hw.gps=yes",
       "hw.gpu.enabled=yes",
-      "hw.gpu.mode=auto",
+      `hw.gpu.mode=${profile.gpuMode}`,
       `hw.initialOrientation=${orientation}`,
       "hw.keyboard=yes",
-      `hw.lcd.density=${density}`,
+      `hw.lcd.density=${profile.density}`,
       `hw.lcd.height=${height}`,
       `hw.lcd.width=${width}`,
-      "hw.mainKeys=no",
+      `hw.mainKeys=${profile.mainKeys}`,
       `hw.ramSize=${specs.memoryMb}`,
       "hw.sdCard=no",
       "hw.sensors.orientation=yes",
@@ -1541,7 +1590,7 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
       `tag.display=${image.playStore ? "Google Play" : image.tag}`,
       `tag.id=${image.tag}`,
       `target=${image.targetId || `android-${image.api}`}`,
-      `vm.heapSize=${heapMb}`,
+      `vm.heapSize=${profile.heapMb}`,
       "",
     ].join("\n"),
   );
@@ -1554,8 +1603,10 @@ const createDisposableAndroidAvd = (sessionId, image, specs, orientation) => {
     avdPath,
     displayWidth: width,
     displayHeight: height,
-    displayDensity: density,
-    lowMemory,
+    displayDensity: profile.density,
+    lowMemory: profile.lowMemory,
+    gpuMode: profile.gpuMode,
+    maxCores: profile.maxCores,
   };
 };
 
@@ -1612,8 +1663,10 @@ const startAndroidEmulator = (sessionId, body = {}, { publicMobile = false } = {
   const requestedCores = publicMobile
     ? Math.min(2, cpus().length)
     : androidInteger(body.cores, 4, 1, Math.min(4, cpus().length));
+  const preliminarySpecs = { memoryMb };
+  const compatibility = androidCompatibilityProfile(image, preliminarySpecs, body.orientation);
   const specs = {
-    cores: memoryMb <= 768 ? 1 : Math.min(requestedCores, memoryMb <= 1536 ? 2 : 4),
+    cores: Math.min(memoryMb <= 768 ? 1 : Math.min(requestedCores, memoryMb <= 1536 ? 2 : 4), compatibility.maxCores),
     memoryMb,
     requestedMemoryMb,
     memoryAdapted: requestedMemoryMb === 0 || memoryMb !== requestedMemoryMb,
@@ -1643,7 +1696,7 @@ const startAndroidEmulator = (sessionId, body = {}, { publicMobile = false } = {
       "-no-audio",
       "-no-boot-anim",
       "-gpu",
-      "host",
+      disposable.gpuMode,
       "-feature",
       "-BluetoothEmulation",
       "-feature",
@@ -1777,49 +1830,50 @@ const androidEmulatorFrame = async (sessionId) => {
     configureAndroidViewport(runtime);
   }
   if (!runtime.awake && androidProperty(serial, "sys.boot_completed") === "1") {
-    try {
-      const runBootCommand = async (args) => {
+    const runBootCommand = async (args, { required = false } = {}) => {
+      try {
         renewAndroidLease(runtime);
         await runAndroidToolAsync("adb", ["-s", serial, "shell", ...args], {
           timeout: 15000,
         });
         renewAndroidLease(runtime);
-      };
-      if (runtime.image.version >= 16) {
-        await runBootCommand(["settings", "put", "global", "hide_error_dialogs", "1"]);
+        return true;
+      } catch (error) {
+        if (required) throw error;
+        return false;
       }
+    };
+    const api = Number(runtime.image.api) || 36;
+    if (api >= 23) {
+      await runBootCommand(["settings", "put", "global", "hide_error_dialogs", "1"]);
+    }
+    if (api >= 17) {
       await runBootCommand(["settings", "put", "global", "stay_on_while_plugged_in", "7"]);
-      await runBootCommand(["settings", "put", "system", "screen_off_timeout", "2147483647"]);
       await runBootCommand(["settings", "put", "global", "window_animation_scale", "0"]);
       await runBootCommand(["settings", "put", "global", "transition_animation_scale", "0"]);
       await runBootCommand(["settings", "put", "global", "animator_duration_scale", "0"]);
-      await runBootCommand(["svc", "power", "stayon", "true"]);
-      if (runtime.specs.memoryMb <= 1536) {
-        await runBootCommand([
-          "settings",
-          "put",
-          "global",
-          "activity_manager_constants",
-          "max_cached_processes=8",
-        ]);
-        for (const packageName of [
-          "com.google.android.googlequicksearchbox",
-          "com.google.android.apps.wellbeing",
-          "com.google.android.apps.photos",
-          "com.google.android.apps.maps",
-          "com.google.android.apps.docs",
-          "com.google.android.apps.youtube.music",
-          "com.google.android.apps.messaging",
-        ]) {
-          await runBootCommand(["am", "force-stop", packageName]);
-        }
-      }
-      await runBootCommand(["input", "keyevent", "KEYCODE_WAKEUP"]);
-      await runBootCommand(["wm", "dismiss-keyguard"]);
-      await runBootCommand(["input", "keyevent", "KEYCODE_HOME"]);
-    } catch {
-      // A frame can still be served if the guest does not support these commands.
     }
+    await runBootCommand(["settings", "put", "system", "screen_off_timeout", "2147483647"]);
+    await runBootCommand(["svc", "power", "stayon", "true"]);
+    if (runtime.specs.memoryMb <= 1536 && api >= 21) {
+      await runBootCommand(["settings", "put", "global", "activity_manager_constants", "max_cached_processes=8"]);
+      for (const packageName of [
+        "com.google.android.googlequicksearchbox",
+        "com.google.android.apps.wellbeing",
+        "com.google.android.apps.photos",
+        "com.google.android.apps.maps",
+        "com.google.android.apps.docs",
+        "com.google.android.apps.youtube.music",
+        "com.google.android.apps.messaging",
+      ]) {
+        await runBootCommand(["am", "force-stop", packageName]);
+      }
+    }
+    await runBootCommand(["input", "keyevent", "KEYCODE_WAKEUP"]);
+    await runBootCommand(["input", "keyevent", "26"]);
+    await runBootCommand(["wm", "dismiss-keyguard"]);
+    await runBootCommand(["input", "keyevent", "KEYCODE_HOME"]);
+    await runBootCommand(["input", "keyevent", "3"]);
     runtime.awake = true;
   }
   let image;
@@ -1897,25 +1951,31 @@ const sendAndroidEmulatorInput = async (sessionId, body = {}) => {
   const clampCoordinate = (value, maximum) =>
     String(Math.max(0, Math.min(maximum, Math.round(Number(value) || 0))));
   const keyMap = {
-    back: "KEYCODE_BACK",
-    home: "KEYCODE_HOME",
-    recents: "KEYCODE_APP_SWITCH",
-    wake: "KEYCODE_WAKEUP",
-    power: "KEYCODE_POWER",
-    enter: "KEYCODE_ENTER",
-    escape: "KEYCODE_BACK",
+    back: ["KEYCODE_BACK", "4"],
+    home: ["KEYCODE_HOME", "3"],
+    recents: ["KEYCODE_APP_SWITCH", "187"],
+    wake: ["KEYCODE_WAKEUP", "26"],
+    power: ["KEYCODE_POWER", "26"],
+    enter: ["KEYCODE_ENTER", "66"],
+    escape: ["KEYCODE_BACK", "4"],
   };
 
-  const runInput = async (args) => {
+  const runInput = async (variants) => {
     let lastError;
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      try {
-        await runAndroidToolAsync("adb", ["-s", serial, "shell", "input", ...args]);
-        return;
-      } catch (error) {
-        lastError = error;
-        if (!/can't find service:\s*input/i.test(String(error?.message || error))) throw error;
-        await new Promise((resolvePromise) => setTimeout(resolvePromise, 1000));
+    const commands = Array.isArray(variants?.[0]) ? variants : [variants];
+    for (const args of commands) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await runAndroidToolAsync("adb", ["-s", serial, "shell", "input", ...args]);
+          return;
+        } catch (error) {
+          lastError = error;
+          if (/can't find service:\s*input/i.test(String(error?.message || error))) {
+            await new Promise((resolvePromise) => setTimeout(resolvePromise, 1000));
+          } else {
+            break;
+          }
+        }
       }
     }
     throw new Error(
@@ -1929,21 +1989,23 @@ const sendAndroidEmulatorInput = async (sessionId, body = {}) => {
     runtime.awake = false;
     await runAndroidToolAsync("adb", ["-s", serial, "reboot"], { timeout: 15000 });
   } else if (body.type === "key" && keyMap[body.key]) {
-    await runInput(["keyevent", keyMap[body.key]]);
+    await runInput(keyMap[body.key].map((keyCode) => ["keyevent", keyCode]));
   } else if (body.type === "tap") {
+    const x = clampCoordinate(body.x, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080));
+    const y = clampCoordinate(body.y, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920));
     await runInput([
-      "tap",
-      clampCoordinate(body.x, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080)),
-      clampCoordinate(body.y, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920)),
+      ["tap", x, y],
+      ["touchscreen", "tap", x, y],
     ]);
   } else if (body.type === "swipe") {
+    const x1 = clampCoordinate(body.x1, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080));
+    const y1 = clampCoordinate(body.y1, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920));
+    const x2 = clampCoordinate(body.x2, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080));
+    const y2 = clampCoordinate(body.y2, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920));
+    const duration = String(Math.max(50, Math.min(3000, Math.round(Number(body.duration) || 250))));
     await runInput([
-      "swipe",
-      clampCoordinate(body.x1, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080)),
-      clampCoordinate(body.y1, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920)),
-      clampCoordinate(body.x2, runtime.displayWidth || (runtime.orientation === "landscape" ? 1920 : 1080)),
-      clampCoordinate(body.y2, runtime.displayHeight || (runtime.orientation === "landscape" ? 1080 : 1920)),
-      String(Math.max(50, Math.min(3000, Math.round(Number(body.duration) || 250)))),
+      ["swipe", x1, y1, x2, y2, duration],
+      ["touchscreen", "swipe", x1, y1, x2, y2, duration],
     ]);
   } else if (body.type === "text") {
     const text = String(body.text || "").slice(0, 500).replace(/%/g, "%25").replace(/\s/g, "%s");
