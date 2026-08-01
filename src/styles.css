@@ -1207,6 +1207,7 @@ h2 {
 }
 
 .android-config[hidden],
+.nintendo-config[hidden],
 .pc-spec-control[hidden],
 .advanced-options[hidden],
 .drop-zone[hidden],
@@ -2919,6 +2920,211 @@ input[type="text"] {
   background: #071011;
 }
 
+.workspace.is-nintendo-mode {
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+}
+
+.workspace.is-nintendo-mode .controls {
+  border-color: rgba(239, 68, 68, 0.48);
+  border-top: 3px solid #ef4444;
+  background:
+    linear-gradient(180deg, rgba(127, 29, 29, 0.14), transparent 38%),
+    #0d1015;
+}
+
+.workspace.is-nintendo-mode .console-area {
+  border-color: rgba(248, 113, 113, 0.38);
+  border-top: 3px solid #f87171;
+  background: #090c11;
+}
+
+.workspace.is-nintendo-mode .controls .kicker,
+.workspace.is-nintendo-mode .console-area .kicker {
+  color: #ff6b6b;
+}
+
+.workspace.is-nintendo-mode .emulator-select {
+  border-color: rgba(248, 113, 113, 0.62);
+  background: #0b0d12;
+  box-shadow: inset 3px 0 0 #ef4444;
+}
+
+.workspace.is-nintendo-mode .drop-zone {
+  border-color: rgba(248, 113, 113, 0.58);
+  background: rgba(127, 29, 29, 0.12);
+}
+
+.workspace.is-nintendo-mode .drop-zone.is-dragging,
+.workspace.is-nintendo-mode .drop-zone.has-file {
+  border-color: #ff7878;
+  background: rgba(127, 29, 29, 0.2);
+}
+
+.workspace.is-nintendo-mode .drop-icon,
+.workspace.is-nintendo-mode .controls .primary {
+  background: #ef4444;
+  color: #fff7f7;
+  box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.12);
+}
+
+.workspace.is-nintendo-mode .hardware-slider {
+  --slider-accent: #ef4444;
+}
+
+.workspace.is-nintendo-mode .range-heading output {
+  color: #ff8080;
+}
+
+.workspace.is-nintendo-mode .screen-mode-icon {
+  width: 190px;
+  height: 110px;
+  filter: drop-shadow(0 16px 28px rgba(239, 68, 68, 0.2));
+}
+
+.workspace.is-nintendo-mode .emustar-console-mark {
+  display: block;
+  object-fit: contain;
+  filter: drop-shadow(0 0 12px rgba(239, 68, 68, 0.3));
+}
+
+.workspace.is-nintendo-mode .terminal-panel {
+  border-color: rgba(248, 113, 113, 0.24);
+}
+
+.workspace.is-nintendo-mode .terminal-header,
+.workspace.is-nintendo-mode .terminal-panel pre {
+  color: #fecaca;
+}
+
+.nintendo-config {
+  display: grid;
+  gap: 13px;
+}
+
+.nintendo-config select {
+  border-color: rgba(248, 113, 113, 0.36);
+  background: #0a0d13;
+}
+
+.nintendo-legal-note {
+  margin: 0;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: rgba(127, 29, 29, 0.13);
+  color: #fecaca;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.nintendo-spec-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.nintendo-display {
+  grid-area: 1 / 1;
+  display: grid;
+  place-items: center;
+  width: min(100%, 760px);
+  min-height: min(100%, 420px);
+  aspect-ratio: 16 / 9;
+  border: 1px solid rgba(248, 113, 113, 0.26);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% -10%, rgba(239, 68, 68, 0.2), transparent 45%),
+    linear-gradient(145deg, #130b0e, #080b10 62%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.nintendo-display[hidden] {
+  display: none;
+}
+
+.nintendo-runtime-card {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(92%, 520px);
+  padding: 26px;
+  text-align: center;
+}
+
+.nintendo-runtime-card img {
+  width: min(210px, 70%);
+  max-height: 90px;
+  object-fit: contain;
+  filter: drop-shadow(0 16px 28px rgba(239, 68, 68, 0.22));
+}
+
+.nintendo-runtime-kicker {
+  margin: 0;
+  color: #ff7b7b;
+  font-size: 0.68rem;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.nintendo-runtime-card h3 {
+  margin: 0;
+  color: #fff7f7;
+  font-size: clamp(1.05rem, 2vw, 1.7rem);
+  line-height: 1.18;
+}
+
+.nintendo-runtime-media {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: #fecaca;
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
+.nintendo-runtime-specs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+}
+
+.nintendo-runtime-specs div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid rgba(248, 113, 113, 0.24);
+  border-radius: 8px;
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.nintendo-runtime-specs dt {
+  color: #ff8d8d;
+  font-size: 0.65rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nintendo-runtime-specs dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: #f8fafc;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.nintendo-runtime-note {
+  margin: 0;
+  color: #aeb9c8;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
 .android-config {
   display: grid;
   gap: 14px;
@@ -3727,6 +3933,10 @@ pre {
   .workspace.is-android-mode {
     grid-template-columns: 1fr;
   }
+
+  .workspace.is-nintendo-mode {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 620px) {
@@ -3743,6 +3953,8 @@ pre {
   }
 
   .field-grid,
+  .nintendo-spec-grid,
+  .nintendo-runtime-specs,
   .button-row,
   .button-row.compact,
   .display-choice-actions,

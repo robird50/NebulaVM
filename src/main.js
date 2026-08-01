@@ -23,6 +23,46 @@ const MOBILE_DEV_LOCK_MS = 5 * 60 * 1000;
 const MOBILE_PUBLIC_RELEASE = true;
 const MOBILE_DEV_GATE_ENABLED = !MOBILE_PUBLIC_RELEASE;
 const ANDROID_CURATED_VERSIONS = [2, 4, 5, 6, 8, 9, 12, 16, 17];
+const NINTENDO_EMULATORS = [
+  {
+    value: "mgba",
+    label: "mGBA",
+    system: "Game Boy Advance",
+    formats: ".gba, .gb, .gbc, .zip",
+  },
+  {
+    value: "melonds",
+    label: "melonDS",
+    system: "Nintendo DS",
+    formats: ".nds, .zip",
+  },
+  {
+    value: "dolphin",
+    label: "Dolphin",
+    system: "GameCube and Wii",
+    formats: ".iso, .gcm, .gcz, .rvz, .wbfs, .wia",
+  },
+  {
+    value: "cemu",
+    label: "Cemu",
+    system: "Wii U",
+    formats: ".wud, .wux, .rpx, .wua",
+  },
+  {
+    value: "snes9x",
+    label: "Snes9x",
+    system: "Super Nintendo",
+    formats: ".sfc, .smc, .fig, .swc, .zip",
+  },
+];
+const NINTENDO_CPU_STEPS = [2, 4, 6, 8];
+const NINTENDO_RAM_STEPS = [2, 4, 8, 16];
+const NINTENDO_VRAM_STEPS = [
+  { value: 512, label: "512 MB" },
+  { value: 1024, label: "1 GB" },
+  { value: 2048, label: "2 GB" },
+  { value: 4096, label: "4 GB" },
+];
 const hostedLauncherHostnames = new Set(["nebulavm.online", "www.nebulavm.online"]);
 const isHistoricalNetlifyDeploy =
   /\.netlify\.app$/i.test(window.location.hostname) &&
@@ -269,6 +309,7 @@ app.innerHTML = `
               <option value="qemu-native-arm64-ubuntu">QEMU ARM64 / Ubuntu</option>
               <option value="remote-vm">Remote VM / browser stream</option>
               <option value="android">Android</option>
+              <option value="nintendo">Nintendo</option>
             </select>
             <div class="emulator-dropdown">
               <button
@@ -316,6 +357,10 @@ app.innerHTML = `
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="android">
                   <img class="emulator-menu-icon" src="/assets/android-icon.png" alt="" />
                   <span>Android</span>
+                </button>
+                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="nintendo">
+                  <img class="emulator-menu-icon" src="/assets/nintendo-icon.webp" alt="" />
+                  <span>Nintendo</span>
                 </button>
               </div>
             </div>
@@ -379,6 +424,79 @@ app.innerHTML = `
               </label>
             </fieldset>
             <p class="android-image-note" id="androidImageNote">Checking installed Android system images...</p>
+          </section>
+
+          <section class="nintendo-config full-span" id="nintendoConfig" hidden>
+            <label class="field full-span">
+              <span>Legal emulator engine</span>
+              <select id="nintendoEngine">
+                ${NINTENDO_EMULATORS.map((engine) => {
+                  return `<option value="${engine.value}">${engine.label} - ${engine.system}</option>`;
+                }).join("")}
+              </select>
+            </label>
+            <p class="nintendo-legal-note">
+              Use homebrew or game backups you legally own. NebulaVM does not include Nintendo games,
+              firmware, BIOS files, keys, or copyrighted system files.
+            </p>
+            <div class="nintendo-spec-grid">
+              <div class="field range-field full-span">
+                <div class="range-heading">
+                  <label for="nintendoCpuSlider">CPU cores</label>
+                  <output id="nintendoCpuValue" for="nintendoCpuSlider">4 cores</output>
+                </div>
+                <input
+                  class="hardware-slider nintendo-slider"
+                  id="nintendoCpuSlider"
+                  type="range"
+                  min="0"
+                  max="3"
+                  step="1"
+                  value="1"
+                  aria-label="Nintendo CPU cores"
+                  aria-valuetext="4 cores"
+                />
+                <span class="range-endpoints" aria-hidden="true"><span>2 cores</span><span>8 cores</span></span>
+              </div>
+
+              <div class="field range-field">
+                <div class="range-heading">
+                  <label for="nintendoRamSlider">RAM</label>
+                  <output id="nintendoRamValue" for="nintendoRamSlider">4 GB</output>
+                </div>
+                <input
+                  class="hardware-slider nintendo-slider"
+                  id="nintendoRamSlider"
+                  type="range"
+                  min="0"
+                  max="3"
+                  step="1"
+                  value="1"
+                  aria-label="Nintendo RAM"
+                  aria-valuetext="4 GB"
+                />
+                <span class="range-endpoints" aria-hidden="true"><span>2 GB</span><span>16 GB</span></span>
+              </div>
+
+              <div class="field range-field">
+                <div class="range-heading">
+                  <label for="nintendoVramSlider">VRAM</label>
+                  <output id="nintendoVramValue" for="nintendoVramSlider">512 MB</output>
+                </div>
+                <input
+                  class="hardware-slider nintendo-slider"
+                  id="nintendoVramSlider"
+                  type="range"
+                  min="0"
+                  max="3"
+                  step="1"
+                  value="0"
+                  aria-label="Nintendo VRAM"
+                  aria-valuetext="512 MB"
+                />
+                <span class="range-endpoints" aria-hidden="true"><span>512 MB</span><span>4 GB</span></span>
+              </div>
+            </div>
           </section>
 
           <label class="field full-span pc-spec-control">
@@ -629,6 +747,7 @@ app.innerHTML = `
             <pre class="qemu-terminal" id="qemuTerminal" hidden></pre>
             <div class="native-display" id="nativeDisplay" hidden></div>
             <iframe class="remote-frame" id="remoteFrame" title="Remote VM display" hidden></iframe>
+            <div class="nintendo-display" id="nintendoDisplay" hidden></div>
             <div class="android-display" id="androidDisplay" hidden>
               <div class="android-device" id="androidDevice" data-era="modern">
                 <div class="android-status-bar">
@@ -918,6 +1037,7 @@ const els = {
   dropZone: document.querySelector("#dropZone"),
   isoInput: document.querySelector("#isoInput"),
   storedIsoInput: document.querySelector("#storedIsoInput"),
+  dropTitle: document.querySelector(".drop-title"),
   isoMeta: document.querySelector("#isoMeta"),
   hostStagingProgress: document.querySelector("#hostStagingProgress"),
   hostStagingProgressFill: document.querySelector("#hostStagingProgressFill"),
@@ -939,6 +1059,14 @@ const els = {
   androidStorage: document.querySelector("#androidStorage"),
   androidOrientation: [...document.querySelectorAll('input[name="androidOrientation"]')],
   androidImageNote: document.querySelector("#androidImageNote"),
+  nintendoConfig: document.querySelector("#nintendoConfig"),
+  nintendoEngine: document.querySelector("#nintendoEngine"),
+  nintendoCpuSlider: document.querySelector("#nintendoCpuSlider"),
+  nintendoCpuValue: document.querySelector("#nintendoCpuValue"),
+  nintendoRamSlider: document.querySelector("#nintendoRamSlider"),
+  nintendoRamValue: document.querySelector("#nintendoRamValue"),
+  nintendoVramSlider: document.querySelector("#nintendoVramSlider"),
+  nintendoVramValue: document.querySelector("#nintendoVramValue"),
   experimentalWarningPill: document.querySelector("#experimentalWarningPill"),
   pcSpecControls: [...document.querySelectorAll(".pc-spec-control")],
   workspace: document.querySelector("#workspace"),
@@ -1033,6 +1161,7 @@ const els = {
   qemuTerminal: document.querySelector("#qemuTerminal"),
   nativeDisplay: document.querySelector("#nativeDisplay"),
   remoteFrame: document.querySelector("#remoteFrame"),
+  nintendoDisplay: document.querySelector("#nintendoDisplay"),
   androidDisplay: document.querySelector("#androidDisplay"),
   androidDevice: document.querySelector("#androidDevice"),
   androidClock: document.querySelector("#androidClock"),
@@ -1103,6 +1232,29 @@ const syncMemorySelectFromSlider = () => {
   els.memorySliderValue.textContent = `${memoryMb} MB`;
   els.memorySlider.setAttribute("aria-valuetext", `${memoryMb} MB`);
   updateSliderTrack(els.memorySlider);
+};
+
+const selectedNintendoEngine = () =>
+  NINTENDO_EMULATORS.find((engine) => engine.value === els.nintendoEngine.value) || NINTENDO_EMULATORS[0];
+const selectedNintendoCpuCores = () =>
+  NINTENDO_CPU_STEPS[Math.max(0, Math.min(NINTENDO_CPU_STEPS.length - 1, Number(els.nintendoCpuSlider.value) || 0))];
+const selectedNintendoRamGb = () =>
+  NINTENDO_RAM_STEPS[Math.max(0, Math.min(NINTENDO_RAM_STEPS.length - 1, Number(els.nintendoRamSlider.value) || 0))];
+const selectedNintendoVram = () =>
+  NINTENDO_VRAM_STEPS[
+    Math.max(0, Math.min(NINTENDO_VRAM_STEPS.length - 1, Number(els.nintendoVramSlider.value) || 0))
+  ];
+
+const syncNintendoSlider = (slider, output, label) => {
+  output.textContent = label;
+  slider.setAttribute("aria-valuetext", label);
+  updateSliderTrack(slider);
+};
+
+const syncNintendoSliders = () => {
+  syncNintendoSlider(els.nintendoCpuSlider, els.nintendoCpuValue, `${selectedNintendoCpuCores()} cores`);
+  syncNintendoSlider(els.nintendoRamSlider, els.nintendoRamValue, `${selectedNintendoRamGb()} GB`);
+  syncNintendoSlider(els.nintendoVramSlider, els.nintendoVramValue, selectedNintendoVram().label);
 };
 
 const POPUP_MOTION_MS = 720;
@@ -3331,6 +3483,7 @@ const isNativeArm64Mode = () => isNativeWindowsArm64Mode() || isNativeUbuntuArm6
 const isNativeMode = () => isNativeX64Mode() || isNativeArm64Mode();
 const isRemoteMode = () => els.emulatorMode.value === "remote-vm";
 const isAndroidMode = () => els.emulatorMode.value === "android";
+const isNintendoMode = () => els.emulatorMode.value === "nintendo";
 const isPublicMobileModeAllowed = (value = els.emulatorMode.value) =>
   value === "android" || value === "remote-vm";
 const isNativeQemuMode = () => isStandaloneQemuMode();
@@ -3359,7 +3512,8 @@ const hasEmulatorIcon = (value) =>
   value === "qemu-native-arm64-windows" ||
   value === "qemu-native-arm64-ubuntu" ||
   value === "remote-vm" ||
-  value === "android";
+  value === "android" ||
+  value === "nintendo";
 const looksLikeArm64Iso = (path) => /(^|[^a-z0-9])(arm64|aarch64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeX64Iso = (path) => /(^|[^a-z0-9])(x64|amd64|x86_64)(?=[^a-z0-9]|$)/i.test(path);
 const looksLikeUbuntuIso = (path) => /(^|[^a-z0-9])ubuntu(?=[^a-z0-9]|$)/i.test(path);
@@ -3429,6 +3583,8 @@ const syncEmulatorDropdown = () => {
   els.emulatorSelectedIcon.src =
     selectedValue === "android"
       ? "/assets/android-icon.png"
+      : selectedValue === "nintendo"
+        ? "/assets/nintendo-icon.webp"
       : selectedValue === "remote-vm"
       ? "/assets/remote-vm-icon.png"
       : selectedValue.startsWith("qemu-native-")
@@ -3487,6 +3643,7 @@ const isSelectedMediaTooLarge = () =>
 
 const isHostStoredMediaSelectedForBrowserMode = () =>
   !isAndroidMode() &&
+  !isNintendoMode() &&
   !isNativeMode() &&
   !isRemoteMode() &&
   Boolean(els.nativeIsoPath.value.trim()) &&
@@ -3527,9 +3684,12 @@ const updateButtons = (busy = false) => {
   const externalMode = isExternalMode();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   const androidMode = isAndroidMode();
+  const nintendoMode = isNintendoMode();
   const mediaWarningBlocksBoot = !els.mediaWarning.hidden && Boolean(els.mediaWarning.textContent);
   const hasBootMedia = androidMode
     ? true
+    : nintendoMode
+    ? Boolean(state.isoFile)
     : emustarMode
     ? Boolean(els.nativeIsoPath.value.trim() || state.isoFile)
     : isNativeMode()
@@ -3551,15 +3711,15 @@ const updateButtons = (busy = false) => {
     windowsCredentialsBlocked ||
     state.hostStagedIsoUploading;
   els.bootButton.title = els.bootButton.disabled && mediaWarningBlocksBoot ? els.mediaWarning.textContent : "";
-  els.pauseButton.disabled = busy || !state.emulator || externalMode;
+  els.pauseButton.disabled = busy || !state.emulator || externalMode || nintendoMode;
   els.stopButton.disabled = busy || !state.emulator;
-  els.resetButton.disabled = busy || !state.emulator || externalMode;
-  els.saveStateButton.disabled = busy || !state.emulator || externalMode;
-  els.loadStateButton.disabled = externalMode;
+  els.resetButton.disabled = busy || !state.emulator || externalMode || nintendoMode;
+  els.saveStateButton.disabled = busy || !state.emulator || externalMode || nintendoMode;
+  els.loadStateButton.disabled = externalMode || nintendoMode;
   els.nativeResetFirmwareButton.disabled =
     busy || !isNativeMode() || Boolean(state.emulator) || nativeUnavailable;
   els.nativeConsoleButton.disabled = busy || !isHyperVMode() || nativeUnavailable;
-  els.windowsTemplateButton.hidden = isMobileOrTabletDevice();
+  els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || nintendoMode;
   els.windowsTemplateButton.disabled =
     busy || Boolean(state.emulator) || state.hostStagedIsoUploading || state.windowsTemplateLoading;
   els.windowsTemplateButton.classList.toggle("is-active", state.windowsTemplateSelected);
@@ -3570,8 +3730,20 @@ const updateButtons = (busy = false) => {
   if (!virtualKeyboardAvailable && state.virtualKeyboardOpen) {
     setVirtualKeyboardOpen(false);
   }
-  els.bootButton.textContent = androidMode ? "Start Android" : emustarMode ? "Launch Hyper-V" : "Boot VM";
-  els.stopButton.textContent = emustarMode ? "End session" : androidMode ? "Stop Android" : "Stop";
+  els.bootButton.textContent = androidMode
+    ? "Start Android"
+    : nintendoMode
+    ? "Start Nintendo"
+    : emustarMode
+      ? "Launch Hyper-V"
+      : "Boot VM";
+  els.stopButton.textContent = emustarMode
+    ? "End session"
+    : androidMode
+    ? "Stop Android"
+    : nintendoMode
+      ? "Stop Nintendo"
+      : "Stop";
   els.pauseButton.textContent = state.running ? "Pause" : "Resume";
   els.androidVersion.disabled = androidMode && Boolean(state.emulator);
   [els.androidCores, els.androidMemory, els.androidStorage, ...els.androidOrientation].forEach(
@@ -3693,7 +3865,7 @@ const setSelectedFile = (file) => {
   els.isoMeta.textContent = `${file.name} - ${formatBytes(file.size)}`;
   els.machineTitle.textContent = file.name;
   els.dropZone.classList.add("has-file");
-  log(`Selected ${file.name} (${formatBytes(file.size)}).`);
+  log(`Selected ${isNintendoMode() ? "Nintendo media" : "boot media"}: ${file.name} (${formatBytes(file.size)}).`);
   updateMediaWarning();
   updateButtons();
   void (async () => {
@@ -3759,10 +3931,15 @@ const stopEmulator = async () => {
   state.nativeRuntimeName = null;
   els.remoteFrame.src = "about:blank";
   els.remoteFrame.hidden = true;
+  els.nintendoDisplay.replaceChildren();
+  els.nintendoDisplay.hidden = true;
   els.androidDisplay.hidden = true;
   if (isAndroidMode()) {
     els.placeholderTitle.textContent = `${androidVersionLabel()} ready`;
     els.placeholderMeta.textContent = "Start Android to open the browser simulator.";
+  } else if (isNintendoMode()) {
+    els.placeholderTitle.textContent = "Nintendo emulator ready";
+    els.placeholderMeta.textContent = `${selectedNintendoEngine().label} handles ${selectedNintendoEngine().system}. Drop legally owned media to begin.`;
   }
   updateButtons();
 };
@@ -3790,12 +3967,98 @@ const buildConfig = () => ({
 
 const prepareBootUi = () => {
   els.screenPlaceholder.hidden = true;
-  els.ramMetric.textContent = `${Number(els.memorySize.value) / 1024 / 1024} MB RAM`;
+  els.ramMetric.textContent = isNintendoMode()
+    ? `${selectedNintendoRamGb()} GB RAM`
+    : `${Number(els.memorySize.value) / 1024 / 1024} MB RAM`;
   setPowerState("Booting", "booting");
   state.startedAt = Date.now();
   clearStatsTimer();
   state.statsTimer = window.setInterval(updateUptime, 1000);
   updateUptime();
+};
+
+const bootNintendo = () => {
+  const engine = selectedNintendoEngine();
+  const mediaName = state.isoFile?.name || "No media selected";
+  const shell = document.createElement("section");
+  shell.className = "nintendo-runtime-card";
+
+  const icon = document.createElement("img");
+  icon.src = "/assets/nintendo-icon.webp";
+  icon.alt = "";
+  shell.append(icon);
+
+  const kicker = document.createElement("p");
+  kicker.className = "nintendo-runtime-kicker";
+  kicker.textContent = "Nintendo launcher";
+  shell.append(kicker);
+
+  const title = document.createElement("h3");
+  title.textContent = `${engine.label} - ${engine.system}`;
+  shell.append(title);
+
+  const media = document.createElement("p");
+  media.className = "nintendo-runtime-media";
+  media.textContent = mediaName;
+  shell.append(media);
+
+  const specList = document.createElement("dl");
+  specList.className = "nintendo-runtime-specs";
+  [
+    ["CPU", `${selectedNintendoCpuCores()} cores`],
+    ["RAM", `${selectedNintendoRamGb()} GB`],
+    ["VRAM", selectedNintendoVram().label],
+    ["Formats", engine.formats],
+  ].forEach(([label, value]) => {
+    const item = document.createElement("div");
+    const term = document.createElement("dt");
+    const description = document.createElement("dd");
+    term.textContent = label;
+    description.textContent = value;
+    item.append(term, description);
+    specList.append(item);
+  });
+  shell.append(specList);
+
+  const note = document.createElement("p");
+  note.className = "nintendo-runtime-note";
+  note.textContent =
+    "Launcher mode is ready. Add the matching emulator core backend to run this media; games, firmware, BIOS files, and keys are not included.";
+  shell.append(note);
+
+  els.qemuTerminal.hidden = true;
+  els.nativeDisplay.hidden = true;
+  els.remoteFrame.hidden = true;
+  els.androidDisplay.hidden = true;
+  els.screenContainer.querySelector(".vga-text").hidden = true;
+  els.screenContainer.querySelector(".vga-canvas").hidden = true;
+  els.nintendoDisplay.replaceChildren(shell);
+  els.nintendoDisplay.hidden = false;
+  els.machineTitle.textContent = `${engine.label} - ${engine.system}`;
+  els.ramMetric.textContent = `${selectedNintendoRamGb()} GB RAM`;
+  setPowerState("Nintendo ready", "running");
+  state.running = true;
+  state.emulator = {
+    run() {
+      state.running = true;
+      setPowerState("Nintendo ready", "running");
+      updateButtons();
+    },
+    stop() {
+      state.running = false;
+      setPowerState("Nintendo paused", "paused");
+      updateButtons();
+    },
+    restart() {
+      bootNintendo();
+    },
+    async destroy() {},
+  };
+  log(
+    `Nintendo launcher ready with ${engine.label}: ${selectedNintendoCpuCores()} CPU cores, ${selectedNintendoRamGb()} GB RAM, ${selectedNintendoVram().label} VRAM.`,
+  );
+  log("Nintendo mode does not include games, firmware, BIOS files, keys, or copyrighted system files.");
+  updateButtons();
 };
 
 const bootV86 = () => {
@@ -4814,7 +5077,11 @@ const bootEmulator = async () => {
     log("Public mobile mode supports Android and Remote VM only.");
     return;
   }
-  if (!isAndroidMode() && !isNativeMode() && !isRemoteMode() && !state.isoFile) return;
+  if (!isAndroidMode() && !isNintendoMode() && !isNativeMode() && !isRemoteMode() && !state.isoFile) return;
+  if (isNintendoMode() && !state.isoFile) {
+    log("Boot blocked: drop a legally owned Nintendo ROM or disc image first.");
+    return;
+  }
   if (isNativeMode() && !isHyperVMode() && !els.nativeIsoPath.value.trim()) {
     log(`Boot blocked: enter a local ISO path for ${nativeModeLabel()}.`);
     return;
@@ -4852,13 +5119,15 @@ const bootEmulator = async () => {
 
   prepareBootUi();
   log("Creating virtual machine.");
-  if (!isRemoteMode() && !isAndroidMode()) {
+  if (!isRemoteMode() && !isAndroidMode() && !isNintendoMode()) {
     log(`Hardware request: ${selectedProcessorSpeedGhz()} GHz CPU target, ${selectedMemoryMb()} MB RAM.`);
   }
 
   try {
     if (isAndroidMode()) {
       await bootAndroid();
+    } else if (isNintendoMode()) {
+      bootNintendo();
     } else if (isRemoteMode()) {
       await bootRemoteVm();
     } else if (isHyperVMode()) {
@@ -4984,6 +5253,30 @@ els.memorySlider.addEventListener("input", () => {
 els.memorySize.addEventListener("change", () => {
   syncMemorySliderFromSelect();
   els.ramMetric.textContent = `${selectedMemoryMb()} MB RAM`;
+});
+[els.nintendoCpuSlider, els.nintendoRamSlider, els.nintendoVramSlider].forEach((slider) => {
+  slider.addEventListener("input", () => {
+    syncNintendoSliders();
+    if (isNintendoMode()) {
+      els.ramMetric.textContent = `${selectedNintendoRamGb()} GB RAM`;
+      if (state.emulator) {
+        bootNintendo();
+      }
+    }
+    updateButtons();
+  });
+});
+els.nintendoEngine.addEventListener("change", () => {
+  syncNintendoSliders();
+  if (isNintendoMode() && !state.emulator) {
+    els.machineTitle.textContent = `${selectedNintendoEngine().label} - ${selectedNintendoEngine().system}`;
+    els.placeholderMeta.textContent = `${selectedNintendoEngine().label} handles ${selectedNintendoEngine().system}. Drop legally owned media to begin.`;
+  }
+  if (isNintendoMode() && state.emulator) {
+    bootNintendo();
+  }
+  log(`Selected ${selectedNintendoEngine().label} for ${selectedNintendoEngine().system}.`);
+  updateButtons();
 });
 
 const updateNativeStatus = async () => {
@@ -5127,47 +5420,85 @@ const updateBackendUi = () => {
   const runtimeBrand = nativeRuntimeBrand();
   const emustarMode = isEmustarEmulator(els.emulatorMode.value);
   const androidMode = isAndroidMode();
+  const nintendoMode = isNintendoMode();
   if (state.windowsTemplateSelected && !emustarMode) {
     clearWindowsTemplateSelection();
   }
   syncEmulatorDropdown();
   els.workspace.classList.toggle("is-emustar-mode", emustarMode);
   els.workspace.classList.toggle("is-android-mode", androidMode);
+  els.workspace.classList.toggle("is-nintendo-mode", nintendoMode);
   document.documentElement.classList.toggle("android-mode", androidMode);
   els.experimentalWarningPill.hidden = !emustarMode && !androidMode && !remoteMode;
   els.emustarInfoLink.hidden = !emustarMode;
-  els.storedImagesControl.hidden = androidMode;
-  els.windowsTemplateButton.hidden = isMobileOrTabletDevice();
+  els.storedImagesControl.hidden = androidMode || nintendoMode;
+  els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || nintendoMode;
   els.dropZone.hidden = androidMode;
   els.mediaWarning.hidden = androidMode;
-  els.demoButton.hidden = androidMode;
+  els.demoButton.hidden = androidMode || nintendoMode;
   els.androidConfig.hidden = !androidMode;
+  els.nintendoConfig.hidden = !nintendoMode;
   els.androidViewSwitch.hidden = !androidMode || isPublicMobileClient;
   els.hostMemoryMetric.hidden = !androidMode;
+  els.dropTitle.textContent = nintendoMode ? "Drop ROM or disc image" : "Drop ISO or disk image";
+  els.isoInput.accept = nintendoMode
+    ? ".gba,.gb,.gbc,.nds,.iso,.gcm,.gcz,.rvz,.wbfs,.wia,.wud,.wux,.rpx,.wua,.sfc,.smc,.fig,.swc,.rom,.zip,.7z"
+    : ".iso,.img,.bin,.raw";
   if (!androidMode && state.androidViewportMode !== "device") {
     setAndroidViewportMode("device", { force: true });
   }
   if (androidMode) syncAndroidOrientation();
+  if (nintendoMode) syncNintendoSliders();
   els.pcSpecControls.forEach((control) => {
-    control.hidden = androidMode;
+    control.hidden = androidMode || nintendoMode;
   });
-  els.advancedOptions.hidden = androidMode;
-  els.mediaKicker.textContent = androidMode ? "Android" : emustarMode ? "Nebula Host" : "Media";
-  els.bootSourceTitle.textContent = androidMode ? "Device" : emustarMode ? "Mission media" : "Boot source";
-  els.displayKicker.textContent = androidMode ? "Android Device" : emustarMode ? "Nebula Console" : "Display";
-  els.activityLabel.textContent = androidMode ? "Android log" : emustarMode ? "Mission log" : "Activity";
-  els.screenModeIcon.src = androidMode ? "/assets/android-icon.png" : "/assets/hyperv-icon.svg";
-  els.displayModeMark.src = androidMode ? "/assets/android-icon.png" : "/assets/hyperv-icon.svg";
-  els.screenModeIcon.hidden = !emustarMode && !androidMode;
-  els.screenOrbital.hidden = emustarMode || androidMode;
+  els.advancedOptions.hidden = androidMode || nintendoMode;
+  els.mediaKicker.textContent = androidMode
+    ? "Android"
+    : nintendoMode
+    ? "Nintendo"
+    : emustarMode
+      ? "Nebula Host"
+      : "Media";
+  els.bootSourceTitle.textContent = androidMode
+    ? "Device"
+    : nintendoMode
+    ? "Game media"
+    : emustarMode
+      ? "Mission media"
+      : "Boot source";
+  els.displayKicker.textContent = androidMode
+    ? "Android Device"
+    : nintendoMode
+    ? "Nintendo Emulator"
+    : emustarMode
+      ? "Nebula Console"
+      : "Display";
+  els.activityLabel.textContent = androidMode ? "Android log" : nintendoMode ? "Nintendo log" : emustarMode ? "Mission log" : "Activity";
+  els.screenModeIcon.src = androidMode
+    ? "/assets/android-icon.png"
+    : nintendoMode
+    ? "/assets/nintendo-icon.webp"
+    : "/assets/hyperv-icon.svg";
+  els.displayModeMark.src = androidMode
+    ? "/assets/android-icon.png"
+    : nintendoMode
+    ? "/assets/nintendo-icon.webp"
+    : "/assets/hyperv-icon.svg";
+  els.screenModeIcon.hidden = !emustarMode && !androidMode && !nintendoMode;
+  els.screenOrbital.hidden = emustarMode || androidMode || nintendoMode;
   els.placeholderTitle.textContent = androidMode
     ? `${androidVersionLabel()} ready`
+    : nintendoMode
+      ? "Nintendo emulator ready"
     : emustarMode
       ? "Hyper-V viewport standing by"
       : "Drop an ISO to begin";
   if (!state.emulator && !state.isoFile && !state.windowsTemplateSelected) {
     els.machineTitle.textContent = androidMode
       ? `${androidVersionLabel()} private device`
+      : nintendoMode
+        ? `${selectedNintendoEngine().label} - ${selectedNintendoEngine().system}`
       : emustarMode
         ? "Hyper-V Control Deck"
         : "Awaiting boot media";
@@ -5186,6 +5517,9 @@ const updateBackendUi = () => {
   els.remotePanel.hidden = !remoteMode;
   if (!androidMode) {
     els.androidDisplay.hidden = true;
+  }
+  if (!nintendoMode) {
+    els.nintendoDisplay.hidden = true;
   }
   if (nativeMode) {
     const hostedEmustarMode = emustarMode && isNetlifyLauncher;
@@ -5237,6 +5571,8 @@ const updateBackendUi = () => {
     : "Uses v86 networking support when available.";
   els.placeholderMeta.textContent = androidMode
     ? `Start ${androidVersionLabel()} with no ISO or PC hardware setup required.`
+    : nintendoMode
+    ? `${selectedNintendoEngine().label} handles ${selectedNintendoEngine().system}. Drop legally owned media to begin.`
     : nativeMode
     ? emustarMode
       ? "Choose or import an ISO to launch a Hyper-V machine."
@@ -5264,6 +5600,8 @@ const updateBackendUi = () => {
     ? Number(els.androidMemory.value) === 0
       ? "Adaptive RAM"
       : `${els.androidMemory.value} MB RAM`
+    : nintendoMode
+    ? `${selectedNintendoRamGb()} GB RAM`
     : `${selectedMemoryMb()} MB RAM`;
   updateMediaWarning();
   updateButtons();
