@@ -3031,6 +3031,7 @@ input[type="text"] {
   width: min(100%, 760px);
   min-height: min(100%, 420px);
   aspect-ratio: 16 / 9;
+  overflow: hidden;
   border: 1px solid rgba(248, 113, 113, 0.26);
   border-radius: 8px;
   background:
@@ -3041,6 +3042,13 @@ input[type="text"] {
 
 .nintendo-display[hidden] {
   display: none;
+}
+
+.nintendo-player-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #05070b;
 }
 
 .nintendo-runtime-card {

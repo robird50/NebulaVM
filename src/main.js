@@ -28,32 +28,29 @@ const NINTENDO_EMULATORS = [
     value: "mgba",
     label: "mGBA",
     system: "Game Boy Advance",
+    core: "gba",
     formats: ".gba, .gb, .gbc, .zip",
+    extensions: ["gba", "gb", "gbc", "zip"],
   },
   {
     value: "melonds",
     label: "melonDS",
     system: "Nintendo DS",
+    core: "nds",
     formats: ".nds, .zip",
-  },
-  {
-    value: "dolphin",
-    label: "Dolphin",
-    system: "GameCube and Wii",
-    formats: ".iso, .gcm, .gcz, .rvz, .wbfs, .wia",
-  },
-  {
-    value: "cemu",
-    label: "Cemu",
-    system: "Wii U",
-    formats: ".wud, .wux, .rpx, .wua",
+    extensions: ["nds", "zip"],
   },
   {
     value: "snes9x",
     label: "Snes9x",
     system: "Super Nintendo",
+    core: "snes",
     formats: ".sfc, .smc, .fig, .swc, .zip",
+    extensions: ["sfc", "smc", "fig", "swc", "zip"],
   },
+];
+const NINTENDO_ACCEPTED_EXTENSIONS = [
+  ...new Set(NINTENDO_EMULATORS.flatMap((engine) => engine.extensions)),
 ];
 const NINTENDO_CPU_STEPS = [2, 4, 6, 8];
 const NINTENDO_RAM_STEPS = [2, 4, 8, 16];
@@ -162,6 +159,10 @@ const state = {
   hostStagingEtaBaselineBytes: 0,
   hostStagingEtaStartedAt: 0,
   hostStagingEtaLastRenderedAt: 0,
+  nintendoRomUrl: "",
+  nintendoFrame: null,
+  nintendoRunId: 0,
+  nintendoMessageHandler: null,
   storedIsos: [],
   storedIsoLimit: STORED_ISO_LIMIT,
   storedImagesMenuOpen: false,
@@ -436,8 +437,9 @@ app.innerHTML = `
               </select>
             </label>
             <p class="nintendo-legal-note">
-              Use homebrew or game backups you legally own. NebulaVM does not include Nintendo games,
-              firmware, BIOS files, keys, or copyrighted system files.
+              Real browser cores are included for mGBA, melonDS, and Snes9x. Use homebrew or game
+              backups you legally own. NebulaVM does not include Nintendo games, firmware, BIOS files,
+              keys, or copyrighted system files.
             </p>
             <div class="nintendo-spec-grid">
               <div class="field range-field full-span">
@@ -1236,6 +1238,16 @@ const syncMemorySelectFromSlider = () => {
 
 const selectedNintendoEngine = () =>
   NINTENDO_EMULATORS.find((engine) => engine.value === els.nintendoEngine.value) || NINTENDO_EMULATORS[0];
+const nintendoMediaExtension = (file = state.isoFile) =>
+  String(file?.name || "")
+    .split(".")
+    .pop()
+    .toLowerCase();
+const nintendoAcceptString = () => NINTENDO_ACCEPTED_EXTENSIONS.map((extension) => `.${extension}`).join(",");
+const nintendoEngineSupportsFile = (engine = selectedNintendoEngine(), file = state.isoFile) => {
+  const extension = nintendoMediaExtension(file);
+  return Boolean(extension && engine.extensions.includes(extension));
+};
 const selectedNintendoCpuCores = () =>
   NINTENDO_CPU_STEPS[Math.max(0, Math.min(NINTENDO_CPU_STEPS.length - 1, Number(els.nintendoCpuSlider.value) || 0))];
 const selectedNintendoRamGb = () =>
@@ -1256,6 +1268,57 @@ const syncNintendoSliders = () => {
   syncNintendoSlider(els.nintendoRamSlider, els.nintendoRamValue, `${selectedNintendoRamGb()} GB`);
   syncNintendoSlider(els.nintendoVramSlider, els.nintendoVramValue, selectedNintendoVram().label);
 };
+
+const scriptSafeJson = (value) => JSON.stringify(value).replace(/</g, "\\u003c");
+
+const nintendoPlayerDocument = ({ core, engineName, gameName, gameUrl, threads }) => `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html,
+      body,
+      #game {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #05070b;
+      }
+
+      body {
+        color: #fff7f7;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <script>
+      window.EJS_player = "#game";
+      window.EJS_gameName = ${scriptSafeJson(gameName)};
+      window.EJS_gameUrl = ${scriptSafeJson(gameUrl)};
+      window.EJS_core = ${scriptSafeJson(core)};
+      window.EJS_pathtodata = "/emulatorjs/data/";
+      window.EJS_biosUrl = "";
+      window.EJS_startOnLoaded = true;
+      window.EJS_threads = ${threads ? "true" : "false"};
+      window.EJS_forceLegacyCores = false;
+      window.EJS_DEBUG_XX = true;
+      window.EJS_disableDatabases = true;
+      window.EJS_disableAutoLang = false;
+      window.EJS_language = "en-US";
+      window.EJS_color = "#ef4444";
+      window.EJS_backgroundColor = "#05070b";
+      window.EJS_gameID = ${scriptSafeJson(`nebulavm-${engineName}-${gameName}`)};
+      window.EJS_onGameStart = function () {
+        parent.postMessage({ type: "nebulavm:nintendo-started", engine: ${scriptSafeJson(engineName)} }, window.location.origin);
+      };
+    </script>
+    <script src="/emulatorjs/data/loader.js"></script>
+  </body>
+</html>`;
 
 const POPUP_MOTION_MS = 720;
 const popupMotionOrigins = new WeakMap();
@@ -3865,6 +3928,15 @@ const setSelectedFile = (file) => {
   els.isoMeta.textContent = `${file.name} - ${formatBytes(file.size)}`;
   els.machineTitle.textContent = file.name;
   els.dropZone.classList.add("has-file");
+  if (isNintendoMode()) {
+    const matchingEngines = NINTENDO_EMULATORS.filter((engine) => engine.extensions.includes(nintendoMediaExtension(file)));
+    const [matchingEngine] = matchingEngines.length === 1 ? matchingEngines : [];
+    if (matchingEngine && matchingEngine.value !== els.nintendoEngine.value) {
+      els.nintendoEngine.value = matchingEngine.value;
+      syncNintendoSliders();
+      log(`Switched Nintendo core to ${matchingEngine.label} for ${matchingEngine.system}.`);
+    }
+  }
   log(`Selected ${isNintendoMode() ? "Nintendo media" : "boot media"}: ${file.name} (${formatBytes(file.size)}).`);
   updateMediaWarning();
   updateButtons();
@@ -3931,6 +4003,15 @@ const stopEmulator = async () => {
   state.nativeRuntimeName = null;
   els.remoteFrame.src = "about:blank";
   els.remoteFrame.hidden = true;
+  if (state.nintendoMessageHandler) {
+    window.removeEventListener("message", state.nintendoMessageHandler);
+    state.nintendoMessageHandler = null;
+  }
+  if (state.nintendoRomUrl) {
+    URL.revokeObjectURL(state.nintendoRomUrl);
+    state.nintendoRomUrl = "";
+  }
+  state.nintendoFrame = null;
   els.nintendoDisplay.replaceChildren();
   els.nintendoDisplay.hidden = true;
   els.androidDisplay.hidden = true;
@@ -3979,52 +4060,39 @@ const prepareBootUi = () => {
 
 const bootNintendo = () => {
   const engine = selectedNintendoEngine();
-  const mediaName = state.isoFile?.name || "No media selected";
-  const shell = document.createElement("section");
-  shell.className = "nintendo-runtime-card";
+  if (!state.isoFile) {
+    throw new Error("Drop a legally owned Nintendo ROM first.");
+  }
+  if (!nintendoEngineSupportsFile(engine)) {
+    throw new Error(`${engine.label} expects ${engine.formats}. Choose the matching Nintendo emulator for this file.`);
+  }
 
-  const icon = document.createElement("img");
-  icon.src = "/assets/nintendo-icon.webp";
-  icon.alt = "";
-  shell.append(icon);
-
-  const kicker = document.createElement("p");
-  kicker.className = "nintendo-runtime-kicker";
-  kicker.textContent = "Nintendo launcher";
-  shell.append(kicker);
-
-  const title = document.createElement("h3");
-  title.textContent = `${engine.label} - ${engine.system}`;
-  shell.append(title);
-
-  const media = document.createElement("p");
-  media.className = "nintendo-runtime-media";
-  media.textContent = mediaName;
-  shell.append(media);
-
-  const specList = document.createElement("dl");
-  specList.className = "nintendo-runtime-specs";
-  [
-    ["CPU", `${selectedNintendoCpuCores()} cores`],
-    ["RAM", `${selectedNintendoRamGb()} GB`],
-    ["VRAM", selectedNintendoVram().label],
-    ["Formats", engine.formats],
-  ].forEach(([label, value]) => {
-    const item = document.createElement("div");
-    const term = document.createElement("dt");
-    const description = document.createElement("dd");
-    term.textContent = label;
-    description.textContent = value;
-    item.append(term, description);
-    specList.append(item);
+  if (state.nintendoRomUrl) {
+    URL.revokeObjectURL(state.nintendoRomUrl);
+    state.nintendoRomUrl = "";
+  }
+  if (state.nintendoMessageHandler) {
+    window.removeEventListener("message", state.nintendoMessageHandler);
+    state.nintendoMessageHandler = null;
+  }
+  state.nintendoRunId += 1;
+  const runId = state.nintendoRunId;
+  const mediaName = state.isoFile.name || "Nintendo media";
+  const threads = selectedNintendoCpuCores() >= 4 && window.crossOriginIsolated === true;
+  const romUrl = URL.createObjectURL(state.isoFile);
+  const frame = document.createElement("iframe");
+  frame.className = "nintendo-player-frame";
+  frame.title = `${engine.label} ${engine.system} player`;
+  frame.allow = "fullscreen; gamepad";
+  frame.srcdoc = nintendoPlayerDocument({
+    core: engine.core,
+    engineName: engine.label,
+    gameName: mediaName,
+    gameUrl: romUrl,
+    threads,
   });
-  shell.append(specList);
-
-  const note = document.createElement("p");
-  note.className = "nintendo-runtime-note";
-  note.textContent =
-    "Launcher mode is ready. Add the matching emulator core backend to run this media; games, firmware, BIOS files, and keys are not included.";
-  shell.append(note);
+  state.nintendoRomUrl = romUrl;
+  state.nintendoFrame = frame;
 
   els.qemuTerminal.hidden = true;
   els.nativeDisplay.hidden = true;
@@ -4032,32 +4100,55 @@ const bootNintendo = () => {
   els.androidDisplay.hidden = true;
   els.screenContainer.querySelector(".vga-text").hidden = true;
   els.screenContainer.querySelector(".vga-canvas").hidden = true;
-  els.nintendoDisplay.replaceChildren(shell);
+  els.nintendoDisplay.replaceChildren(frame);
   els.nintendoDisplay.hidden = false;
   els.machineTitle.textContent = `${engine.label} - ${engine.system}`;
   els.ramMetric.textContent = `${selectedNintendoRamGb()} GB RAM`;
-  setPowerState("Nintendo ready", "running");
+  setPowerState("Nintendo loading", "booting");
   state.running = true;
   state.emulator = {
     run() {
       state.running = true;
-      setPowerState("Nintendo ready", "running");
+      setPowerState("Nintendo running", "running");
       updateButtons();
     },
     stop() {
       state.running = false;
-      setPowerState("Nintendo paused", "paused");
+      setPowerState("Nintendo stopped", "off");
       updateButtons();
     },
     restart() {
       bootNintendo();
     },
-    async destroy() {},
+    async destroy() {
+      if (state.nintendoFrame === frame) {
+        state.nintendoFrame = null;
+      }
+      if (state.nintendoMessageHandler === onNintendoMessage) {
+        window.removeEventListener("message", onNintendoMessage);
+        state.nintendoMessageHandler = null;
+      }
+      frame.src = "about:blank";
+      frame.remove();
+      if (state.nintendoRomUrl === romUrl) {
+        URL.revokeObjectURL(romUrl);
+        state.nintendoRomUrl = "";
+      }
+    },
   };
   log(
-    `Nintendo launcher ready with ${engine.label}: ${selectedNintendoCpuCores()} CPU cores, ${selectedNintendoRamGb()} GB RAM, ${selectedNintendoVram().label} VRAM.`,
+    `Starting ${engine.label} with ${mediaName}: ${selectedNintendoCpuCores()} CPU cores, ${selectedNintendoRamGb()} GB RAM, ${selectedNintendoVram().label} VRAM profile.`,
   );
-  log("Nintendo mode does not include games, firmware, BIOS files, keys, or copyrighted system files.");
+  log(`Loaded the real ${engine.label} browser core. Use only homebrew or backups you legally own.`);
+  const onNintendoMessage = (event) => {
+    if (event.origin !== window.location.origin || event.source !== frame.contentWindow) return;
+    if (event.data?.type !== "nebulavm:nintendo-started" || runId !== state.nintendoRunId) return;
+    window.removeEventListener("message", onNintendoMessage);
+    setPowerState("Nintendo running", "running");
+    log(`${engine.label} reported that the game started.`);
+  };
+  state.nintendoMessageHandler = onNintendoMessage;
+  window.addEventListener("message", onNintendoMessage);
   updateButtons();
 };
 
@@ -5441,9 +5532,7 @@ const updateBackendUi = () => {
   els.androidViewSwitch.hidden = !androidMode || isPublicMobileClient;
   els.hostMemoryMetric.hidden = !androidMode;
   els.dropTitle.textContent = nintendoMode ? "Drop ROM or disc image" : "Drop ISO or disk image";
-  els.isoInput.accept = nintendoMode
-    ? ".gba,.gb,.gbc,.nds,.iso,.gcm,.gcz,.rvz,.wbfs,.wia,.wud,.wux,.rpx,.wua,.sfc,.smc,.fig,.swc,.rom,.zip,.7z"
-    : ".iso,.img,.bin,.raw";
+  els.isoInput.accept = nintendoMode ? nintendoAcceptString() : ".iso,.img,.bin,.raw";
   if (!androidMode && state.androidViewportMode !== "device") {
     setAndroidViewportMode("device", { force: true });
   }
