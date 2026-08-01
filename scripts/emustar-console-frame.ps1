@@ -212,6 +212,108 @@ function Hide-ConsoleFromHost {
   }
 }
 
+function Test-ConsoleBitmapLooksStuckConnecting {
+  param([System.Drawing.Bitmap]$Bitmap)
+
+  if (-not $Bitmap -or $Bitmap.Width -lt 160 -or $Bitmap.Height -lt 160) {
+    return $false
+  }
+
+  # VMConnect's stuck "Connecting..." screen is a flat dark gray client area.
+  # Real guest frames have colored firmware/setup pixels or a much less uniform image.
+  $top = [math]::Min($Bitmap.Height - 2, 80)
+  $bottom = [math]::Max($top + 1, $Bitmap.Height - 28)
+  $stepX = [math]::Max(8, [math]::Floor($Bitmap.Width / 80))
+  $stepY = [math]::Max(8, [math]::Floor(($bottom - $top) / 60))
+  $total = 0
+  $darkGray = 0
+  $bright = 0
+  $saturated = 0
+
+  for ($y = $top; $y -lt $bottom; $y += $stepY) {
+    for ($x = 0; $x -lt $Bitmap.Width; $x += $stepX) {
+      $pixel = $Bitmap.GetPixel($x, $y)
+      $max = [math]::Max($pixel.R, [math]::Max($pixel.G, $pixel.B))
+      $min = [math]::Min($pixel.R, [math]::Min($pixel.G, $pixel.B))
+      $spread = $max - $min
+      $total += 1
+
+      if ($max -lt 75 -and $spread -lt 14) {
+        $darkGray += 1
+      }
+      if ($min -gt 170) {
+        $bright += 1
+      }
+      if ($max -gt 70 -and $spread -gt 35) {
+        $saturated += 1
+      }
+    }
+  }
+
+  if ($total -lt 1) {
+    return $false
+  }
+
+  return (($darkGray / $total) -gt 0.86) -and
+    (($bright / $total) -lt 0.035) -and
+    (($saturated / $total) -lt 0.035)
+}
+
+function Get-RecoveryStatePath {
+  $safeName = $VmName -replace "[^A-Za-z0-9_.-]", "_"
+  return (Join-Path $env:TEMP "nebulavm-vmconnect-recovery-$safeName.txt")
+}
+
+function Get-ProcessAgeSeconds {
+  param([object]$Process)
+
+  try {
+    return ((Get-Date) - $Process.StartTime).TotalSeconds
+  } catch {
+    return 999
+  }
+}
+
+function Restart-StaleConsoleProcess {
+  $statePath = Get-RecoveryStatePath
+  $nowTicks = (Get-Date).Ticks
+  if (Test-Path -LiteralPath $statePath) {
+    try {
+      $lastTicks = [int64](Get-Content -LiteralPath $statePath -Raw)
+      $secondsSinceLastRecovery = ([TimeSpan]::FromTicks($nowTicks - $lastTicks)).TotalSeconds
+      if ($secondsSinceLastRecovery -lt 18) {
+        return $false
+      }
+    } catch {
+      # Ignore malformed state and allow one recovery.
+    }
+  }
+
+  Set-Content -LiteralPath $statePath -Value ([string]$nowTicks) -NoNewline
+  Get-TargetConsoleProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 350
+  return $true
+}
+
+function Refresh-ConsoleBitmap {
+  param(
+    [object]$Process,
+    [System.Drawing.Bitmap]$Bitmap,
+    [int]$WaitSeconds = 8
+  )
+
+  $deadline = (Get-Date).AddSeconds($WaitSeconds)
+  do {
+    Capture-ConsoleBitmap -Process $Process -Bitmap $Bitmap
+    if (-not (Test-ConsoleBitmapLooksStuckConnecting -Bitmap $Bitmap)) {
+      return $false
+    }
+    Start-Sleep -Milliseconds 500
+  } while ((Get-Date) -lt $deadline)
+
+  return $true
+}
+
 function Capture-ConsoleBitmap {
   param(
     [object]$Process,
@@ -247,6 +349,22 @@ try {
   $bitmap = New-Object System.Drawing.Bitmap $bounds.width, $bounds.height
   try {
     Capture-ConsoleBitmap -Process $process -Bitmap $bitmap
+    $isStuckConnecting = Test-ConsoleBitmapLooksStuckConnecting -Bitmap $bitmap
+    if ($isStuckConnecting -and (Get-ProcessAgeSeconds -Process $process) -lt 10) {
+      $isStuckConnecting = Refresh-ConsoleBitmap -Process $process -Bitmap $bitmap -WaitSeconds 8
+    }
+    if ($isStuckConnecting -and (Restart-StaleConsoleProcess)) {
+      $bitmap.Dispose()
+      $process = Get-ConsoleProcess -OpenIfMissing $true
+      if (-not $process) {
+        throw "The Hyper-V setup console could not be reopened."
+      }
+      Move-ConsoleOffscreen -Process $process
+      $bounds = Get-ConsoleBounds -Process $process
+      $bitmap = New-Object System.Drawing.Bitmap $bounds.width, $bounds.height
+      [void](Refresh-ConsoleBitmap -Process $process -Bitmap $bitmap -WaitSeconds 8)
+    }
+
     $outputBitmap = $bitmap
     if ($ContentOnly) {
       $clientBounds = Get-ConsoleClientBounds -Process $process -WindowBounds $bounds
