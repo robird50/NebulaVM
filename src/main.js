@@ -852,7 +852,7 @@ app.innerHTML = `
 
         <section>
           <h3>Nintendo DS</h3>
-          <p>Works with melonDS for legal `.nds` homebrew.</p>
+          <p>Works with melonDS for legal <code>.nds</code> homebrew.</p>
           <ul>
             <li><a href="https://www.gamebrew.org/wiki/List_of_DS_homebrew_games" target="_blank" rel="noreferrer">GameBrew DS homebrew games list</a></li>
             <li><a href="https://itch.io/c/1565877/nds-homebrew" target="_blank" rel="noreferrer">NDS Homebrew collection on itch.io</a></li>
@@ -861,7 +861,7 @@ app.innerHTML = `
 
         <section>
           <h3>Super Nintendo</h3>
-          <p>Works with Snes9x for legal `.sfc` and `.smc` homebrew.</p>
+          <p>Works with Snes9x for legal <code>.sfc</code> and <code>.smc</code> homebrew.</p>
           <ul>
             <li><a href="https://itch.io/games/free/tag-homebrew/tag-snes-rom" target="_blank" rel="noreferrer">Free SNES ROM homebrew on itch.io</a></li>
             <li><a href="https://itch.io/c/1537684/snes-homebrew" target="_blank" rel="noreferrer">SNES Homebrew collection on itch.io</a></li>

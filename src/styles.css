@@ -2031,6 +2031,13 @@ input[type="text"] {
   line-height: 1.45;
 }
 
+.nintendo-help-sections code {
+  color: #f5f8fb;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
 .nintendo-help-sections ul {
   display: grid;
   gap: 8px;
