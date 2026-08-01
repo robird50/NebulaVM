@@ -89,6 +89,13 @@ function Move-ConsoleOffscreen {
   ) | Out-Null
 }
 
+function Get-VmConnectChromeTopPixels {
+  param([int]$ClientHeight)
+
+  # Hide VMConnect's menu row and toolbar row in fullscreen/browser-content mode.
+  return [math]::Min(96, [math]::Max(58, [math]::Round($ClientHeight * 0.075)))
+}
+
 function Get-TargetConsoleProcesses {
   $processIds = Get-CimInstance Win32_Process -Filter "Name = 'vmconnect.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -and $_.CommandLine -like "*$VmName*" } |
@@ -183,12 +190,14 @@ function Get-ConsoleClientBounds {
   if ($width -lt 64 -or $height -lt 64) {
     throw "The Hyper-V setup console content area is too small to mirror."
   }
+  $chromeTop = Get-VmConnectChromeTopPixels -ClientHeight $height
+  $guestHeight = [math]::Max(64, $height - $chromeTop)
 
   return [ordered]@{
     offsetX = [math]::Max(0, $offsetX)
-    offsetY = [math]::Max(0, $offsetY)
+    offsetY = [math]::Max(0, $offsetY + $chromeTop)
     width = [math]::Min($width, [int]$WindowBounds.width - [math]::Max(0, $offsetX))
-    height = [math]::Min($height, [int]$WindowBounds.height - [math]::Max(0, $offsetY))
+    height = [math]::Min($guestHeight, [int]$WindowBounds.height - [math]::Max(0, $offsetY + $chromeTop))
   }
 }
 

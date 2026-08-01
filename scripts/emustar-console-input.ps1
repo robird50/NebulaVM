@@ -76,6 +76,9 @@ namespace NebulaVM {
     public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
   }
 }
+"@
+  }
+}
 
 function Move-ConsoleOffscreen {
   param([object]$Process)
@@ -120,8 +123,12 @@ function Move-ConsoleOnscreen {
   ) | Out-Null
   Start-Sleep -Milliseconds 40
 }
-"@
-  }
+
+function Get-VmConnectChromeTopPixels {
+  param([int]$ClientHeight)
+
+  # Hide VMConnect's menu row and toolbar row in fullscreen/browser-content mode.
+  return [math]::Min(96, [math]::Max(58, [math]::Round($ClientHeight * 0.075)))
 }
 
 function Get-TargetConsoleProcesses {
@@ -238,12 +245,14 @@ function Get-ConsoleClientBounds {
   if ($width -lt 64 -or $height -lt 64) {
     throw "The Hyper-V setup console content area is too small for pointer control."
   }
+  $chromeTop = Get-VmConnectChromeTopPixels -ClientHeight $height
+  $guestHeight = [math]::Max(64, $height - $chromeTop)
 
   return [ordered]@{
     left = [int]$origin.X
-    top = [int]$origin.Y
+    top = [int]($origin.Y + $chromeTop)
     width = $width
-    height = $height
+    height = $guestHeight
   }
 }
 
