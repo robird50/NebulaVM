@@ -1650,17 +1650,16 @@ const startAndroidEmulator = (sessionId, body = {}, { publicMobile = false } = {
       ? 3072
       : freeMemoryMb >= 3840
         ? 2048
-        : freeMemoryMb >= 2200
+        : freeMemoryMb >= 1800
           ? 1280
-          : freeMemoryMb >= 1800
-          ? 1024
           : freeMemoryMb >= 1408
             ? 768
             : 512;
   const modernAndroid = requestedVersion >= 15;
-  if (modernAndroid && freeMemoryMb < 2200) {
+  const modernAndroidMinimumHostFreeMb = 1800;
+  if (modernAndroid && freeMemoryMb < modernAndroidMinimumHostFreeMb) {
     const error = new Error(
-      `Android ${requestedVersion} needs at least 1280 MB plus Windows breathing room. Only ${freeMemoryMb} MB is currently available on the host. Close a few host apps, then try again.`,
+      `Android ${requestedVersion} needs about ${modernAndroidMinimumHostFreeMb} MB available on the host to allocate a 1280 MB device. Only ${freeMemoryMb} MB is currently available. Close a few host apps, then try again.`,
     );
     error.statusCode = 503;
     throw error;
