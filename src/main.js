@@ -20,9 +20,10 @@ const MOBILE_DEV_ATTEMPTS_KEY = "nebulavm.mobile.devAttempts";
 const MOBILE_DEV_LOCK_KEY = "nebulavm.mobile.devLockUntil";
 const MOBILE_DEV_MAX_ATTEMPTS = 5;
 const MOBILE_DEV_LOCK_MS = 5 * 60 * 1000;
-const HYPERV_MIRROR_FAST_FRAME_MS = 33;
-const HYPERV_MIRROR_HIGH_FRAME_MS = 50;
-const HYPERV_MIRROR_IDLE_FRAME_MS = 83;
+const HYPERV_MIRROR_60FPS_FRAME_MS = 16;
+const HYPERV_MIRROR_FAST_FRAME_MS = HYPERV_MIRROR_60FPS_FRAME_MS;
+const HYPERV_MIRROR_HIGH_FRAME_MS = HYPERV_MIRROR_60FPS_FRAME_MS;
+const HYPERV_MIRROR_IDLE_FRAME_MS = HYPERV_MIRROR_60FPS_FRAME_MS;
 const HYPERV_MIRROR_RETRY_MS = 500;
 const MOBILE_PUBLIC_RELEASE = true;
 const MOBILE_DEV_GATE_ENABLED = !MOBILE_PUBLIC_RELEASE;
@@ -2116,14 +2117,20 @@ const requestRfbDesktopResize = () => {
   const rfb = state.nativeRfb;
   if (!rfb) return;
 
-  rfb.background = "#05070a";
-  rfb.scaleViewport = true;
-  rfb.resizeSession = true;
+  configureRfbFor60Fps(rfb);
   window.requestAnimationFrame(() => {
     if (state.nativeRfb === rfb && typeof rfb._requestRemoteResize === "function") {
       rfb._requestRemoteResize();
     }
   });
+};
+
+const configureRfbFor60Fps = (rfb) => {
+  rfb.background = "#05070a";
+  rfb.scaleViewport = true;
+  rfb.resizeSession = true;
+  rfb.qualityLevel = 8;
+  rfb.compressionLevel = 1;
 };
 
 const requestGuestDesktopResize = (reason = "viewport") => {
@@ -3254,9 +3261,7 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   els.nativeDisplay.replaceChildren(status);
 
   const rfb = new RFB(els.nativeDisplay, nativeWebSocketUrl(base, vncPath));
-  rfb.background = "#05070a";
-  rfb.scaleViewport = true;
-  rfb.resizeSession = true;
+  configureRfbFor60Fps(rfb);
   rfb.viewOnly = false;
   rfb.focusOnClick = true;
   rfb.addEventListener("credentialsrequired", () => {
@@ -3471,6 +3476,7 @@ const startHyperVSetupConsole = (base) => {
 
   const pollFrame = async () => {
     if (!state.hyperVConsoleActive) return;
+    const frameStartedAt = performance.now();
     try {
       const frame = await fetchHyperVFrame(isScreenFullscreen());
       const nextFrameUrl = URL.createObjectURL(frame.blob);
@@ -3489,7 +3495,8 @@ const startHyperVSetupConsole = (base) => {
           : highFrameMode
             ? HYPERV_MIRROR_HIGH_FRAME_MS
             : HYPERV_MIRROR_IDLE_FRAME_MS;
-      state.hyperVConsoleTimer = window.setTimeout(pollFrame, nextDelay);
+      const elapsedMs = performance.now() - frameStartedAt;
+      state.hyperVConsoleTimer = window.setTimeout(pollFrame, Math.max(0, nextDelay - elapsedMs));
     } catch (error) {
       status.textContent = `Hyper-V setup mirror waiting: ${error.message}`;
       state.hyperVConsoleTimer = window.setTimeout(pollFrame, HYPERV_MIRROR_RETRY_MS);

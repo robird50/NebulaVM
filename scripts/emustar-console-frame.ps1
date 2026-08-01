@@ -212,7 +212,7 @@ try {
         Where-Object { $_.MimeType -eq "image/jpeg" } |
         Select-Object -First 1
       $encoderParams = New-Object System.Drawing.Imaging.EncoderParameters 1
-      $encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 72L
+      $encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 62L
       $outputBitmap.Save($stream, $codec, $encoderParams)
       $bytes = $stream.ToArray()
     } finally {

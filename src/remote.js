@@ -9,9 +9,10 @@ const reconnectButton = document.querySelector("#reconnectButton");
 const fullscreenButton = document.querySelector("#fullscreenButton");
 const fullscreenExitButton = document.querySelector("#fullscreenExitButton");
 const expectedSessionId = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("session") || "";
-const REMOTE_MIRROR_FAST_FRAME_MS = 33;
-const REMOTE_MIRROR_HIGH_FRAME_MS = 50;
-const REMOTE_MIRROR_IDLE_FRAME_MS = 83;
+const REMOTE_MIRROR_60FPS_FRAME_MS = 16;
+const REMOTE_MIRROR_FAST_FRAME_MS = REMOTE_MIRROR_60FPS_FRAME_MS;
+const REMOTE_MIRROR_HIGH_FRAME_MS = REMOTE_MIRROR_60FPS_FRAME_MS;
+const REMOTE_MIRROR_IDLE_FRAME_MS = REMOTE_MIRROR_60FPS_FRAME_MS;
 const REMOTE_MIRROR_RETRY_MS = 500;
 
 let rfb = null;
@@ -117,6 +118,14 @@ const websocketUrl = (base, path, token) => {
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("token", token);
   return url.toString();
+};
+
+const configureRfbFor60Fps = (remoteRfb) => {
+  remoteRfb.background = "#05070a";
+  remoteRfb.scaleViewport = true;
+  remoteRfb.resizeSession = true;
+  remoteRfb.qualityLevel = 8;
+  remoteRfb.compressionLevel = 1;
 };
 
 const clearMirror = () => {
@@ -326,6 +335,7 @@ const startMirrorConsole = (base, token) => {
 
   const poll = async () => {
     if (!mirrorActive) return;
+    const frameStartedAt = performance.now();
     try {
       const frame = await fetchMirrorFrame(isRemoteFullscreen());
       const nextUrl = URL.createObjectURL(frame.blob);
@@ -341,7 +351,8 @@ const startMirrorConsole = (base, token) => {
           : isRemoteFullscreen()
             ? REMOTE_MIRROR_HIGH_FRAME_MS
             : REMOTE_MIRROR_IDLE_FRAME_MS;
-      mirrorTimer = window.setTimeout(poll, nextDelay);
+      const elapsedMs = performance.now() - frameStartedAt;
+      mirrorTimer = window.setTimeout(poll, Math.max(0, nextDelay - elapsedMs));
     } catch (error) {
       status.textContent = `Waiting for Hyper-V mirror: ${error.message}`;
       mirrorTimer = window.setTimeout(poll, REMOTE_MIRROR_RETRY_MS);
@@ -365,9 +376,7 @@ const connectVnc = (base, token, status) => {
   viewportChildren();
 
   rfb = new RFB(viewport, websocketUrl(base, status.vncPath, token));
-  rfb.background = "#05070a";
-  rfb.scaleViewport = true;
-  rfb.resizeSession = true;
+  configureRfbFor60Fps(rfb);
   rfb.viewOnly = false;
   rfb.focusOnClick = true;
   rfb.addEventListener("credentialsrequired", () => {
