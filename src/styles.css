@@ -29,6 +29,8 @@
     sans-serif;
   background: #0d1118;
   color: #edf2f7;
+  --screen-visual-width: 100vw;
+  --screen-visual-height: 100dvh;
   font-synthesis: weight;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -2670,10 +2672,11 @@ input[type="text"] {
 
 .screen-shell:fullscreen,
 .screen-shell.is-fullscreen {
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
-  min-height: 100vh;
+  width: var(--screen-visual-width);
+  max-width: var(--screen-visual-width);
+  height: var(--screen-visual-height);
+  max-height: var(--screen-visual-height);
+  min-height: 0;
   border: 0;
   border-radius: 0;
   background: #000;
@@ -2681,10 +2684,11 @@ input[type="text"] {
 
 .screen-shell:fullscreen .screen-container,
 .screen-shell.is-fullscreen .screen-container {
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
-  min-height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
 }
 
 .screen-shell:fullscreen .qemu-terminal,
@@ -2722,14 +2726,14 @@ input[type="text"] {
 body.screen-app-fullscreen {
   position: fixed;
   inset: 0;
-  width: 100vw;
-  height: 100dvh;
+  width: var(--screen-visual-width);
+  height: var(--screen-visual-height);
   overflow: hidden;
 }
 
 body.screen-app-fullscreen .shell {
-  width: 100vw;
-  min-height: 100dvh;
+  width: var(--screen-visual-width);
+  min-height: var(--screen-visual-height);
   padding: 0;
 }
 
@@ -2744,8 +2748,8 @@ body.screen-app-fullscreen .commit-id {
 body.screen-app-fullscreen .workspace,
 body.screen-app-fullscreen .console-area {
   display: block;
-  width: 100vw;
-  min-height: 100dvh;
+  width: var(--screen-visual-width);
+  min-height: var(--screen-visual-height);
   margin: 0;
   padding: 0;
   border: 0;
@@ -2756,9 +2760,11 @@ body.screen-app-fullscreen .screen-shell {
   position: fixed;
   z-index: 1000;
   inset: 0;
-  width: 100vw;
-  height: 100dvh;
-  min-height: 100dvh;
+  width: var(--screen-visual-width);
+  max-width: var(--screen-visual-width);
+  height: var(--screen-visual-height);
+  max-height: var(--screen-visual-height);
+  min-height: 0;
   border: 0;
   border-radius: 0;
 }
@@ -3069,6 +3075,28 @@ body.screen-app-fullscreen .screen-shell {
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.35);
 }
 
+.screen-shell:fullscreen .hyperv-console-bridge,
+.screen-shell.is-fullscreen .hyperv-console-bridge,
+.screen-shell:fullscreen .native-display,
+.screen-shell.is-fullscreen .native-display,
+.screen-shell:fullscreen .remote-frame,
+.screen-shell.is-fullscreen .remote-frame {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
+
+.screen-shell:fullscreen .hyperv-console-bridge img,
+.screen-shell.is-fullscreen .hyperv-console-bridge img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
 .hyperv-console-overlay {
   position: absolute;
   top: 12px;
@@ -3105,6 +3133,13 @@ body.screen-app-fullscreen .screen-shell {
   color: #cbd6e3;
   font-weight: 900;
   text-align: center;
+}
+
+.screen-shell:fullscreen .hyperv-console-overlay,
+.screen-shell.is-fullscreen .hyperv-console-overlay,
+.screen-shell:fullscreen .hyperv-console-bridge .native-display-status,
+.screen-shell.is-fullscreen .hyperv-console-bridge .native-display-status {
+  display: none;
 }
 
 .remote-frame {
@@ -4058,9 +4093,37 @@ body.screen-app-fullscreen .screen-shell {
 
 .screen-shell:fullscreen .android-display,
 .screen-shell.is-fullscreen .android-display {
-  width: min(100vw, 56.25vh);
-  height: 100vh;
-  min-height: 100vh;
+  width: min(var(--screen-visual-width), calc(var(--screen-visual-height) * 0.5625));
+  height: var(--screen-visual-height);
+  min-height: 0;
+}
+
+.workspace.is-android-mode .screen-shell:fullscreen,
+.workspace.is-android-mode .screen-shell.is-fullscreen,
+.workspace.is-android-mode.is-android-landscape .screen-shell:fullscreen,
+.workspace.is-android-mode.is-android-landscape .screen-shell.is-fullscreen,
+.workspace.is-android-mode.is-avd-management .screen-shell:fullscreen,
+.workspace.is-android-mode.is-avd-management .screen-shell.is-fullscreen {
+  width: var(--screen-visual-width);
+  max-width: var(--screen-visual-width);
+  height: var(--screen-visual-height);
+  max-height: var(--screen-visual-height);
+  min-height: 0;
+  aspect-ratio: auto;
+}
+
+.workspace.is-android-mode.is-android-landscape .screen-shell:fullscreen .android-display,
+.workspace.is-android-mode.is-android-landscape .screen-shell.is-fullscreen .android-display {
+  width: var(--screen-visual-width);
+  height: min(var(--screen-visual-height), calc(var(--screen-visual-width) * 0.5625));
+}
+
+.workspace.is-android-mode.is-avd-management .screen-shell:fullscreen .android-display,
+.workspace.is-android-mode.is-avd-management .screen-shell.is-fullscreen .android-display,
+.workspace.is-android-mode.is-avd-management .screen-shell:fullscreen .native-display,
+.workspace.is-android-mode.is-avd-management .screen-shell.is-fullscreen .native-display {
+  width: 100%;
+  height: 100%;
 }
 
 .screen-container canvas,

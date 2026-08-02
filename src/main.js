@@ -2103,7 +2103,35 @@ const fetchAndroidStudioFrame = async () => {
   throw new Error(lastError.message || androidBridgeMessage);
 };
 
+const screenVisualViewportSize = () => {
+  const visual = window.visualViewport;
+  return {
+    width: Math.max(
+      320,
+      Math.round(visual?.width || window.innerWidth || document.documentElement.clientWidth || 0),
+    ),
+    height: Math.max(
+      320,
+      Math.round(visual?.height || window.innerHeight || document.documentElement.clientHeight || 0),
+    ),
+  };
+};
+
+const setScreenVisualViewportSize = () => {
+  const { width, height } = screenVisualViewportSize();
+  document.documentElement.style.setProperty("--screen-visual-width", `${width}px`);
+  document.documentElement.style.setProperty("--screen-visual-height", `${height}px`);
+};
+
 const viewportDesktopSize = () => {
+  if (isScreenFullscreen()) {
+    const { width, height } = screenVisualViewportSize();
+    return {
+      width: width - (width % 2),
+      height: height - (height % 2),
+    };
+  }
+
   const rect = (els.nativeDisplay.hidden ? els.screenContainer : els.nativeDisplay).getBoundingClientRect();
   const width = Math.max(640, Math.min(7680, Math.round(rect.width)));
   const height = Math.max(360, Math.min(4320, Math.round(rect.height)));
@@ -6327,6 +6355,7 @@ const prefersScreenAppFullscreen = () =>
   isRemoteMode() && (isPublicMobileClient || window.matchMedia?.("(pointer: coarse), (max-width: 760px)")?.matches);
 
 const updateFullscreenButton = () => {
+  setScreenVisualViewportSize();
   const isFullscreen = isScreenFullscreen();
   els.fullscreenButton.textContent = isFullscreen ? "Exit fullscreen" : "Fullscreen";
   els.screenShell.classList.toggle("is-fullscreen", isFullscreen);
@@ -6383,11 +6412,25 @@ const toggleFullscreen = async () => {
   updateFullscreenButton();
 };
 
+const refreshScreenViewportSize = () => {
+  setScreenVisualViewportSize();
+  if (!isScreenFullscreen()) {
+    requestGuestDesktopResize("browser resize");
+    return;
+  }
+  state.hyperVConsolePollNow?.(8);
+  requestGuestDesktopResize("fullscreen viewport resize");
+};
+
 els.fullscreenButton.addEventListener("click", toggleFullscreen);
 els.screenFullscreenExitButton.addEventListener("click", toggleFullscreen);
 document.addEventListener("fullscreenchange", updateFullscreenButton);
 document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
-window.addEventListener("resize", () => requestGuestDesktopResize("browser resize"));
+window.addEventListener("resize", refreshScreenViewportSize);
+window.addEventListener("orientationchange", refreshScreenViewportSize);
+window.visualViewport?.addEventListener("resize", refreshScreenViewportSize);
+window.visualViewport?.addEventListener("scroll", refreshScreenViewportSize);
+setScreenVisualViewportSize();
 els.virtualKeyboardButton.addEventListener("click", () => {
   setVirtualKeyboardOpen(!state.virtualKeyboardOpen);
 });

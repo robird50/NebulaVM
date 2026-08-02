@@ -92,10 +92,12 @@ header h1 {
 }
 
 #remoteViewport:fullscreen,
-#remoteViewport:-webkit-full-screen {
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
+#remoteViewport:-webkit-full-screen,
+#remoteViewport.is-remote-fullscreen {
+  width: var(--remote-visual-width);
+  max-width: var(--remote-visual-width);
+  height: var(--remote-visual-height);
+  max-height: var(--remote-visual-height);
   min-height: 0;
   border: 0;
   border-radius: 0;
@@ -105,6 +107,8 @@ header h1 {
 #remoteViewport canvas {
   width: 100% !important;
   height: 100% !important;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
 }
 
@@ -126,6 +130,8 @@ header h1 {
 }
 
 .remote-console-bridge img {
+  width: auto;
+  height: auto;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
@@ -257,7 +263,9 @@ body.remote-app-fullscreen #remoteViewport {
   z-index: 1000;
   inset: 0;
   width: var(--remote-visual-width);
+  max-width: var(--remote-visual-width);
   height: var(--remote-visual-height);
+  max-height: var(--remote-visual-height);
   min-height: 0;
   border: 0;
   border-radius: 0;
@@ -265,10 +273,9 @@ body.remote-app-fullscreen #remoteViewport {
 
 body.remote-app-fullscreen .remote-console-status,
 #remoteViewport:fullscreen .remote-console-status,
-#remoteViewport:-webkit-full-screen .remote-console-status {
-  right: max(10px, env(safe-area-inset-right));
-  bottom: max(10px, env(safe-area-inset-bottom));
-  left: max(10px, env(safe-area-inset-left));
+#remoteViewport:-webkit-full-screen .remote-console-status,
+#remoteViewport.is-remote-fullscreen .remote-console-status {
+  display: none;
 }
 
 @media (max-width: 760px) {
