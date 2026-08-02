@@ -44,6 +44,28 @@ function Test-NebulaHost {
   }
 }
 
+function Get-NebulaHostProcesses {
+  try {
+    return @(
+      Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction Stop |
+        Where-Object {
+          $_.CommandLine -like "*NebulaVM*" -and
+          $_.CommandLine -like "*vite*" -and
+          $_.CommandLine -like "*--port*" -and
+          $_.CommandLine -like "*5174*"
+        }
+    )
+  } catch {
+    return @()
+  }
+}
+
+function Stop-NebulaHostProcesses {
+  foreach ($hostProcess in (Get-NebulaHostProcesses)) {
+    Stop-Process -Id $hostProcess.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Test-NebulaPublicHost([string]$PublicUrl) {
   if (-not $PublicUrl) {
     return $false
@@ -71,6 +93,8 @@ function Start-NebulaHost {
   if (Test-NebulaHost) {
     return
   }
+
+  Stop-NebulaHostProcesses
 
   Start-Process `
     -FilePath $nodePath `
@@ -130,7 +154,7 @@ function Test-TunnelRejected {
   }
   return [bool](Select-String `
     -Path $cloudflaredLogPath `
-    -Pattern "Unauthorized: Tunnel not found|Register tunnel error from server side" `
+    -Pattern "Unauthorized: Tunnel not found" `
     -Quiet)
 }
 
@@ -152,9 +176,9 @@ function Start-NebulaTunnel {
     -WindowStyle Hidden `
     -PassThru
 
-  $deadline = (Get-Date).AddSeconds(90)
+  $deadline = (Get-Date).AddSeconds(180)
   while ((Get-Date) -lt $deadline) {
-    Start-Sleep -Milliseconds 750
+    Start-Sleep -Seconds 2
     $process.Refresh()
     if ($process.HasExited -or (Test-TunnelRejected)) {
       break
