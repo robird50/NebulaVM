@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("Status", "Start", "Stop", "Reset", "OpenConsole", "CloseConsole", "ResizeDisplay")]
+  [ValidateSet("Status", "Start", "Stop", "RequestNewDisk", "Reset", "OpenConsole", "CloseConsole", "ResizeDisplay")]
   [string]$Action,
 
   [string]$ConfigBase64 = ""
