@@ -82,8 +82,8 @@ function Get-VmSnapshot {
 }
 
 function Get-Status {
-  $featureState = Get-FeatureState
   $cmdletsReady = Test-HyperVCmdlets
+  $featureState = if ($cmdletsReady) { "Enabled" } else { Get-FeatureState }
   $vm = $null
   $serviceState = "Unavailable"
 

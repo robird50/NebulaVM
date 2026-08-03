@@ -1857,7 +1857,7 @@ const requestHyperVJsonFromBases = async (path, options, bridgeBases) => {
 };
 
 const fetchHyperVJson = async (path, options) => {
-  const uniqueBridgeBases = nativeBridgeBases();
+  const uniqueBridgeBases = await prepareHostedHyperVBases();
   const previousBase = state.nativeQemuApiBase;
 
   try {
@@ -1866,7 +1866,7 @@ const fetchHyperVJson = async (path, options) => {
     if (!isNetlifyLauncher) throw error;
 
     state.nativeQemuApiBase = null;
-    const refreshedHost = await fetchNetlifyHostRegistry();
+    const refreshedHost = await waitForNetlifyHostRegistry();
     if (!refreshedHost?.publicUrl || refreshedHost.publicUrl === previousBase) {
       throw error;
     }
@@ -1920,7 +1920,7 @@ const requestHyperVFrameFromBases = async (contentOnly, bridgeBases) => {
 };
 
 const fetchHyperVFrame = async (contentOnly = false) => {
-  const uniqueBridgeBases = nativeBridgeBases();
+  const uniqueBridgeBases = await prepareHostedHyperVBases();
   const previousBase = state.nativeQemuApiBase;
 
   try {
@@ -1929,7 +1929,7 @@ const fetchHyperVFrame = async (contentOnly = false) => {
     if (!isNetlifyLauncher) throw error;
 
     state.nativeQemuApiBase = null;
-    const refreshedHost = await fetchNetlifyHostRegistry();
+    const refreshedHost = await waitForNetlifyHostRegistry();
     if (!refreshedHost?.publicUrl || refreshedHost.publicUrl === previousBase) {
       throw error;
     }
@@ -2213,8 +2213,16 @@ const requestGuestDesktopResize = (reason = "viewport") => {
   }, 350);
 };
 
+const prepareHostedHyperVBases = async () => {
+  if (isNetlifyLauncher && !state.nativeQemuApiBase) {
+    await waitForNetlifyHostRegistry();
+  }
+  return nativeBridgeBases();
+};
+
 const fetchEmustarHostJson = async (path, options) => {
-  const uniqueBridgeBases = nativeBridgeBases();
+  const uniqueBridgeBases = await prepareHostedHyperVBases();
+  const previousBase = state.nativeQemuApiBase;
   let lastError = new Error(nativeQemuBridgeMessage);
 
   for (const base of uniqueBridgeBases) {
@@ -2239,6 +2247,14 @@ const fetchEmustarHostJson = async (path, options) => {
       return { response, data, base };
     } catch (error) {
       lastError = error instanceof TypeError ? new Error(nativeQemuBridgeMessage) : error;
+    }
+  }
+
+  if (isNetlifyLauncher) {
+    state.nativeQemuApiBase = null;
+    const refreshedHost = await waitForNetlifyHostRegistry();
+    if (refreshedHost?.publicUrl && refreshedHost.publicUrl !== previousBase) {
+      return fetchEmustarHostJson(path, options);
     }
   }
 
@@ -3055,6 +3071,16 @@ const fetchNetlifyHostRegistry = async () => {
   } catch {
     return null;
   }
+};
+
+const waitForNetlifyHostRegistry = async ({ attempts = 6, intervalMs = 750 } = {}) => {
+  let host = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    host = await fetchNetlifyHostRegistry();
+    if (host?.publicUrl) return host;
+    await new Promise((resolveWait) => window.setTimeout(resolveWait, intervalMs));
+  }
+  return host;
 };
 
 const remoteConsoleUrl = (sessionId = "") => {

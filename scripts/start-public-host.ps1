@@ -11,7 +11,7 @@ $cloudflaredLogPath = Join-Path $projectRoot ".nebulavm-cloudflared.log"
 $netlifyRegistryUrl = if ($env:NEBULAVM_REGISTRY_URL) {
   $env:NEBULAVM_REGISTRY_URL
 } else {
-  "https://nebulavm.netlify.app/.netlify/functions/host-registry"
+  "https://nebulavm.online/.netlify/functions/host-registry"
 }
 $lastRegistryPublish = Get-Date 0
 
