@@ -2155,11 +2155,16 @@ const requestRfbDesktopResize = () => {
   if (!rfb) return;
 
   configureRfbFor60Fps(rfb);
-  window.requestAnimationFrame(() => {
-    if (state.nativeRfb === rfb && typeof rfb._requestRemoteResize === "function") {
-      rfb._requestRemoteResize();
-    }
-  });
+  const refresh = () => {
+    if (state.nativeRfb !== rfb) return;
+    rfb._updateClip?.();
+    rfb._updateScale?.();
+    rfb._requestRemoteResize?.();
+  };
+
+  window.requestAnimationFrame(refresh);
+  window.setTimeout(refresh, 120);
+  window.setTimeout(refresh, 350);
 };
 
 const configureRfbFor60Fps = (rfb) => {

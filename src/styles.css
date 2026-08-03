@@ -2910,9 +2910,8 @@ body.screen-app-fullscreen .screen-shell {
 }
 
 .native-display canvas {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: contain;
+  display: block;
+  touch-action: none;
 }
 
 .hyperv-console-bridge {
