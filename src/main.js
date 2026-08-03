@@ -146,6 +146,8 @@ const state = {
   nativeRfb: null,
   nativeRuntimeName: null,
   nativeMonitorTimer: null,
+  nativeStatusRefreshTimer: null,
+  lastNativeStopLogKey: "",
   hyperVConsoleTimer: null,
   hyperVConsoleActive: false,
   hyperVConsoleCleanup: null,
@@ -3581,6 +3583,7 @@ const adoptRunningHyperVViewport = async (status, base) => {
   state.nativeRuntimeName = "Hyper-V";
   state.nativeQemuApiBase = base;
   state.running = true;
+  state.lastNativeStopLogKey = "";
   if (!state.startedAt) {
     state.startedAt = Date.now();
     clearStatsTimer();
@@ -4006,6 +4009,7 @@ const monitorNativeVm = () => {
         : await fetchNativeQemuJson(`status?arch=${nativeArchitecture()}`);
       const running = hyperVRuntime ? status.vm?.state === "Running" : status.running;
       if (running) {
+        state.lastNativeStopLogKey = "";
         if (
           hyperVRuntime &&
           !state.nativeRfb &&
@@ -4059,9 +4063,13 @@ const monitorNativeVm = () => {
         ? "The Hyper-V machine is powered off."
         : nativeExitSummary(status.lastExit);
       const runtimeName = state.nativeRuntimeName || nativeRuntimeBrand();
+      const stopLogKey = `${runtimeName}:${summary}`;
       showNativeDisplayStatus(`${runtimeName} stopped. ${summary}`);
       setPowerState(`${runtimeName} stopped`, "off");
-      log(`${runtimeName} stopped: ${summary}`);
+      if (state.lastNativeStopLogKey !== stopLogKey) {
+        log(`${runtimeName} stopped: ${summary}`);
+        state.lastNativeStopLogKey = stopLogKey;
+      }
       state.nativeRuntimeName = null;
       updateButtons();
     } catch {
@@ -4511,6 +4519,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   }
 
   state.nativeRuntimeName = runtimeName;
+  state.lastNativeStopLogKey = "";
   const rfb =
     displayMode === "viewport" && result.vncReady
       ? connectNativeDisplay(base, result.vncPath, runtimeName, result.vncPassword || "")
@@ -6551,4 +6560,9 @@ log("NebulaVM ready.");
 renderStoredIsoSlots();
 updateBackendUi();
 void connectNetlifyHostRegistry();
+state.nativeStatusRefreshTimer = window.setInterval(() => {
+  if (!isNativeMode()) return;
+  if (state.hostStagedIsoUploading) return;
+  void updateNativeStatus();
+}, 5000);
 updateButtons();
