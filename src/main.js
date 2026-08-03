@@ -175,6 +175,7 @@ const state = {
   storedIsoUploading: false,
   windowsTemplateLoading: false,
   windowsTemplateSelected: false,
+  windowsTemplateDiskPath: "",
   androidView: "home",
   androidHistory: ["home"],
   androidRecents: [],
@@ -2236,17 +2237,22 @@ const fetchEmustarHostJson = async (path, options) => {
 const emustarHostBaseCandidates = () => nativeBridgeBases();
 
 const browserIsoFileKey = (file) => (file ? `${file.name}:${file.size}` : "");
-const WINDOWS_TEMPLATE_MEDIA_TYPE = "cdrom";
-const WINDOWS_TEMPLATE_BOOT_ORDER = "213";
+const WINDOWS_TEMPLATE_SETUP_MEDIA_TYPE = "cdrom";
+const WINDOWS_TEMPLATE_SETUP_BOOT_ORDER = "213";
+const WINDOWS_TEMPLATE_DISK_MEDIA_TYPE = "hda";
+const WINDOWS_TEMPLATE_DISK_BOOT_ORDER = "123";
 
 const applyWindowsTemplateBootLocks = () => {
   if (!state.windowsTemplateSelected) return;
-  els.mediaType.value = WINDOWS_TEMPLATE_MEDIA_TYPE;
-  els.bootOrder.value = WINDOWS_TEMPLATE_BOOT_ORDER;
+  els.mediaType.value = state.windowsTemplateDiskPath ? WINDOWS_TEMPLATE_DISK_MEDIA_TYPE : WINDOWS_TEMPLATE_SETUP_MEDIA_TYPE;
+  els.bootOrder.value = state.windowsTemplateDiskPath
+    ? WINDOWS_TEMPLATE_DISK_BOOT_ORDER
+    : WINDOWS_TEMPLATE_SETUP_BOOT_ORDER;
 };
 
 const clearWindowsTemplateSelection = () => {
   state.windowsTemplateSelected = false;
+  state.windowsTemplateDiskPath = "";
   els.windowsTemplateButton?.classList.remove("is-active");
 };
 
@@ -2407,6 +2413,7 @@ const selectWindows11Template = async ({ boot = false } = {}) => {
     resetHostStagedIsoStateOnly();
     state.isoFile = null;
     state.windowsTemplateSelected = true;
+    state.windowsTemplateDiskPath = template.diskPath || "";
     els.emulatorMode.value = "emustar-hyperv";
     els.processorMode.value = "x64";
     els.nativeIsoPath.value = template.isoPath;
@@ -2421,7 +2428,11 @@ const selectWindows11Template = async ({ boot = false } = {}) => {
     els.dropZone.classList.add("has-file");
     els.windowsTemplateButton.classList.add("is-active");
     setStoredImagesMenuOpen(false);
-    log(`Using Windows 11 Template: ${template.isoPath}`);
+    log(
+      template.diskPath
+        ? `Using prepared Windows 11 Template disk: ${template.diskPath}`
+        : `Using Windows 11 Template setup ISO: ${template.isoPath}`,
+    );
     updateButtons();
     if (boot) {
       await bootEmulator();
@@ -4455,6 +4466,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
     body: JSON.stringify({
       displayMode,
       isoPath: els.nativeIsoPath.value.trim(),
+      templateDiskPath: state.windowsTemplateSelected ? state.windowsTemplateDiskPath : "",
       guestType: selectedIsoLooksLikeWindows() ? "windows" : "other",
       cpuGhz: selectedProcessorSpeedGhz(),
       memoryMb: selectedMemoryMb(),

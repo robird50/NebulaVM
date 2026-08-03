@@ -344,7 +344,9 @@ function Start-Emustar {
   Assert-HyperVReady
 
   $isoPath = [string]$config.isoPath
+  $templateDiskPath = [string]$config.templateDiskPath
   $isoProvided = -not [string]::IsNullOrWhiteSpace($isoPath)
+  $templateDiskProvided = -not [string]::IsNullOrWhiteSpace($templateDiskPath)
   if ($isoProvided) {
     if (-not [IO.Path]::IsPathRooted($isoPath)) {
       throw "Enter an absolute ISO path, such as C:\Users\Dell\Downloads\Your.iso."
@@ -356,8 +358,20 @@ function Start-Emustar {
       throw "EMUSTAR Hyper-V currently accepts CD-ROM ISO files."
     }
   }
-  if (-not $isoProvided) {
-    throw "Choose an ISO path before launching EMUSTAR."
+  if ($templateDiskProvided) {
+    if (-not [IO.Path]::IsPathRooted($templateDiskPath)) {
+      throw "The prepared Windows template disk path must be absolute."
+    }
+    if (-not (Test-Path -LiteralPath $templateDiskPath -PathType Leaf)) {
+      throw "The prepared Windows template disk does not exist: $templateDiskPath"
+    }
+    if ([IO.Path]::GetExtension($templateDiskPath) -ne ".vhdx") {
+      throw "The prepared Windows template must be a VHDX disk."
+    }
+    $templateDiskPath = [IO.Path]::GetFullPath($templateDiskPath)
+  }
+  if (-not $isoProvided -and -not $templateDiskProvided) {
+    throw "Choose an ISO path or Windows template disk before launching Hyper-V."
   }
 
   $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
@@ -365,9 +379,12 @@ function Start-Emustar {
   $memoryMb = [math]::Min(6144, [math]::Max(512, [int]$config.memoryMb))
   $diskSizeGb = [math]::Min(256, [math]::Max(64, [int]$config.diskSizeGb))
   $processorCount = [math]::Min(2, [math]::Max(1, [Environment]::ProcessorCount - 1))
-  $diskFirst = [string]$config.bootOrder -eq "123"
+  $diskFirst = $templateDiskProvided -or [string]$config.bootOrder -eq "123"
   $guestType = [string]$config.guestType
   $isWindowsGuest = $guestType -eq "windows"
+  if ($templateDiskProvided) {
+    $isWindowsGuest = $true
+  }
   if ([string]::IsNullOrWhiteSpace($guestType)) {
     $isWindowsGuest = [IO.Path]::GetFileName($isoPath) -match '(?i)(^|[^a-z0-9])(windows|win(?:dows)?[\s_-]*[0-9]+|w[0-9]+)(?=[^a-z0-9]|$)'
   }
@@ -380,7 +397,11 @@ function Start-Emustar {
     throw "EMUSTAR requires a private device identity before it can create a virtual disk."
   }
   New-Item -ItemType Directory -Path $vmDirectory -Force | Out-Null
-  $vhdPath = Get-IsolatedDiskPath -VmDirectory $vmDirectory -IsoPath $isoPath -OwnerId $storageOwnerId
+  $vhdPath = if ($templateDiskProvided) {
+    $templateDiskPath
+  } else {
+    Get-IsolatedDiskPath -VmDirectory $vmDirectory -IsoPath $isoPath -OwnerId $storageOwnerId
+  }
 
   if ($vm -and $vm.State -eq "Running") {
     $mountedIso = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue |
@@ -389,8 +410,11 @@ function Start-Emustar {
     $mountedDisk = Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue |
       Select-Object -First 1 |
       ForEach-Object { [string]$_.Path }
-    $sameIso = $mountedIso -and
-      ([IO.Path]::GetFullPath($mountedIso) -eq [IO.Path]::GetFullPath($isoPath))
+    $sameIso = if ($templateDiskProvided) {
+      [string]::IsNullOrWhiteSpace($mountedIso)
+    } else {
+      $mountedIso -and ([IO.Path]::GetFullPath($mountedIso) -eq [IO.Path]::GetFullPath($isoPath))
+    }
     $sameDisk = $mountedDisk -and
       ([IO.Path]::GetFullPath($mountedDisk) -eq [IO.Path]::GetFullPath($vhdPath))
     if ($sameIso -and $sameDisk) {
@@ -410,7 +434,13 @@ function Start-Emustar {
         } else {
           Close-EmustarConsole | Out-Null
         }
-        $warnings.Add("EMUSTAR attached to the VM that was already running with this ISO.")
+        $warnings.Add(
+          $(if ($templateDiskProvided) {
+            "Hyper-V attached to the VM that was already running with this prepared Windows template disk."
+          } else {
+            "Hyper-V attached to the VM that was already running with this ISO."
+          })
+        )
         return [ordered]@{
           ok = $true
           engine = "Microsoft Hyper-V"
@@ -474,10 +504,16 @@ function Start-Emustar {
   Set-VMProcessor -VM $vm -Count $processorCount
 
   $dvd = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($dvd) {
-    Set-VMDvdDrive -VMDvdDrive $dvd -Path $isoPath
+  if ($templateDiskProvided -or -not $isoProvided) {
+    if ($dvd) {
+      Set-VMDvdDrive -VMDvdDrive $dvd -Path $null
+    }
   } else {
-    Add-VMDvdDrive -VM $vm -Path $isoPath | Out-Null
+    if ($dvd) {
+      Set-VMDvdDrive -VMDvdDrive $dvd -Path $isoPath
+    } else {
+      Add-VMDvdDrive -VM $vm -Path $isoPath | Out-Null
+    }
   }
 
   try {
@@ -521,7 +557,7 @@ function Start-Emustar {
     throw "EMUSTAR cannot start while Hyper-V is in state '$($vm.State)'."
   }
 
-  if (-not $diskFirst -and $isoProvided) {
+  if (-not $templateDiskProvided -and -not $diskFirst -and $isoProvided) {
     $bootKeyCount = Send-BootPromptKeys
     if ($bootKeyCount -gt 0) {
       $warnings.Add("Sent boot prompt keys so CD-ROM setup can start automatically.")

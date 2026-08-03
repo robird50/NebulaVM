@@ -432,6 +432,7 @@ const storedIsoManifestPath = resolve(storedIsoDirectory, "stored-isos.json");
 const storedIsoLimit = 2;
 const storedIsoTtlMs = 3 * 24 * 60 * 60 * 1000;
 const templateIsoDirectory = resolve(workspaceDir, "vm-disks", "templates");
+const templateDiskDirectory = resolve(workspaceDir, "vm-disks", "emustar-hyperv", "disks");
 const windows11TemplateIsoPath = resolve(templateIsoDirectory, "windows-11-template.iso");
 const windows11TemplateSourceCandidates = [
   windows11TemplateIsoPath,
@@ -507,6 +508,8 @@ const sourceLooksLikeWindows11Template = (candidatePath) => {
 const grantHyperVTemplateAccess = () => {
   const grantTarget = "*S-1-5-83-0:(R)";
   const grantTree = "*S-1-5-83-0:(OI)(CI)(RX)";
+  const grantDiskTarget = "*S-1-5-83-0:(M)";
+  const grantDiskTree = "*S-1-5-83-0:(OI)(CI)(M)";
   for (const directoryPath of [resolve(workspaceDir, "vm-disks"), templateIsoDirectory]) {
     if (!existsSync(directoryPath)) continue;
     execFileSync("icacls", [directoryPath, "/grant", grantTree], {
@@ -520,6 +523,33 @@ const grantHyperVTemplateAccess = () => {
       stdio: "ignore",
     });
   }
+  if (existsSync(templateDiskDirectory)) {
+    execFileSync("icacls", [templateDiskDirectory, "/grant", grantDiskTree], {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+  }
+  const templateDiskPath = findWindows11TemplateDisk();
+  if (templateDiskPath) {
+    execFileSync("icacls", [templateDiskPath, "/grant", grantDiskTarget], {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+  }
+};
+
+const findWindows11TemplateDisk = () => {
+  if (!existsSync(templateDiskDirectory)) return "";
+  const minimumInstalledDiskSize = 8 * 1024 * 1024 * 1024;
+  return readdirSync(templateDiskDirectory)
+    .filter((name) => /^windows-11-template-.*\.vhdx$/i.test(name))
+    .map((name) => {
+      const diskPath = resolve(templateDiskDirectory, name);
+      const stats = statSync(diskPath);
+      return { diskPath, size: stats.size, mtimeMs: stats.mtimeMs };
+    })
+    .filter((entry) => entry.size >= minimumInstalledDiskSize)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs || b.size - a.size)[0]?.diskPath || "";
 };
 
 const ensureWindows11TemplateIso = () => {
@@ -548,12 +578,17 @@ const ensureWindows11TemplateIso = () => {
   grantHyperVTemplateAccess();
 
   const size = statSync(windows11TemplateIsoPath).size;
+  const diskPath = findWindows11TemplateDisk();
+  const diskSize = diskPath ? statSync(diskPath).size : 0;
   return {
     ok: true,
     available: true,
     name: "Windows 11 Template",
     isoPath: windows11TemplateIsoPath,
     size,
+    diskPath,
+    diskSize,
+    prepared: Boolean(diskPath),
   };
 };
 
