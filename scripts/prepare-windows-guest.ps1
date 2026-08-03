@@ -319,6 +319,21 @@ exit /b 0
     & reg.exe unload HKLM\NebulaOfflineSoftware | Out-Null
   }
 
+  $offlineDefaultUser = Join-Path $windowsDrive "Users\Default\NTUSER.DAT"
+  if (Test-Path -LiteralPath $offlineDefaultUser -PathType Leaf) {
+    & reg.exe load HKLM\NebulaDefaultUser $offlineDefaultUser | Out-Null
+    try {
+      & reg.exe add "HKLM\NebulaDefaultUser\Control Panel\Desktop" `
+        /v Wallpaper /t REG_SZ /d "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /f | Out-Null
+      & reg.exe add "HKLM\NebulaDefaultUser\Control Panel\Desktop" `
+        /v WallpaperStyle /t REG_SZ /d 10 /f | Out-Null
+      & reg.exe add "HKLM\NebulaDefaultUser\Control Panel\Desktop" `
+        /v TileWallpaper /t REG_SZ /d 0 /f | Out-Null
+    } finally {
+      & reg.exe unload HKLM\NebulaDefaultUser | Out-Null
+    }
+  }
+
   $bcdbootCandidates = @(
     (Join-Path $env:SystemRoot "System32\bcdboot.exe"),
     (Join-Path $windowsDrive "Windows\System32\bcdboot.exe")

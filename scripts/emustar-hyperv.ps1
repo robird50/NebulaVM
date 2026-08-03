@@ -219,6 +219,63 @@ function Get-IsolatedDiskPath {
   return Join-Path $diskDirectory "$safeMediaName-$shortHash.vhdx"
 }
 
+function Get-IsolatedTemplateDiskPath {
+  param(
+    [string]$VmDirectory,
+    [string]$TemplateDiskPath,
+    [string]$OwnerId
+  )
+
+  $safeOwnerId = ([string]$OwnerId -replace "[^a-zA-Z0-9_-]", "-").Trim("-")
+  if ([string]::IsNullOrWhiteSpace($safeOwnerId)) {
+    throw "EMUSTAR did not receive a valid storage owner for the Windows template."
+  }
+
+  $identity = "$safeOwnerId|windows-11-template|$([IO.Path]::GetFullPath($TemplateDiskPath).ToLowerInvariant())"
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    $hashBytes = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity))
+  } finally {
+    $sha.Dispose()
+  }
+  $shortHash = ([BitConverter]::ToString($hashBytes) -replace "-", "").Substring(0, 16).ToLowerInvariant()
+  $diskDirectory = Join-Path $VmDirectory "disks"
+  New-Item -ItemType Directory -Path $diskDirectory -Force | Out-Null
+  return Join-Path $diskDirectory "private-windows-11-template-$shortHash.vhdx"
+}
+
+function Ensure-TemplateChildDisk {
+  param(
+    [string]$ChildDiskPath,
+    [string]$ParentDiskPath
+  )
+
+  if (Test-Path -LiteralPath $ChildDiskPath -PathType Leaf) {
+    return
+  }
+
+  $parentItem = Get-Item -LiteralPath $ParentDiskPath -ErrorAction Stop
+  $parentAttributes = $parentItem.Attributes
+  try {
+    if (($parentAttributes -band [IO.FileAttributes]::ReadOnly) -eq 0) {
+      $parentItem.Attributes = $parentAttributes -bor [IO.FileAttributes]::ReadOnly
+    }
+    New-VHD -Path $ChildDiskPath -ParentPath $ParentDiskPath -Differencing | Out-Null
+  } catch {
+    if (Test-Path -LiteralPath $ChildDiskPath -PathType Leaf) {
+      Remove-Item -LiteralPath $ChildDiskPath -Force -ErrorAction SilentlyContinue
+    }
+    throw "Could not create your private Windows 11 template disk: $($_.Exception.Message)"
+  } finally {
+    try {
+      $parentItem.Refresh()
+      $parentItem.Attributes = $parentItem.Attributes -bor [IO.FileAttributes]::ReadOnly
+    } catch {
+      # Keeping the golden template read-only is best effort after creation.
+    }
+  }
+}
+
 function Set-LowHostMemoryProfile {
   param(
     [object]$Vm,
@@ -398,7 +455,7 @@ function Start-Emustar {
   }
   New-Item -ItemType Directory -Path $vmDirectory -Force | Out-Null
   $vhdPath = if ($templateDiskProvided) {
-    $templateDiskPath
+    Get-IsolatedTemplateDiskPath -VmDirectory $vmDirectory -TemplateDiskPath $templateDiskPath -OwnerId $storageOwnerId
   } else {
     Get-IsolatedDiskPath -VmDirectory $vmDirectory -IsoPath $isoPath -OwnerId $storageOwnerId
   }
@@ -456,6 +513,14 @@ function Start-Emustar {
     }
   }
 
+  if ($templateDiskProvided -and $vm -and $vm.State -ne "Off") {
+    $vm = Stop-EmustarForConfiguration -Vm $vm
+  }
+
+  if ($templateDiskProvided) {
+    Ensure-TemplateChildDisk -ChildDiskPath $vhdPath -ParentDiskPath $templateDiskPath
+  }
+
   if (-not $vm) {
     if (-not (Test-Path -LiteralPath $vhdPath)) {
       New-VHD -Path $vhdPath -Dynamic -SizeBytes ($diskSizeGb * 1GB) | Out-Null
@@ -490,7 +555,11 @@ function Start-Emustar {
     ([IO.Path]::GetFullPath($currentDiskPath) -ne [IO.Path]::GetFullPath($vhdPath))
   if ($diskChanged) {
     if (-not (Test-Path -LiteralPath $vhdPath)) {
-      New-VHD -Path $vhdPath -Dynamic -SizeBytes ($diskSizeGb * 1GB) | Out-Null
+      if ($templateDiskProvided) {
+        Ensure-TemplateChildDisk -ChildDiskPath $vhdPath -ParentDiskPath $templateDiskPath
+      } else {
+        New-VHD -Path $vhdPath -Dynamic -SizeBytes ($diskSizeGb * 1GB) | Out-Null
+      }
     }
     if ($currentDisk) {
       Remove-VMHardDiskDrive -VMHardDiskDrive $currentDisk

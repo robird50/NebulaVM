@@ -2169,7 +2169,8 @@ const requestGuestDesktopResize = (reason = "viewport") => {
     els.emulatorMode.value !== "emustar-hyperv" ||
     state.nativeRuntimeName !== "Hyper-V" ||
     !state.running ||
-    state.hyperVConsoleActive
+    state.hyperVConsoleActive ||
+    state.windowsTemplateSelected
   ) {
     return;
   }
@@ -2197,7 +2198,9 @@ const requestGuestDesktopResize = (reason = "viewport") => {
         log("Asked the guest to extend its desktop; if it refuses, NebulaVM will keep the image contained without stretching.");
       }
     } catch (error) {
-      log(`Guest display resize unavailable: ${error.message}`);
+      if (!/timed out/i.test(error.message || "")) {
+        log(`Guest display resize unavailable: ${error.message}`);
+      }
     }
   }, 350);
 };
@@ -3408,12 +3411,16 @@ const startHyperVSetupConsole = (base) => {
   const pointerToFramePoint = (event) => {
     const rect = image.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
+    const frameWidth = Number(image.dataset.frameWidth) || image.naturalWidth || rect.width;
+    const frameHeight = Number(image.dataset.frameHeight) || image.naturalHeight || rect.height;
+    const relativeX = Math.min(Math.max(0, event.clientX - rect.left), rect.width);
+    const relativeY = Math.min(Math.max(0, event.clientY - rect.top), rect.height);
     return {
       type: "click",
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-      width: rect.width,
-      height: rect.height,
+      x: (relativeX / rect.width) * frameWidth,
+      y: (relativeY / rect.height) * frameHeight,
+      width: frameWidth,
+      height: frameHeight,
       contentOnly: isScreenFullscreen(),
     };
   };
@@ -3524,6 +3531,8 @@ const startHyperVSetupConsole = (base) => {
       }
       state.hyperVConsoleFrameUrl = nextFrameUrl;
       image.src = nextFrameUrl;
+      image.dataset.frameWidth = String(frame.width || "");
+      image.dataset.frameHeight = String(frame.height || "");
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
       status.textContent = "Use Tab, arrows, Enter, and paste text here to control setup.";

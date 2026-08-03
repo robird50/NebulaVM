@@ -252,12 +252,16 @@ const startMirrorConsole = (base, token) => {
   const pointerToFramePoint = (event) => {
     const rect = image.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
+    const frameWidth = Number(image.dataset.frameWidth) || image.naturalWidth || rect.width;
+    const frameHeight = Number(image.dataset.frameHeight) || image.naturalHeight || rect.height;
+    const relativeX = Math.min(Math.max(0, event.clientX - rect.left), rect.width);
+    const relativeY = Math.min(Math.max(0, event.clientY - rect.top), rect.height);
     return {
       type: "click",
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-      width: rect.width,
-      height: rect.height,
+      x: (relativeX / rect.width) * frameWidth,
+      y: (relativeY / rect.height) * frameHeight,
+      width: frameWidth,
+      height: frameHeight,
       contentOnly: isRemoteFullscreen(),
     };
   };
@@ -342,6 +346,8 @@ const startMirrorConsole = (base, token) => {
       if (mirrorFrameUrl) URL.revokeObjectURL(mirrorFrameUrl);
       mirrorFrameUrl = nextUrl;
       image.src = nextUrl;
+      image.dataset.frameWidth = String(frame.width || "");
+      image.dataset.frameHeight = String(frame.height || "");
       if (frame.width) image.width = frame.width;
       if (frame.height) image.height = frame.height;
       status.textContent = "Click, type, Tab, arrows, Enter, and paste to control this VM.";
