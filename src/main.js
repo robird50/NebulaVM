@@ -4113,6 +4113,26 @@ const nativeExitSummary = (lastExit) => {
   return outputLine ? `${outputLine}${code}` : `The runtime stopped${code}.`;
 };
 
+const hyperVStopSummary = (status) => {
+  const event = status?.lastHyperVPowerEvent || status?.lastHyperVEvent;
+  const base = status?.vm?.status && status.vm.status !== "Operating normally"
+    ? `The Hyper-V machine is powered off. VM status: ${status.vm.status}.`
+    : "The Hyper-V machine is powered off.";
+
+  if (!event?.message) {
+    return `${base} Windows did not report a more specific reason yet.`;
+  }
+
+  const eventLabel = event.id ? `Event ${event.id}` : "Latest Hyper-V event";
+  const level = event.level ? `${event.level} ` : "";
+  const message = String(event.message).replace(/\s+/g, " ").trim();
+  if (event.id === 18502 && /was turned off/i.test(message)) {
+    return `${base} ${level}${eventLabel}: Windows logged that the VM was turned off, but did not report a crash reason.`;
+  }
+
+  return `${base} ${level}${eventLabel}: ${message}`;
+};
+
 const monitorNativeVm = () => {
   clearNativeMonitor();
   state.nativeMonitorTimer = window.setInterval(async () => {
@@ -4181,7 +4201,7 @@ const monitorNativeVm = () => {
       clearStatsTimer();
       updateUptime();
       const summary = hyperVRuntime
-        ? "The Hyper-V machine is powered off."
+        ? hyperVStopSummary(status)
         : nativeExitSummary(status.lastExit);
       const runtimeName = state.nativeRuntimeName || nativeRuntimeBrand();
       const stopLogKey = `${runtimeName}:${summary}`;

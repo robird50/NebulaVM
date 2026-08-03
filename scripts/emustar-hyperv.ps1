@@ -81,6 +81,68 @@ function Get-VmSnapshot {
   }
 }
 
+function Convert-HyperVEvent {
+  param([object]$Event)
+
+  if ($null -eq $Event) {
+    return $null
+  }
+
+  $message = ($Event.Message -replace "\s+", " ").Trim()
+  if ($message.Length -gt 500) {
+    $message = "$($message.Substring(0, 497))..."
+  }
+
+  return [ordered]@{
+    timeCreated = $Event.TimeCreated.ToString("o")
+    id = $Event.Id
+    level = $Event.LevelDisplayName
+    provider = $Event.ProviderName
+    message = $message
+  }
+}
+
+function Get-LatestHyperVEvent {
+  param(
+    [switch]$PowerOnly
+  )
+
+  $events = @()
+  $startTime = (Get-Date).AddHours(-2)
+  foreach ($logName in @("Microsoft-Windows-Hyper-V-Worker-Admin", "Microsoft-Windows-Hyper-V-VMMS-Admin")) {
+    try {
+      $events += Get-WinEvent `
+        -FilterHashtable @{ LogName = $logName; StartTime = $startTime } `
+        -MaxEvents 60 `
+        -ErrorAction SilentlyContinue |
+        Where-Object { $_.Message -like "*$vmName*" }
+    } catch {
+      # Some Windows editions keep individual Hyper-V logs disabled until first use.
+    }
+  }
+
+  if ($PowerOnly) {
+    $preferred = $events |
+      Where-Object { $_.Id -in @(12030, 18500, 18502, 18601, 3050, 3122) } |
+      Sort-Object TimeCreated -Descending |
+      Select-Object -First 1
+  } else {
+    $preferred = $events |
+      Where-Object {
+        $_.LevelDisplayName -in @("Error", "Warning") -or
+        $_.Id -in @(12030, 18502, 19060, 3050, 3122)
+      } |
+      Sort-Object TimeCreated -Descending |
+      Select-Object -First 1
+  }
+
+  if (-not $preferred) {
+    $preferred = $events | Sort-Object TimeCreated -Descending | Select-Object -First 1
+  }
+
+  return Convert-HyperVEvent -Event $preferred
+}
+
 function Get-Status {
   $cmdletsReady = Test-HyperVCmdlets
   $featureState = if ($cmdletsReady) { "Enabled" } else { Get-FeatureState }
@@ -104,6 +166,8 @@ function Get-Status {
     serviceState = $serviceState
     available = $featureState -eq "Enabled" -and $cmdletsReady
     vm = Get-VmSnapshot -Vm $vm
+    lastHyperVEvent = Get-LatestHyperVEvent
+    lastHyperVPowerEvent = Get-LatestHyperVEvent -PowerOnly
   }
 }
 
