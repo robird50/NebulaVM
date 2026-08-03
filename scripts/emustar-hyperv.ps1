@@ -557,6 +557,44 @@ function Set-LowHostMemoryProfile {
   Set-VMMemory -VM $Vm -DynamicMemoryEnabled $false -StartupBytes ($MemoryMb * 1MB)
 }
 
+function Get-RequestedDisplaySize {
+  param([object]$Config)
+
+  $width = 1280
+  $height = 720
+  if ($Config.PSObject.Properties.Name -contains "displayWidth") {
+    $width = [int]$Config.displayWidth
+  }
+  if ($Config.PSObject.Properties.Name -contains "displayHeight") {
+    $height = [int]$Config.displayHeight
+  }
+
+  $width = [math]::Min(7680, [math]::Max(640, $width))
+  $height = [math]::Min(4320, [math]::Max(360, $height))
+  $width = $width - ($width % 2)
+  $height = $height - ($height % 2)
+  return [pscustomobject]@{ Width = $width; Height = $height }
+}
+
+function Set-EmustarVideoMode {
+  param(
+    [object]$Vm,
+    [int]$Width,
+    [int]$Height
+  )
+
+  try {
+    Set-VMVideo `
+      -VMName $Vm.Name `
+      -ResolutionType Single `
+      -HorizontalResolution $Width `
+      -VerticalResolution $Height | Out-Null
+    $warnings.Add("Requested Hyper-V display size ${Width}x${Height}.")
+  } catch {
+    $warnings.Add("Hyper-V display size could not be configured before boot: $($_.Exception.Message)")
+  }
+}
+
 function Set-InstalledWindowsBoot {
   param(
     [object]$Vm,
@@ -675,6 +713,7 @@ function Start-Emustar {
   if ([string]::IsNullOrWhiteSpace($guestType)) {
     $isWindowsGuest = [IO.Path]::GetFileName($isoPath) -match '(?i)(^|[^a-z0-9])(windows|win(?:dows)?[\s_-]*[0-9]+|w[0-9]+)(?=[^a-z0-9]|$)'
   }
+  $displaySize = Get-RequestedDisplaySize -Config $config
   $vmDirectory = [string]$config.vmDirectory
   if ([string]::IsNullOrWhiteSpace($vmDirectory)) {
     throw "The EMUSTAR VM directory was not supplied."
@@ -802,6 +841,7 @@ function Start-Emustar {
   Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown -CheckpointType Disabled
   Set-LowHostMemoryProfile -Vm $vm -MemoryMb $memoryMb -FixedStartup $isWindowsGuest
   Set-VMProcessor -VM $vm -Count $processorCount
+  Set-EmustarVideoMode -Vm $vm -Width $displaySize.Width -Height $displaySize.Height
 
   $dvd = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($templateDiskProvided -or -not $isoProvided) {
@@ -932,6 +972,13 @@ function Get-GuestCredential {
   }
 
   $credentials = Get-Content -LiteralPath $credentialsPath -Raw | ConvertFrom-Json
+  if (
+    $credentials.PSObject.Properties.Name -contains "passwordDisabled" -and
+    [bool]$credentials.passwordDisabled -and
+    [string]::IsNullOrWhiteSpace([string]$credentials.adminPassword)
+  ) {
+    throw "Live guest control is unavailable because the Windows account is passwordless. The fixed Hyper-V video mode will be used instead."
+  }
   $securePassword = ConvertTo-SecureString ([string]$credentials.adminPassword) -AsPlainText -Force
   return [pscredential]::new([string]$credentials.username, $securePassword)
 }

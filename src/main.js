@@ -640,6 +640,16 @@ app.innerHTML = `
                 </select>
               </label>
 
+              <label class="field full-span" id="hyperVResolutionField">
+                <span>Display resolution</span>
+                <select id="hyperVResolution">
+                  <option value="1280x720" selected>1280 x 720 (16:9)</option>
+                  <option value="1366x768">1366 x 768 (16:9)</option>
+                  <option value="1600x900">1600 x 900 (16:9)</option>
+                  <option value="1920x1080">1920 x 1080 (16:9)</option>
+                </select>
+              </label>
+
               <label class="field full-span">
                 <span>Local ISO path</span>
                 <input id="nativeIsoPath" type="text" placeholder="C:\\Path\\To\\Your.iso" />
@@ -1192,6 +1202,8 @@ const els = {
   emustarCopyShareButton: document.querySelector("#emustarCopyShareButton"),
   emustarShareStatus: document.querySelector("#emustarShareStatus"),
   nativeDisplayMode: document.querySelector("#nativeDisplayMode"),
+  hyperVResolutionField: document.querySelector("#hyperVResolutionField"),
+  hyperVResolution: document.querySelector("#hyperVResolution"),
   nativeIsoPath: document.querySelector("#nativeIsoPath"),
   windowsCredentialsPanel: document.querySelector("#windowsCredentialsPanel"),
   windowsCredentialsHelp: document.querySelector("#windowsCredentialsHelp"),
@@ -1509,6 +1521,10 @@ if (isNetlifyLauncher) {
   window.localStorage.setItem("nebulavm.emustar.display", "viewport");
 } else if (savedNativeDisplayMode === "viewport" || savedNativeDisplayMode === "external") {
   els.nativeDisplayMode.value = savedNativeDisplayMode;
+}
+const savedHyperVResolution = window.localStorage.getItem("nebulavm.hyperv.resolution");
+if ([...els.hyperVResolution.options].some((option) => option.value === savedHyperVResolution)) {
+  els.hyperVResolution.value = savedHyperVResolution;
 }
 
 const mobilePinState = {
@@ -3820,6 +3836,15 @@ const isQemuMode = () => isBrowserQemuMode() || isNativeQemuMode();
 const isExternalMode = () => isQemuMode() || isHyperVMode() || isRemoteMode();
 const shouldForceEmustarViewport = () => isNetlifyLauncher && isHyperVMode();
 const selectedNativeDisplayMode = () => (shouldForceEmustarViewport() ? "viewport" : els.nativeDisplayMode.value);
+const selectedHyperVResolution = () => {
+  const match = /^(\d+)x(\d+)$/.exec(els.hyperVResolution.value || "");
+  const width = match ? Number(match[1]) : 1280;
+  const height = match ? Number(match[2]) : 720;
+  return {
+    width: Math.max(640, Math.min(7680, width)) || 1280,
+    height: Math.max(360, Math.min(4320, height)) || 720,
+  };
+};
 const nativeArchitecture = () => (isNativeArm64Mode() ? "aarch64" : "x86_64");
 const nativeProfile = () =>
   isNativeUbuntuArm64Mode() ? "ubuntu-arm64" : isNativeWindowsArm64Mode() ? "windows-arm64" : "generic-x64";
@@ -4631,6 +4656,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   }
 
   const runtimeName = "Hyper-V";
+  const displaySize = selectedHyperVResolution();
   els.screenContainer.querySelector(".vga-text").hidden = true;
   els.screenContainer.querySelector(".vga-canvas").hidden = true;
   els.qemuTerminal.hidden = true;
@@ -4655,6 +4681,8 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
       guestType: selectedIsoLooksLikeWindows() ? "windows" : "other",
       cpuGhz: selectedProcessorSpeedGhz(),
       memoryMb: selectedMemoryMb(),
+      displayWidth: displaySize.width,
+      displayHeight: displaySize.height,
       bootOrder: els.bootOrder.value,
       createDisk: els.nativeCreateDisk.checked,
       diskSizeGb: Number(els.nativeDiskSize.value),
@@ -5956,6 +5984,8 @@ const updateBackendUi = () => {
     if (hostedEmustarMode) {
       els.nativeDisplayMode.value = "viewport";
     }
+    els.hyperVResolutionField.hidden = !emustarMode;
+    els.hyperVResolution.disabled = !emustarMode || Boolean(state.emulator);
     state.nativeQemuReady = false;
     els.nativeStatus.dataset.mode = "";
     els.nativeStatus.textContent = `Checking ${nativeModeLabel()}...`;
@@ -6540,6 +6570,10 @@ els.nativeDisplayMode.addEventListener("change", () => {
     els.nativeDisplayMode.value = "viewport";
   }
   window.localStorage.setItem("nebulavm.emustar.display", els.nativeDisplayMode.value);
+});
+els.hyperVResolution.addEventListener("change", () => {
+  window.localStorage.setItem("nebulavm.hyperv.resolution", els.hyperVResolution.value);
+  requestGuestDesktopResize("Hyper-V resolution change");
 });
 els.nativeResetFirmwareButton.addEventListener("click", resetNativeFirmware);
 els.nativeConsoleButton.addEventListener("click", openHyperVConsole);

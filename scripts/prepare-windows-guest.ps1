@@ -42,7 +42,16 @@ if (Test-Path -LiteralPath $credentialsPath) {
   $credentials | ConvertTo-Json | Set-Content -LiteralPath $credentialsPath -Encoding ASCII
 }
 
-if ([string]::IsNullOrWhiteSpace([string]$credentials.adminPassword)) {
+$passwordDisabled = $false
+if ($credentials.PSObject.Properties.Name -contains "passwordDisabled") {
+  $passwordDisabled = [bool]$credentials.passwordDisabled
+}
+
+if ($passwordDisabled) {
+  $credentials.adminPassword = ""
+  $credentials.passwordDisabled = $true
+  $credentials | ConvertTo-Json | Set-Content -LiteralPath $credentialsPath -Encoding ASCII
+} elseif ([string]::IsNullOrWhiteSpace([string]$credentials.adminPassword)) {
   $credentials.adminPassword = "Nebula-" + ([guid]::NewGuid().ToString("N").Substring(0, 14)) + "!"
   $credentials.passwordDisabled = $false
   $credentials | ConvertTo-Json | Set-Content -LiteralPath $credentialsPath -Encoding ASCII
@@ -175,11 +184,27 @@ try {
   New-Item -ItemType Directory -Path $payloadDirectory -Force | Out-Null
   Copy-Item -LiteralPath $tightVncPath -Destination (Join-Path $payloadDirectory "tightvnc.msi") -Force
 
+  $guestSetupUsername = [string]$credentials.username
+  if ([string]::IsNullOrWhiteSpace($guestSetupUsername)) {
+    $guestSetupUsername = "Nebula"
+  }
+  $guestSetupPasswordDisabled = if ($passwordDisabled) { "true" } else { "false" }
+
   $guestSetup = @'
 $ErrorActionPreference = "Stop"
 $logPath = "C:\NebulaVM\setup.log"
 Start-Transcript -Path $logPath -Append
 try {
+  $guestUsername = "__GUEST_USERNAME__"
+  $passwordDisabled = "__PASSWORD_DISABLED__" -eq "true"
+  if ($passwordDisabled -and -not [string]::IsNullOrWhiteSpace($guestUsername)) {
+    & net.exe user $guestUsername "" /active:yes | Out-Null
+    $winlogonPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+    Set-ItemProperty -Path $winlogonPath -Name AutoAdminLogon -Value "1"
+    Set-ItemProperty -Path $winlogonPath -Name DefaultUserName -Value $guestUsername
+    Set-ItemProperty -Path $winlogonPath -Name DefaultPassword -Value ""
+  }
+
   Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
   Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
 
@@ -275,7 +300,9 @@ try {
   Stop-Transcript
 }
 '@.Replace("__VNC_PASSWORD__", [string]$credentials.vncPassword).
-  Replace("__DISPLAY_MAC__", $displayMac)
+  Replace("__DISPLAY_MAC__", $displayMac).
+  Replace("__GUEST_USERNAME__", $guestSetupUsername).
+  Replace("__PASSWORD_DISABLED__", $guestSetupPasswordDisabled)
   Set-Content -LiteralPath (Join-Path $payloadDirectory "setup-guest.ps1") -Value $guestSetup -Encoding UTF8
 
   $setupScripts = Join-Path $windowsDrive "Windows\Setup\Scripts"
@@ -300,6 +327,16 @@ exit /b 0
   $guestPassword = if ($passwordDisabled) { "" } else { [string]$credentials.adminPassword }
   $escapedUsername = [Security.SecurityElement]::Escape($guestUsername)
   $escapedPassword = [Security.SecurityElement]::Escape($guestPassword)
+  $localAccountPasswordXml = if ($passwordDisabled) {
+    ""
+  } else {
+    "            <Password><Value>$escapedPassword</Value><PlainText>true</PlainText></Password>"
+  }
+  $autoLogonPasswordXml = if ($passwordDisabled) {
+    ""
+  } else {
+    "        <Password><Value>$escapedPassword</Value><PlainText>true</PlainText></Password>"
+  }
   $unattend = @"
 <?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
@@ -334,7 +371,7 @@ exit /b 0
             <Name>$escapedUsername</Name>
             <Group>Administrators</Group>
             <DisplayName>$escapedUsername</DisplayName>
-            <Password><Value>$escapedPassword</Value><PlainText>true</PlainText></Password>
+$localAccountPasswordXml
           </LocalAccount>
         </LocalAccounts>
       </UserAccounts>
@@ -342,7 +379,7 @@ exit /b 0
         <Enabled>true</Enabled>
         <LogonCount>10</LogonCount>
         <Username>$escapedUsername</Username>
-        <Password><Value>$escapedPassword</Value><PlainText>true</PlainText></Password>
+$autoLogonPasswordXml
       </AutoLogon>
     </component>
   </settings>

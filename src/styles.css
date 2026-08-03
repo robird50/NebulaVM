@@ -1034,11 +1034,18 @@ h2 {
 }
 
 .workspace.is-emustar-mode .screen-shell {
+  aspect-ratio: 16 / 9;
+  min-height: 0;
   border-color: rgba(96, 220, 255, 0.58);
   background-color: #02060a;
   box-shadow:
     0 0 0 1px rgba(255, 228, 94, 0.1),
     0 18px 46px rgba(0, 0, 0, 0.34);
+}
+
+.workspace.is-emustar-mode .screen-container {
+  height: 100%;
+  min-height: 0;
 }
 
 .workspace.is-emustar-mode .screen-placeholder {
