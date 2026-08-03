@@ -349,8 +349,22 @@ function Set-NebulaWallpaperInHive {
     /v WallpaperStyle /t REG_SZ /d 10 /f | Out-Null
   & reg.exe add "$HiveRoot\Control Panel\Desktop" `
     /v TileWallpaper /t REG_SZ /d 0 /f | Out-Null
+  & reg.exe delete "$HiveRoot\Control Panel\Desktop" `
+    /v TranscodedImageCache /f 2>$null | Out-Null
+  & reg.exe delete "$HiveRoot\Control Panel\Desktop" `
+    /v TranscodedImageCache_000 /f 2>$null | Out-Null
   & reg.exe add "$HiveRoot\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" `
     /v BackgroundHistoryPath0 /t REG_SZ /d "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /f | Out-Null
+  & reg.exe add "$HiveRoot\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" `
+    /v CurrentWallpaperPath /t REG_SZ /d "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /f | Out-Null
+  & reg.exe delete "$HiveRoot\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" `
+    /v TranscodedImageCache /f 2>$null | Out-Null
+  & reg.exe add "$HiveRoot\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop" `
+    /v NoChangingWallPaper /t REG_DWORD /d 0 /f | Out-Null
+  & reg.exe delete "$HiveRoot\Software\Microsoft\Windows\CurrentVersion\Policies\System" `
+    /v Wallpaper /f 2>$null | Out-Null
+  & reg.exe delete "$HiveRoot\Software\Microsoft\Windows\CurrentVersion\Policies\System" `
+    /v WallpaperStyle /f 2>$null | Out-Null
 }
 
 function Set-NebulaWallpaperActiveSetup {
@@ -361,17 +375,33 @@ function Set-NebulaWallpaperActiveSetup {
 
   $wallpaperScript = @'
 $ErrorActionPreference = "SilentlyContinue"
-$wallpaper = "C:\Windows\Web\Wallpaper\Windows\img0.jpg"
-if (-not (Test-Path -LiteralPath $wallpaper -PathType Leaf)) {
-  $wallpaper = "C:\Windows\Web\4K\Wallpaper\Windows\img0_1920x1200.jpg"
-}
+$wallpaperCandidates = @(
+  "C:\Windows\Web\Wallpaper\Windows\img0.jpg",
+  "C:\Windows\Web\4K\Wallpaper\Windows\img0_3840x2400.jpg",
+  "C:\Windows\Web\4K\Wallpaper\Windows\img0_2560x1600.jpg",
+  "C:\Windows\Web\4K\Wallpaper\Windows\img0_1920x1200.jpg",
+  "C:\Windows\Web\4K\Wallpaper\Windows\img0_1366x768.jpg"
+)
+$wallpaper = $wallpaperCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 if (Test-Path -LiteralPath $wallpaper -PathType Leaf) {
+  $themeDirectory = Join-Path $env:APPDATA "Microsoft\Windows\Themes"
+  Remove-Item -LiteralPath (Join-Path $themeDirectory "TranscodedWallpaper") -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path $themeDirectory "Transcoded_000") -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path $themeDirectory "CachedFiles") -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -Path "HKCU:\Control Panel\Desktop" -Force | Out-Null
   Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name Wallpaper -Value $wallpaper
   Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name WallpaperStyle -Value "10"
   Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name TileWallpaper -Value "0"
+  Remove-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name TranscodedImageCache -ErrorAction SilentlyContinue
+  Remove-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name TranscodedImageCache_000 -ErrorAction SilentlyContinue
   New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" -Force | Out-Null
   Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" -Name BackgroundHistoryPath0 -Value $wallpaper
+  Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" -Name CurrentWallpaperPath -Value $wallpaper
+  Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" -Name TranscodedImageCache -ErrorAction SilentlyContinue
+  New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop" -Force | Out-Null
+  New-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop" -Name NoChangingWallPaper -Value 0 -PropertyType DWord -Force | Out-Null
+  Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System" -Name Wallpaper -ErrorAction SilentlyContinue
+  Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System" -Name WallpaperStyle -ErrorAction SilentlyContinue
   Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class NebulaWallpaper { [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni); }' -ErrorAction SilentlyContinue
   [NebulaWallpaper]::SystemParametersInfo(20, 0, $wallpaper, 3) | Out-Null
   Start-Process rundll32.exe -ArgumentList "user32.dll,UpdatePerUserSystemParameters" -WindowStyle Hidden
@@ -386,9 +416,11 @@ if (Test-Path -LiteralPath $wallpaper -PathType Leaf) {
     if ($LASTEXITCODE -eq 0) {
       try {
         & reg.exe add "$softwareHive\Microsoft\Active Setup\Installed Components\NebulaVM-Wallpaper" `
-          /v Version /t REG_SZ /d "1,0,0,2" /f | Out-Null
+          /v Version /t REG_SZ /d "1,0,0,5" /f | Out-Null
         & reg.exe add "$softwareHive\Microsoft\Active Setup\Installed Components\NebulaVM-Wallpaper" `
           /v StubPath /t REG_SZ /d "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\NebulaVM\apply-wallpaper.ps1" /f | Out-Null
+        & reg.exe add "$softwareHive\Microsoft\Windows\CurrentVersion\Run" `
+          /v NebulaVMWallpaper /t REG_SZ /d "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\NebulaVM\apply-wallpaper.ps1" /f | Out-Null
       } finally {
         & reg.exe unload $softwareHive | Out-Null
       }
@@ -421,6 +453,10 @@ function Set-NebulaWallpaperForOfflineUsers {
     }
     try {
       Set-NebulaWallpaperInHive -HiveRoot $hiveRoot
+      $themesDirectory = Join-Path $profileRoot "AppData\Roaming\Microsoft\Windows\Themes"
+      Remove-Item -LiteralPath (Join-Path $themesDirectory "TranscodedWallpaper") -Force -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath (Join-Path $themesDirectory "Transcoded_000") -Force -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath (Join-Path $themesDirectory "CachedFiles") -Recurse -Force -ErrorAction SilentlyContinue
     } finally {
       & reg.exe unload $hiveRoot | Out-Null
     }
