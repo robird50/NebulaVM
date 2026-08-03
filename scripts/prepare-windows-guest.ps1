@@ -183,6 +183,31 @@ try {
   Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
   Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
 
+  $wallpaperLines = @(
+    '$ErrorActionPreference = "SilentlyContinue"',
+    '$wallpaper = "C:\Windows\Web\Wallpaper\Windows\img0.jpg"',
+    'if (-not (Test-Path -LiteralPath $wallpaper -PathType Leaf)) {',
+    '  $wallpaper = "C:\Windows\Web\4K\Wallpaper\Windows\img0_1920x1200.jpg"',
+    '}',
+    'if (Test-Path -LiteralPath $wallpaper -PathType Leaf) {',
+    '  New-Item -Path "HKCU:\Control Panel\Desktop" -Force | Out-Null',
+    '  Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name Wallpaper -Value $wallpaper',
+    '  Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name WallpaperStyle -Value "10"',
+    '  Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name TileWallpaper -Value "0"',
+    '  New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" -Force | Out-Null',
+    '  Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" -Name BackgroundHistoryPath0 -Value $wallpaper',
+    '  Add-Type -TypeDefinition ''using System; using System.Runtime.InteropServices; public static class NebulaWallpaper { [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni); }'' -ErrorAction SilentlyContinue',
+    '  [NebulaWallpaper]::SystemParametersInfo(20, 0, $wallpaper, 3) | Out-Null',
+    '  Start-Process rundll32.exe -ArgumentList "user32.dll,UpdatePerUserSystemParameters" -WindowStyle Hidden',
+    '}'
+  )
+  Set-Content -LiteralPath "C:\NebulaVM\apply-wallpaper.ps1" -Value ($wallpaperLines -join [Environment]::NewLine) -Encoding UTF8
+
+  $activeSetupKey = "HKLM:\Software\Microsoft\Active Setup\Installed Components\NebulaVM-Wallpaper"
+  New-Item -Path $activeSetupKey -Force | Out-Null
+  Set-ItemProperty -Path $activeSetupKey -Name Version -Value "1,0,0,2"
+  Set-ItemProperty -Path $activeSetupKey -Name StubPath -Value 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\NebulaVM\apply-wallpaper.ps1'
+
   $displayMac = "__DISPLAY_MAC__" -replace "(..)(?!$)", '$1-'
   $displayAdapter = Get-NetAdapter | Where-Object MacAddress -eq $displayMac | Select-Object -First 1
   if ($displayAdapter) {

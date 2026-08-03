@@ -276,6 +276,136 @@ function Ensure-TemplateChildDisk {
   }
 }
 
+function Set-NebulaWallpaperInHive {
+  param([string]$HiveRoot)
+
+  & reg.exe add "$HiveRoot\Control Panel\Desktop" `
+    /v Wallpaper /t REG_SZ /d "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /f | Out-Null
+  & reg.exe add "$HiveRoot\Control Panel\Desktop" `
+    /v WallpaperStyle /t REG_SZ /d 10 /f | Out-Null
+  & reg.exe add "$HiveRoot\Control Panel\Desktop" `
+    /v TileWallpaper /t REG_SZ /d 0 /f | Out-Null
+  & reg.exe add "$HiveRoot\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" `
+    /v BackgroundHistoryPath0 /t REG_SZ /d "C:\Windows\Web\Wallpaper\Windows\img0.jpg" /f | Out-Null
+}
+
+function Set-NebulaWallpaperActiveSetup {
+  param([string]$WindowsDrive)
+
+  $payloadDirectory = Join-Path $WindowsDrive "NebulaVM"
+  New-Item -ItemType Directory -Path $payloadDirectory -Force | Out-Null
+
+  $wallpaperScript = @'
+$ErrorActionPreference = "SilentlyContinue"
+$wallpaper = "C:\Windows\Web\Wallpaper\Windows\img0.jpg"
+if (-not (Test-Path -LiteralPath $wallpaper -PathType Leaf)) {
+  $wallpaper = "C:\Windows\Web\4K\Wallpaper\Windows\img0_1920x1200.jpg"
+}
+if (Test-Path -LiteralPath $wallpaper -PathType Leaf) {
+  New-Item -Path "HKCU:\Control Panel\Desktop" -Force | Out-Null
+  Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name Wallpaper -Value $wallpaper
+  Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name WallpaperStyle -Value "10"
+  Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name TileWallpaper -Value "0"
+  New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" -Force | Out-Null
+  Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers" -Name BackgroundHistoryPath0 -Value $wallpaper
+  Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class NebulaWallpaper { [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni); }' -ErrorAction SilentlyContinue
+  [NebulaWallpaper]::SystemParametersInfo(20, 0, $wallpaper, 3) | Out-Null
+  Start-Process rundll32.exe -ArgumentList "user32.dll,UpdatePerUserSystemParameters" -WindowStyle Hidden
+}
+'@
+  Set-Content -LiteralPath (Join-Path $payloadDirectory "apply-wallpaper.ps1") -Value $wallpaperScript -Encoding UTF8
+
+  $offlineSoftware = Join-Path $WindowsDrive "Windows\System32\Config\SOFTWARE"
+  if (Test-Path -LiteralPath $offlineSoftware -PathType Leaf) {
+    $softwareHive = "HKLM\NebulaTemplateSoftware$PID"
+    & reg.exe load $softwareHive $offlineSoftware | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+      try {
+        & reg.exe add "$softwareHive\Microsoft\Active Setup\Installed Components\NebulaVM-Wallpaper" `
+          /v Version /t REG_SZ /d "1,0,0,2" /f | Out-Null
+        & reg.exe add "$softwareHive\Microsoft\Active Setup\Installed Components\NebulaVM-Wallpaper" `
+          /v StubPath /t REG_SZ /d "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\NebulaVM\apply-wallpaper.ps1" /f | Out-Null
+      } finally {
+        & reg.exe unload $softwareHive | Out-Null
+      }
+    }
+  }
+}
+
+function Set-NebulaWallpaperForOfflineUsers {
+  param([string]$WindowsDrive)
+
+  $profileRoots = @(
+    (Join-Path $WindowsDrive "Users\Default"),
+    (Get-ChildItem -LiteralPath (Join-Path $WindowsDrive "Users") -Directory -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -notin @("All Users", "Default", "Default User", "Public") } |
+      Select-Object -ExpandProperty FullName)
+  ) | Where-Object { $_ }
+
+  $index = 0
+  foreach ($profileRoot in $profileRoots) {
+    $userHive = Join-Path $profileRoot "NTUSER.DAT"
+    if (-not (Test-Path -LiteralPath $userHive -PathType Leaf)) {
+      continue
+    }
+
+    $index += 1
+    $hiveRoot = "HKLM\NebulaUserWallpaper$PID$index"
+    & reg.exe load $hiveRoot $userHive | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      continue
+    }
+    try {
+      Set-NebulaWallpaperInHive -HiveRoot $hiveRoot
+    } finally {
+      & reg.exe unload $hiveRoot | Out-Null
+    }
+  }
+}
+
+function Ensure-WindowsTemplateWallpaper {
+  param([string]$VhdPath)
+
+  if (-not (Test-Path -LiteralPath $VhdPath -PathType Leaf)) {
+    return
+  }
+
+  $mountedHere = $false
+  $diskImage = $null
+  try {
+    $diskImage = Mount-VHD -Path $VhdPath -Passthru -ErrorAction Stop
+    $mountedHere = $true
+    $disk = $diskImage | Get-Disk -ErrorAction Stop
+    $windowsPartition = Get-Partition -DiskNumber $disk.Number -ErrorAction Stop |
+      Where-Object { $_.Type -eq "Basic" -or [string]$_.GptType -eq "{EBD0A0A2-B9E5-4433-87C0-68B6B72699C7}" } |
+      Sort-Object Size -Descending |
+      Select-Object -First 1
+    if (-not $windowsPartition) {
+      return
+    }
+
+    if (-not $windowsPartition.DriveLetter) {
+      $windowsPartition | Add-PartitionAccessPath -AssignDriveLetter -ErrorAction Stop | Out-Null
+      $windowsPartition = Get-Partition -DiskNumber $disk.Number -PartitionNumber $windowsPartition.PartitionNumber
+    }
+
+    $windowsDrive = "$($windowsPartition.DriveLetter):"
+    if (-not (Test-Path -LiteralPath (Join-Path $windowsDrive "Windows") -PathType Container)) {
+      return
+    }
+
+    Set-NebulaWallpaperActiveSetup -WindowsDrive $windowsDrive
+    Set-NebulaWallpaperForOfflineUsers -WindowsDrive $windowsDrive
+    $warnings.Add("Applied the NebulaVM Windows wallpaper repair hook to this private template disk.")
+  } catch {
+    $warnings.Add("Windows wallpaper repair could not be applied before boot: $($_.Exception.Message)")
+  } finally {
+    if ($mountedHere) {
+      Dismount-VHD -Path $VhdPath -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 function Set-LowHostMemoryProfile {
   param(
     [object]$Vm,
@@ -519,6 +649,7 @@ function Start-Emustar {
 
   if ($templateDiskProvided) {
     Ensure-TemplateChildDisk -ChildDiskPath $vhdPath -ParentDiskPath $templateDiskPath
+    Ensure-WindowsTemplateWallpaper -VhdPath $vhdPath
   }
 
   if (-not $vm) {
