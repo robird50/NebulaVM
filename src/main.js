@@ -4120,19 +4120,22 @@ const nativeExitSummary = (lastExit) => {
 
 const hyperVStopSummary = (status) => {
   const event = status?.lastHyperVPowerEvent || status?.lastHyperVEvent;
-  const base = status?.vm?.status && status.vm.status !== "Operating normally"
-    ? `The Hyper-V machine is powered off. VM status: ${status.vm.status}.`
-    : "The Hyper-V machine is powered off.";
+  const vmState = status?.vm?.state ? ` VM state: ${status.vm.state}.` : "";
+  const vmStatus =
+    status?.vm?.status && status.vm.status !== "Operating normally"
+      ? ` Hyper-V status: ${status.vm.status}.`
+      : "";
+  const base = `Hyper-V reports this VM is no longer running, so NebulaVM closed the browser display.${vmState}${vmStatus}`;
 
   if (!event?.message) {
-    return `${base} Windows did not report a more specific reason yet.`;
+    return `${base} Windows has not reported a specific shutdown reason yet.`;
   }
 
   const eventLabel = event.id ? `Event ${event.id}` : "Latest Hyper-V event";
   const level = event.level ? `${event.level} ` : "";
   const message = String(event.message).replace(/\s+/g, " ").trim();
   if (event.id === 18502 && /was turned off/i.test(message)) {
-    return `${base} ${level}${eventLabel}: Windows logged that the VM was turned off, but did not report a crash reason.`;
+    return `${base} ${level}${eventLabel}: Windows logged a normal power-off, but did not report whether setup shut down, restarted, or crashed.`;
   }
 
   return `${base} ${level}${eventLabel}: ${message}`;
