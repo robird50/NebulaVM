@@ -13,6 +13,7 @@ const COMMIT_ID = typeof __NEBULAVM_COMMIT__ === "string" ? __NEBULAVM_COMMIT__ 
 const HOST_TOKEN_STORAGE_KEY = "nebulavm.emustar.hostToken";
 const HOST_SESSION_STORAGE_KEY = "nebulavm.emustar.sessionId";
 const HOST_DEVICE_STORAGE_KEY = "nebulavm.emustar.deviceId.v1";
+const HYPERV_REMOTE_SESSION_STORAGE_KEY = "nebulavm.hyperv.remoteSessionId";
 const STORED_ISO_PROMPT_KEY = "nebulavm.emustar.storedIsoPrompt";
 const STORED_ISO_LIMIT = 2;
 const MOBILE_DEV_UNLOCK_KEY = "nebulavm.mobile.devUnlock.v3";
@@ -124,6 +125,7 @@ const savedSessionId =
   window.sessionStorage.getItem(HOST_SESSION_STORAGE_KEY) ||
   (crypto.randomUUID ? crypto.randomUUID() : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 window.sessionStorage.setItem(HOST_SESSION_STORAGE_KEY, savedSessionId);
+const savedHyperVRemoteSessionId = window.sessionStorage.getItem(HYPERV_REMOTE_SESSION_STORAGE_KEY) || "";
 const storedDeviceId = window.localStorage.getItem(HOST_DEVICE_STORAGE_KEY) || "";
 const savedDeviceId = /^[a-zA-Z0-9_-]{16,128}$/.test(storedDeviceId)
   ? storedDeviceId
@@ -143,6 +145,7 @@ const state = {
   nativeHostToken: savedHostToken,
   nativeSessionId: savedSessionId,
   nativeDeviceId: savedDeviceId,
+  hyperVRemoteSessionId: savedHyperVRemoteSessionId,
   nativeRfb: null,
   nativeRuntimeName: null,
   nativeMonitorTimer: null,
@@ -3063,6 +3066,28 @@ const remoteConsoleUrl = (sessionId = "") => {
   return url.toString();
 };
 
+const setHyperVRemoteSessionId = (sessionId = "") => {
+  const safeSessionId = String(sessionId || "").trim();
+  state.hyperVRemoteSessionId = safeSessionId;
+  if (/^[a-f0-9]{16,64}$/i.test(safeSessionId)) {
+    window.sessionStorage.setItem(HYPERV_REMOTE_SESSION_STORAGE_KEY, safeSessionId);
+  } else {
+    window.sessionStorage.removeItem(HYPERV_REMOTE_SESSION_STORAGE_KEY);
+  }
+};
+
+const canAdoptHyperVViewport = (status) => {
+  if (status.vm?.state !== "Running") return false;
+  if (state.emulator || state.nativeRuntimeName === "Hyper-V") return true;
+
+  const statusSessionId = String(status.remoteSessionId || "").trim();
+  return Boolean(
+    statusSessionId &&
+      state.hyperVRemoteSessionId &&
+      statusSessionId === state.hyperVRemoteSessionId,
+  );
+};
+
 const setHostedHostWaitingStatus = () => {
   state.nativeQemuApiAvailable = false;
   state.nativeQemuReady = false;
@@ -3632,10 +3657,11 @@ const startHyperVSetupConsole = (base) => {
 };
 
 const adoptRunningHyperVViewport = async (status, base) => {
-  if (!isHyperVMode() || status.vm?.state !== "Running") {
+  if (!isHyperVMode() || !canAdoptHyperVViewport(status)) {
     return false;
   }
 
+  setHyperVRemoteSessionId(status.remoteSessionId || state.hyperVRemoteSessionId);
   els.nativeDisplayMode.value = "viewport";
   window.localStorage.setItem("nebulavm.emustar.display", "viewport");
   els.screenPlaceholder.hidden = true;
@@ -3711,6 +3737,7 @@ const waitForHyperVStartRecovery = async (shouldStop = () => false) => {
             ok: true,
             recoveredFromSlowStart: true,
             vm: status.vm,
+            remoteSessionId: status.remoteSessionId || "",
             vncReady: Boolean(status.vncReady),
             vncPath: status.vncPath || "",
             vncPassword: status.vncPassword || "",
@@ -4122,6 +4149,7 @@ const monitorNativeVm = () => {
       state.nativeRfb?.disconnect();
       state.nativeRfb = null;
       state.emulator = null;
+      setHyperVRemoteSessionId("");
       state.running = false;
       state.startedAt = null;
       clearStatsTimer();
@@ -4191,6 +4219,7 @@ const createDemoBootImage = () => {
 const stopEmulator = async () => {
   clearNativeMonitor();
   clearNativeDisplayReconnect({ clearConfig: true });
+  setHyperVRemoteSessionId("");
   setVirtualKeyboardOpen(false);
   stopHyperVSetupConsole();
 
@@ -4586,6 +4615,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
     throw new Error(result.error || "Hyper-V failed to start.");
   }
 
+  setHyperVRemoteSessionId(result.remoteSessionId || "");
   state.nativeRuntimeName = runtimeName;
   state.lastNativeStopLogKey = "";
   const rfb =
@@ -5611,6 +5641,9 @@ const updateNativeStatus = async () => {
       state.nativeQemuApiAvailable = true;
       state.nativeQemuReady = Boolean(status.available);
       if (status.available) {
+        if (status.vm?.state && status.vm.state !== "Running") {
+          setHyperVRemoteSessionId("");
+        }
         const vmState = status.vm ? ` VM: ${status.vm.state}.` : "";
         els.nativeStatus.dataset.mode = "ready";
         els.nativeStatus.textContent = `Hyper-V ready${bridgeLabel}.${vmState}`;
