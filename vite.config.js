@@ -3202,6 +3202,21 @@ const nativeQemuPlugin = () => ({
           return;
         }
 
+        if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/request-new-disk") {
+          const body = await readJsonBody(req);
+          assertStoredIsoAccess(req, body.isoPath);
+          const result = await runHyperVAction("RequestNewDisk", {
+              ...body,
+              storageOwnerId: storedIsoOwnerId(req),
+              vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
+            }, 120000);
+          hyperVRemoteSessionId = "";
+          hyperVRemoteSessionStartedAt = "";
+          clearHyperVStatusCache();
+          json(res, 200, result);
+          return;
+        }
+
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/reset") {
           clearHyperVStatusCache();
           json(res, 200, await runHyperVAction("Reset"));

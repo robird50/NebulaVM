@@ -284,6 +284,7 @@ app.innerHTML = `
           <button class="primary" id="bootButton" type="button" disabled>Boot VM</button>
           <button class="secondary" id="pauseButton" type="button" disabled>Pause</button>
           <button class="danger" id="stopButton" type="button" disabled>Stop</button>
+          <button class="new-disk-button" id="newDiskButton" type="button" hidden disabled>Request new disk</button>
         </div>
 
         <label class="drop-zone" id="dropZone" for="isoInput">
@@ -1231,6 +1232,7 @@ const els = {
   bootButton: document.querySelector("#bootButton"),
   pauseButton: document.querySelector("#pauseButton"),
   stopButton: document.querySelector("#stopButton"),
+  newDiskButton: document.querySelector("#newDiskButton"),
   resetButton: document.querySelector("#resetButton"),
   saveStateButton: document.querySelector("#saveStateButton"),
   loadStateButton: document.querySelector("#loadStateButton"),
@@ -4040,6 +4042,7 @@ const updateButtons = (busy = false) => {
   const androidMode = isAndroidMode();
   const nintendoMode = isNintendoMode();
   const mediaWarningBlocksBoot = !els.mediaWarning.hidden && Boolean(els.mediaWarning.textContent);
+  const hasHyperVDiskSource = emustarMode && Boolean(els.nativeIsoPath.value.trim() || state.windowsTemplateSelected);
   const hasBootMedia = androidMode
     ? true
     : nintendoMode
@@ -4067,6 +4070,8 @@ const updateButtons = (busy = false) => {
   els.bootButton.title = els.bootButton.disabled && mediaWarningBlocksBoot ? els.mediaWarning.textContent : "";
   els.pauseButton.disabled = busy || !state.emulator || externalMode || nintendoMode;
   els.stopButton.disabled = busy || !state.emulator;
+  els.newDiskButton.hidden = !emustarMode;
+  els.newDiskButton.disabled = busy || !hasHyperVDiskSource || state.hostStagedIsoUploading || nativeUnavailable;
   els.resetButton.disabled = busy || !state.emulator || externalMode || nintendoMode;
   els.saveStateButton.disabled = busy || !state.emulator || externalMode || nintendoMode;
   els.loadStateButton.disabled = externalMode || nintendoMode;
@@ -4098,6 +4103,7 @@ const updateButtons = (busy = false) => {
     : nintendoMode
       ? "Stop Nintendo"
       : "Stop";
+  els.bootButton.parentElement.classList.toggle("has-new-disk", emustarMode);
   els.pauseButton.textContent = state.running ? "Pause" : "Resume";
   els.androidVersion.disabled = androidMode && Boolean(state.emulator);
   [els.androidCores, els.androidMemory, els.androidStorage, ...els.androidOrientation].forEach(
@@ -4359,6 +4365,55 @@ const stopEmulator = async () => {
     els.placeholderMeta.textContent = `${selectedNintendoEngine().label} handles ${selectedNintendoEngine().system}. Drop legally owned media to begin.`;
   }
   updateButtons();
+};
+
+const requestNewHyperVDisk = async () => {
+  if (!isHyperVMode()) return;
+  const isoPath = els.nativeIsoPath.value.trim();
+  if (!isoPath && !state.windowsTemplateSelected) {
+    log("Choose a Hyper-V ISO or Windows 11 Template before requesting a new disk.");
+    return;
+  }
+
+  updateButtons(true);
+  try {
+    log("Requesting a brand-new private Hyper-V disk.");
+    clearNativeMonitor();
+    clearNativeDisplayReconnect({ clearConfig: true });
+    stopHyperVSetupConsole();
+    state.nativeRfb?.disconnect();
+    state.nativeRfb = null;
+
+    const { response, data } = await fetchHyperVJson("request-new-disk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        isoPath,
+        templateDiskPath: state.windowsTemplateSelected ? state.windowsTemplateDiskPath : "",
+        diskSizeGb: Number(els.nativeDiskSize.value),
+      }),
+    });
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Hyper-V could not create a new private disk.");
+    }
+
+    state.emulator = null;
+    state.running = false;
+    state.startedAt = null;
+    clearStatsTimer();
+    updateUptime();
+    setHyperVRemoteSessionId("");
+    setPowerState("Fresh disk ready", "off");
+    showNativeDisplayStatus("Fresh Hyper-V disk ready. Launch Hyper-V to boot it.");
+    els.screenPlaceholder.hidden = false;
+    els.nativeDisplay.replaceChildren();
+    els.nativeDisplay.hidden = true;
+    log(data.message || `Fresh private Hyper-V disk ready: ${data.diskPath}`);
+  } catch (error) {
+    log(`New disk failed: ${error.message}`);
+  } finally {
+    updateButtons();
+  }
 };
 
 const getBootMediaConfig = () => {
@@ -5669,6 +5724,7 @@ els.demoButton.addEventListener("click", () => {
 });
 els.pauseButton.addEventListener("click", pauseOrResume);
 els.stopButton.addEventListener("click", stopEmulator);
+els.newDiskButton.addEventListener("click", requestNewHyperVDisk);
 els.resetButton.addEventListener("click", resetEmulator);
 els.saveStateButton.addEventListener("click", saveState);
 els.loadStateButton.addEventListener("click", () => els.stateInput.click());

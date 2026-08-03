@@ -934,6 +934,116 @@ function Stop-Emustar {
   return [ordered]@{ ok = $true; vm = Get-VmSnapshot -Vm (Get-VM -Name $vmName -ErrorAction SilentlyContinue) }
 }
 
+function Remove-EmustarDiskFile {
+  param([string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return
+  }
+
+  for ($attempt = 1; $attempt -le 5; $attempt += 1) {
+    try {
+      Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+      return
+    } catch {
+      if ($attempt -eq 5) {
+        throw "Could not remove the old private Hyper-V disk because it is still locked: $($_.Exception.Message)"
+      }
+      Start-Sleep -Milliseconds (350 * $attempt)
+    }
+  }
+}
+
+function Request-NewEmustarDisk {
+  $config = Read-Config
+  Assert-HyperVReady
+
+  $isoPath = [string]$config.isoPath
+  $templateDiskPath = [string]$config.templateDiskPath
+  $isoProvided = -not [string]::IsNullOrWhiteSpace($isoPath)
+  $templateDiskProvided = -not [string]::IsNullOrWhiteSpace($templateDiskPath)
+  if (-not $isoProvided -and -not $templateDiskProvided) {
+    throw "Choose an ISO path or Windows 11 Template before requesting a new Hyper-V disk."
+  }
+
+  if ($isoProvided) {
+    if (-not [IO.Path]::IsPathRooted($isoPath) -or -not (Test-Path -LiteralPath $isoPath -PathType Leaf)) {
+      throw "The selected ISO file is no longer available on the host."
+    }
+    $isoPath = [IO.Path]::GetFullPath($isoPath)
+  }
+  if ($templateDiskProvided) {
+    if (-not [IO.Path]::IsPathRooted($templateDiskPath) -or -not (Test-Path -LiteralPath $templateDiskPath -PathType Leaf)) {
+      throw "The Windows 11 Template disk is no longer available on the host."
+    }
+    $templateDiskPath = [IO.Path]::GetFullPath($templateDiskPath)
+  }
+
+  $vmDirectory = [string]$config.vmDirectory
+  if ([string]::IsNullOrWhiteSpace($vmDirectory)) {
+    throw "The Hyper-V VM directory was not supplied."
+  }
+  $storageOwnerId = [string]$config.storageOwnerId
+  if ([string]::IsNullOrWhiteSpace($storageOwnerId)) {
+    throw "NebulaVM needs this browser's private device identity before it can replace the disk."
+  }
+  New-Item -ItemType Directory -Path $vmDirectory -Force | Out-Null
+
+  $diskSizeGb = [math]::Min(256, [math]::Max(64, [int]$config.diskSizeGb))
+  $vhdPath = if ($templateDiskProvided) {
+    Get-IsolatedTemplateDiskPath -VmDirectory $vmDirectory -TemplateDiskPath $templateDiskPath -OwnerId $storageOwnerId
+  } else {
+    Get-IsolatedDiskPath -VmDirectory $vmDirectory -IsoPath $isoPath -OwnerId $storageOwnerId
+  }
+
+  $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+  $reattach = $false
+  $stoppedVm = $false
+  if ($vm) {
+    $currentDisk = Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue |
+      Where-Object { $_.Path -and ([IO.Path]::GetFullPath([string]$_.Path) -eq [IO.Path]::GetFullPath($vhdPath)) } |
+      Select-Object -First 1
+    if ($currentDisk) {
+      $reattach = $true
+      if ($vm.State -ne "Off") {
+        $vm = Stop-EmustarForConfiguration -Vm $vm
+        $stoppedVm = $true
+      }
+      $currentDisk = Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and ([IO.Path]::GetFullPath([string]$_.Path) -eq [IO.Path]::GetFullPath($vhdPath)) } |
+        Select-Object -First 1
+      if ($currentDisk) {
+        Remove-VMHardDiskDrive -VMHardDiskDrive $currentDisk
+      }
+    }
+  }
+
+  Remove-EmustarDiskFile -Path $vhdPath
+  if ($templateDiskProvided) {
+    Ensure-TemplateChildDisk -ChildDiskPath $vhdPath -ParentDiskPath $templateDiskPath
+    Ensure-WindowsTemplateWallpaper -VhdPath $vhdPath
+  } else {
+    New-VHD -Path $vhdPath -Dynamic -SizeBytes ($diskSizeGb * 1GB) | Out-Null
+  }
+
+  if ($reattach -and $vm) {
+    Add-VMHardDiskDrive -VM $vm -Path $vhdPath | Out-Null
+  }
+
+  return [ordered]@{
+    ok = $true
+    diskPath = $vhdPath
+    stoppedVm = $stoppedVm
+    message = $(if ($templateDiskProvided) {
+      "Fresh private Windows 11 Template disk ready. Launch Hyper-V to boot from the new copy."
+    } else {
+      "Fresh private Hyper-V disk ready. Launch Hyper-V to boot with a clean disk."
+    })
+    vm = Get-VmSnapshot -Vm (Get-VM -Name $vmName -ErrorAction SilentlyContinue)
+    warnings = $warnings
+  }
+}
+
 function Reset-Emustar {
   Assert-HyperVReady
   $vm = Get-VM -Name $vmName -ErrorAction Stop
@@ -1123,6 +1233,7 @@ try {
     "Status" { Get-Status }
     "Start" { Start-Emustar }
     "Stop" { Stop-Emustar }
+    "RequestNewDisk" { Request-NewEmustarDisk }
     "Reset" { Reset-Emustar }
     "OpenConsole" { Open-EmustarConsole }
     "CloseConsole" { Close-EmustarConsole }

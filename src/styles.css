@@ -1783,6 +1783,10 @@ input[type="text"] {
   gap: 10px;
 }
 
+.button-row.main-actions.has-new-disk {
+  grid-template-columns: 1.15fr 0.9fr 1fr 1.25fr;
+}
+
 .button-row.compact {
   grid-template-columns: repeat(3, 1fr);
 }
@@ -1790,6 +1794,7 @@ input[type="text"] {
 .primary,
 .secondary,
 .danger,
+.new-disk-button,
 .terminal-header button {
   min-height: 42px;
   padding: 0 13px;
@@ -1821,6 +1826,19 @@ input[type="text"] {
 .danger {
   background: #f87171;
   color: #220607;
+}
+
+.new-disk-button {
+  border: 1px solid rgba(96, 220, 255, 0.46);
+  background: #8be9ff;
+  color: #061016;
+}
+
+.new-disk-button:hover:not(:disabled),
+.new-disk-button:focus-visible:not(:disabled) {
+  outline: 0;
+  background: #b9f4ff;
+  box-shadow: 0 0 0 3px rgba(96, 220, 255, 0.18);
 }
 
 .display-choice-overlay {
@@ -4272,6 +4290,7 @@ pre {
   .nintendo-help-sections,
   .nintendo-runtime-specs,
   .button-row,
+  .button-row.main-actions.has-new-disk,
   .button-row.compact,
   .display-choice-actions,
   .emustar-host-share {
