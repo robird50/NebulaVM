@@ -147,6 +147,9 @@ const state = {
   nativeRuntimeName: null,
   nativeMonitorTimer: null,
   nativeStatusRefreshTimer: null,
+  nativeDisplayReconnectTimer: null,
+  nativeDisplayReconnectAttempts: 0,
+  nativeDisplayReconnectConfig: null,
   lastNativeStopLogKey: "",
   hyperVConsoleTimer: null,
   hyperVConsoleActive: false,
@@ -3294,6 +3297,8 @@ const sendVirtualKeyboardKey = async (key, { text = false } = {}) => {
 const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   if (!vncPath) return null;
 
+  clearNativeDisplayReconnect({ resetAttempts: false });
+  state.nativeDisplayReconnectConfig = { base, vncPath, runtimeName, password };
   if (runtimeName === "Hyper-V") {
     stopHyperVSetupConsole();
   }
@@ -3312,17 +3317,23 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
     rfb.sendCredentials({ password });
   });
   rfb.addEventListener("connect", () => {
+    clearNativeDisplayReconnect();
+    state.nativeDisplayReconnectConfig = { base, vncPath, runtimeName, password };
     status.remove();
     requestGuestDesktopResize(`${runtimeName} viewport`);
     log(`${runtimeName} display connected in browser.`);
     updateButtons();
   });
   rfb.addEventListener("disconnect", () => {
-    if (state.nativeRfb === rfb) {
+    const wasCurrentDisplay = state.nativeRfb === rfb;
+    if (wasCurrentDisplay) {
       state.nativeRfb = null;
     }
     if (state.emulator) {
       log(`${runtimeName} display disconnected.`);
+      if (wasCurrentDisplay && selectedNativeDisplayMode() === "viewport") {
+        scheduleNativeDisplayReconnect(`${runtimeName} display disconnected`);
+      }
     }
     updateButtons();
   });
@@ -3371,6 +3382,45 @@ const sendHyperVConsoleInput = async (payload) => {
   } catch (error) {
     log(`Hyper-V setup input failed: ${error.message}`);
   }
+};
+
+const clearNativeDisplayReconnect = ({ resetAttempts = true, clearConfig = false } = {}) => {
+  if (state.nativeDisplayReconnectTimer) {
+    window.clearTimeout(state.nativeDisplayReconnectTimer);
+    state.nativeDisplayReconnectTimer = null;
+  }
+  if (resetAttempts) {
+    state.nativeDisplayReconnectAttempts = 0;
+  }
+  if (clearConfig) {
+    state.nativeDisplayReconnectConfig = null;
+  }
+};
+
+const scheduleNativeDisplayReconnect = (reason = "Display disconnected") => {
+  const config = state.nativeDisplayReconnectConfig;
+  if (!state.emulator || !config?.vncPath || !isNativeMode()) return;
+  if (state.nativeDisplayReconnectTimer) return;
+
+  state.nativeDisplayReconnectAttempts += 1;
+  const delay = Math.min(10000, 1000 + state.nativeDisplayReconnectAttempts * 1500);
+  showNativeDisplayStatus(`${reason}. Reconnecting in ${Math.ceil(delay / 1000)} seconds...`);
+
+  state.nativeDisplayReconnectTimer = window.setTimeout(() => {
+    state.nativeDisplayReconnectTimer = null;
+    if (!state.emulator || state.nativeRfb || !isNativeMode()) return;
+    try {
+      state.nativeRfb = connectNativeDisplay(
+        config.base || state.nativeQemuApiBase || window.location.origin,
+        config.vncPath,
+        config.runtimeName || nativeRuntimeBrand(),
+        config.password || "",
+      );
+    } catch (error) {
+      log(`Display reconnect failed: ${error.message}`);
+      scheduleNativeDisplayReconnect("Display reconnect failed");
+    }
+  }, delay);
 };
 
 const startHyperVSetupConsole = (base) => {
@@ -4051,6 +4101,7 @@ const monitorNativeVm = () => {
       }
 
       clearNativeMonitor();
+      clearNativeDisplayReconnect({ clearConfig: true });
       stopHyperVSetupConsole();
       state.nativeRfb?.disconnect();
       state.nativeRfb = null;
@@ -4123,6 +4174,7 @@ const createDemoBootImage = () => {
 
 const stopEmulator = async () => {
   clearNativeMonitor();
+  clearNativeDisplayReconnect({ clearConfig: true });
   setVirtualKeyboardOpen(false);
   stopHyperVSetupConsole();
 
