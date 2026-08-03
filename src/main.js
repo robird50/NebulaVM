@@ -3313,10 +3313,25 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   configureRfbFor60Fps(rfb);
   rfb.viewOnly = false;
   rfb.focusOnClick = true;
+  let connected = false;
+  const connectTimeout = window.setTimeout(() => {
+    if (connected || state.nativeRfb !== rfb || !state.emulator) return;
+    state.nativeRfb = null;
+    log(`${runtimeName} display connection timed out.`);
+    try {
+      rfb.disconnect();
+    } catch {
+      // The reconnect loop below is the important recovery path here.
+    }
+    scheduleNativeDisplayReconnect(`${runtimeName} display connection timed out`);
+    updateButtons();
+  }, 15000);
   rfb.addEventListener("credentialsrequired", () => {
     rfb.sendCredentials({ password });
   });
   rfb.addEventListener("connect", () => {
+    connected = true;
+    window.clearTimeout(connectTimeout);
     clearNativeDisplayReconnect();
     state.nativeDisplayReconnectConfig = { base, vncPath, runtimeName, password };
     status.remove();
@@ -3325,6 +3340,7 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
     updateButtons();
   });
   rfb.addEventListener("disconnect", () => {
+    window.clearTimeout(connectTimeout);
     const wasCurrentDisplay = state.nativeRfb === rfb;
     if (wasCurrentDisplay) {
       state.nativeRfb = null;
