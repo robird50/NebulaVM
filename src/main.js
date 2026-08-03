@@ -4033,6 +4033,19 @@ const monitorNativeVm = () => {
         return;
       }
 
+      if (hyperVRuntime) {
+        try {
+          await wait(750);
+          const { data: confirmStatus } = await fetchHyperVJson("status");
+          if (confirmStatus.vm?.state === "Running") {
+            return;
+          }
+        } catch {
+          // A failed confirmation should not tear down an otherwise healthy session.
+          return;
+        }
+      }
+
       clearNativeMonitor();
       stopHyperVSetupConsole();
       state.nativeRfb?.disconnect();
@@ -5524,7 +5537,7 @@ const updateNativeStatus = async () => {
         const vmState = status.vm ? ` VM: ${status.vm.state}.` : "";
         els.nativeStatus.dataset.mode = "ready";
         els.nativeStatus.textContent = `Hyper-V ready${bridgeLabel}.${vmState}`;
-        if (state.emulator && await adoptRunningHyperVViewport(status, base)) {
+        if (await adoptRunningHyperVViewport(status, base)) {
           els.nativeStatus.textContent = `Hyper-V display is live in the browser viewport${bridgeLabel}.`;
         }
       } else if (status.restartRequired) {
