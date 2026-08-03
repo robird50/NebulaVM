@@ -2123,13 +2123,17 @@ const screenVisualViewportSize = () => {
       320,
       Math.round(visual?.height || window.innerHeight || document.documentElement.clientHeight || 0),
     ),
+    left: Math.max(0, Math.round(visual?.offsetLeft || 0)),
+    top: Math.max(0, Math.round(visual?.offsetTop || 0)),
   };
 };
 
 const setScreenVisualViewportSize = () => {
-  const { width, height } = screenVisualViewportSize();
+  const { width, height, left, top } = screenVisualViewportSize();
   document.documentElement.style.setProperty("--screen-visual-width", `${width}px`);
   document.documentElement.style.setProperty("--screen-visual-height", `${height}px`);
+  document.documentElement.style.setProperty("--screen-visual-left", `${left}px`);
+  document.documentElement.style.setProperty("--screen-visual-top", `${top}px`);
 };
 
 const viewportDesktopSize = () => {
@@ -6550,7 +6554,9 @@ const screenNativeFullscreenElement = () =>
 const isScreenNativeFullscreen = () => screenNativeFullscreenElement() === els.screenShell;
 const isScreenFullscreen = () => isScreenNativeFullscreen() || state.screenAppFullscreen;
 const prefersScreenAppFullscreen = () =>
-  isRemoteMode() && (isPublicMobileClient || window.matchMedia?.("(pointer: coarse), (max-width: 760px)")?.matches);
+  isMobileOrTabletDevice() ||
+  isPublicMobileClient ||
+  window.matchMedia?.("(pointer: coarse), (max-width: 760px)")?.matches;
 
 const updateFullscreenButton = () => {
   setScreenVisualViewportSize();

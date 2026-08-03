@@ -48,12 +48,17 @@ const setVisualViewportSize = () => {
     320,
     Math.round(visual?.height || window.innerHeight || document.documentElement.clientHeight || 0),
   );
+  const left = Math.max(0, Math.round(visual?.offsetLeft || 0));
+  const top = Math.max(0, Math.round(visual?.offsetTop || 0));
   document.documentElement.style.setProperty("--remote-visual-width", `${width}px`);
   document.documentElement.style.setProperty("--remote-visual-height", `${height}px`);
+  document.documentElement.style.setProperty("--remote-visual-left", `${left}px`);
+  document.documentElement.style.setProperty("--remote-visual-top", `${top}px`);
 };
 
 const refreshRemoteViewport = () => {
   setVisualViewportSize();
+  refreshRfbGeometry();
   if (mirrorActive) pollMirrorFrame(20);
 };
 
@@ -126,6 +131,23 @@ const configureRfbFor60Fps = (remoteRfb) => {
   remoteRfb.resizeSession = true;
   remoteRfb.qualityLevel = 8;
   remoteRfb.compressionLevel = 1;
+};
+
+const refreshRfbGeometry = () => {
+  const activeRfb = rfb;
+  if (!activeRfb) return;
+
+  configureRfbFor60Fps(activeRfb);
+  const refresh = () => {
+    if (rfb !== activeRfb) return;
+    activeRfb._updateClip?.();
+    activeRfb._updateScale?.();
+    activeRfb._requestRemoteResize?.();
+  };
+
+  window.requestAnimationFrame(refresh);
+  window.setTimeout(refresh, 120);
+  window.setTimeout(refresh, 350);
 };
 
 const clearMirror = () => {
@@ -392,6 +414,7 @@ const connectVnc = (base, token, status) => {
     message.hidden = true;
     stateLabel.textContent = "Live";
     reconnectButton.disabled = false;
+    refreshRfbGeometry();
   });
   rfb.addEventListener("disconnect", () => {
     showMessage(

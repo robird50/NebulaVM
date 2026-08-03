@@ -11,6 +11,8 @@
   color: #f4f8fc;
   --remote-visual-width: 100vw;
   --remote-visual-height: 100dvh;
+  --remote-visual-left: 0px;
+  --remote-visual-top: 0px;
 }
 
 * {
@@ -105,11 +107,8 @@ header h1 {
 }
 
 #remoteViewport canvas {
-  width: 100% !important;
-  height: 100% !important;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+  display: block;
+  touch-action: none;
 }
 
 .remote-console-bridge {
@@ -261,7 +260,10 @@ body.remote-app-fullscreen footer {
 body.remote-app-fullscreen #remoteViewport {
   position: fixed;
   z-index: 1000;
-  inset: 0;
+  top: var(--remote-visual-top);
+  left: var(--remote-visual-left);
+  right: auto;
+  bottom: auto;
   width: var(--remote-visual-width);
   max-width: var(--remote-visual-width);
   height: var(--remote-visual-height);
@@ -269,6 +271,7 @@ body.remote-app-fullscreen #remoteViewport {
   min-height: 0;
   border: 0;
   border-radius: 0;
+  transform: translateZ(0);
 }
 
 body.remote-app-fullscreen .remote-console-status,

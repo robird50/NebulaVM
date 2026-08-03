@@ -31,6 +31,8 @@
   color: #edf2f7;
   --screen-visual-width: 100vw;
   --screen-visual-height: 100dvh;
+  --screen-visual-left: 0px;
+  --screen-visual-top: 0px;
   font-synthesis: weight;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -2759,7 +2761,10 @@ body.screen-app-fullscreen .console-area {
 body.screen-app-fullscreen .screen-shell {
   position: fixed;
   z-index: 1000;
-  inset: 0;
+  top: var(--screen-visual-top);
+  left: var(--screen-visual-left);
+  right: auto;
+  bottom: auto;
   width: var(--screen-visual-width);
   max-width: var(--screen-visual-width);
   height: var(--screen-visual-height);
@@ -2767,6 +2772,7 @@ body.screen-app-fullscreen .screen-shell {
   min-height: 0;
   border: 0;
   border-radius: 0;
+  transform: translateZ(0);
 }
 
 .screen-container {
