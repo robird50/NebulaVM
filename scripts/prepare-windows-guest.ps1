@@ -42,6 +42,12 @@ if (Test-Path -LiteralPath $credentialsPath) {
   $credentials | ConvertTo-Json | Set-Content -LiteralPath $credentialsPath -Encoding ASCII
 }
 
+if ([string]::IsNullOrWhiteSpace([string]$credentials.adminPassword)) {
+  $credentials.adminPassword = "Nebula-" + ([guid]::NewGuid().ToString("N").Substring(0, 14)) + "!"
+  $credentials.passwordDisabled = $false
+  $credentials | ConvertTo-Json | Set-Content -LiteralPath $credentialsPath -Encoding ASCII
+}
+
 if (-not (Test-Path -LiteralPath $tightVncPath)) {
   Invoke-WebRequest -UseBasicParsing -Uri $tightVncUrl -OutFile $tightVncPath
 }
@@ -313,9 +319,19 @@ exit /b 0
     & reg.exe unload HKLM\NebulaOfflineSoftware | Out-Null
   }
 
-  $guestBcdboot = Join-Path $windowsDrive "Windows\System32\bcdboot.exe"
-  & $guestBcdboot "$windowsDrive\Windows" /s $systemDrive /f UEFI
-  if ($LASTEXITCODE -ne 0) {
+  $bcdbootCandidates = @(
+    (Join-Path $env:SystemRoot "System32\bcdboot.exe"),
+    (Join-Path $windowsDrive "Windows\System32\bcdboot.exe")
+  ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique
+  $bcdbootSucceeded = $false
+  foreach ($bcdbootPath in $bcdbootCandidates) {
+    & $bcdbootPath "$windowsDrive\Windows" /s $systemDrive /f UEFI
+    if ($LASTEXITCODE -eq 0) {
+      $bcdbootSucceeded = $true
+      break
+    }
+  }
+  if (-not $bcdbootSucceeded) {
     throw "BCDBOOT could not create the VM's UEFI boot files."
   }
 } finally {
