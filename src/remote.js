@@ -1,6 +1,38 @@
 import RFB from "@novnc/novnc";
 import "./remote.css";
 
+const netlifyPlaceholderHostname = "nebulavm.netlify.app";
+const isNetlifyPlaceholderDomain = window.location.hostname.toLowerCase() === netlifyPlaceholderHostname;
+if (isNetlifyPlaceholderDomain) {
+  document.documentElement.classList.add("netlify-domain-notice-page");
+  document.title = "NebulaVM official domain";
+  document.body.insertAdjacentHTML(
+    "afterbegin",
+    `
+      <main class="official-domain-notice" aria-labelledby="officialDomainTitle">
+        <section class="official-domain-notice-panel">
+          <img class="official-domain-notice-logo" src="/assets/nebulavm-logo.png" alt="" />
+          <p class="official-domain-notice-kicker">NebulaVM domain check</p>
+          <h1 id="officialDomainTitle">Yes&hellip; you caught us.</h1>
+          <p>
+            We do use Netlify to host our site&mdash;but what's the point of having two different domains?
+          </p>
+          <p>
+            Some parts of our backend are also configured specifically for <strong>nebulavm.online</strong>,
+            so using <strong>nebulavm.netlify.app</strong> may cause certain features to behave differently
+            or not work as intended.
+          </p>
+          <p>
+            For the full experience, visit <a href="https://nebulavm.online/">nebulavm.online</a>.
+            It's the official address, and honestly, it's quicker to type anyway.
+          </p>
+          <a class="official-domain-notice-button" href="https://nebulavm.online/">Open NebulaVM</a>
+        </section>
+      </main>
+    `,
+  );
+}
+
 const registryUrl = "https://nebulavm.online/.netlify/functions/host-registry";
 const viewport = document.querySelector("#remoteViewport");
 const message = document.querySelector("#remoteMessage");

@@ -57,6 +57,93 @@ body {
     linear-gradient(135deg, #0d1118 0%, #151b24 48%, #111820 100%);
 }
 
+html.netlify-domain-notice-page {
+  overflow: hidden;
+}
+
+html.netlify-domain-notice-page #app {
+  display: none;
+}
+
+.official-domain-notice {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: clamp(20px, 5vw, 52px);
+  background:
+    radial-gradient(circle at 50% 10%, rgba(96, 220, 255, 0.18), transparent 34%),
+    linear-gradient(135deg, #080d14 0%, #101822 52%, #090d13 100%);
+}
+
+.official-domain-notice-panel {
+  width: min(780px, 100%);
+  padding: clamp(24px, 5vw, 44px);
+  border: 1px solid rgba(96, 220, 255, 0.28);
+  border-radius: 16px;
+  background: rgba(12, 19, 28, 0.92);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42), 0 0 44px rgba(96, 220, 255, 0.12);
+}
+
+.official-domain-notice-logo {
+  display: block;
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+  margin-bottom: 20px;
+}
+
+.official-domain-notice-kicker {
+  margin: 0 0 10px;
+  color: #60dcff;
+  font-size: 0.78rem;
+  font-weight: 1000;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.official-domain-notice h1 {
+  margin: 0 0 18px;
+  font-family: "NebulaVM Display", "NebulaVM Main", sans-serif;
+  font-size: clamp(2.4rem, 8vw, 5rem);
+  line-height: 0.95;
+}
+
+.official-domain-notice p {
+  max-width: 66ch;
+  margin: 14px 0 0;
+  color: rgba(237, 242, 247, 0.84);
+  font-size: clamp(1rem, 2.8vw, 1.16rem);
+  line-height: 1.62;
+}
+
+.official-domain-notice strong {
+  color: #ffffff;
+}
+
+.official-domain-notice a {
+  color: #ffdd3d;
+  font-weight: 1000;
+  text-underline-offset: 4px;
+}
+
+.official-domain-notice-button {
+  display: inline-flex;
+  min-height: 46px;
+  margin-top: 26px;
+  padding: 0 18px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 221, 61, 0.5);
+  border-radius: 8px;
+  background: #ffdd3d;
+  color: #121212 !important;
+  text-decoration: none;
+  box-shadow: 0 10px 30px rgba(255, 221, 61, 0.16);
+}
+
 button,
 input,
 select {
