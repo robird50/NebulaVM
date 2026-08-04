@@ -629,6 +629,54 @@ function Set-InstalledWindowsBoot {
   }
 }
 
+function Get-EmustarVmIdText {
+  param([object]$Vm)
+
+  if (-not $Vm) {
+    return ""
+  }
+
+  foreach ($propertyName in @("Id", "VMId")) {
+    if ($Vm.PSObject.Properties.Name -contains $propertyName) {
+      $value = $Vm.$propertyName
+      if ($value -is [guid]) {
+        return $value.Guid.ToString().ToLowerInvariant()
+      }
+      if ($value) {
+        return ([string]$value).Trim("{}").ToLowerInvariant()
+      }
+    }
+  }
+
+  return ""
+}
+
+function Stop-EmustarWorkerProcess {
+  param([object]$Vm)
+
+  $vmIdText = Get-EmustarVmIdText -Vm $Vm
+  if ([string]::IsNullOrWhiteSpace($vmIdText)) {
+    return $false
+  }
+
+  $workers = Get-CimInstance Win32_Process -Filter "Name = 'vmwp.exe'" -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.CommandLine -and $_.CommandLine.ToLowerInvariant().Contains($vmIdText)
+    }
+
+  $stoppedAny = $false
+  foreach ($worker in $workers) {
+    try {
+      Stop-Process -Id $worker.ProcessId -Force -ErrorAction Stop
+      $stoppedAny = $true
+    } catch {
+      $warnings.Add("NebulaVM could not clear stuck Hyper-V worker process $($worker.ProcessId): $($_.Exception.Message)")
+    }
+  }
+
+  return $stoppedAny
+}
+
 function Stop-EmustarForConfiguration {
   param([object]$Vm)
 
@@ -659,6 +707,23 @@ function Stop-EmustarForConfiguration {
     }
 
     Start-Sleep -Seconds 1
+  }
+
+  if ($lastState -eq "Stopping") {
+    $current = Get-VM -Name $Vm.Name -ErrorAction SilentlyContinue
+    $warnings.Add("Hyper-V kept EMUSTAR in 'Stopping', so NebulaVM is clearing the stuck worker for this VM only.")
+    $clearedWorker = Stop-EmustarWorkerProcess -Vm $current
+    if ($clearedWorker) {
+      $recoveryDeadline = (Get-Date).AddSeconds(30)
+      while ((Get-Date) -lt $recoveryDeadline) {
+        $current = Get-VM -Name $Vm.Name -ErrorAction SilentlyContinue
+        if (-not $current -or $current.State.ToString() -eq "Off") {
+          return $current
+        }
+        $lastState = $current.State.ToString()
+        Start-Sleep -Seconds 1
+      }
+    }
   }
 
   throw "EMUSTAR is still in Hyper-V state '$lastState'. Wait a few seconds or end the session, then launch again."
@@ -929,7 +994,7 @@ function Stop-Emustar {
   Assert-HyperVReady
   $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
   if ($vm -and $vm.State -ne "Off") {
-    Stop-VM -VM $vm -Force -TurnOff
+    $vm = Stop-EmustarForConfiguration -Vm $vm
   }
   return [ordered]@{ ok = $true; vm = Get-VmSnapshot -Vm (Get-VM -Name $vmName -ErrorAction SilentlyContinue) }
 }
