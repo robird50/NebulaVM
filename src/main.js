@@ -74,14 +74,6 @@ const isHistoricalNetlifyDeploy =
   !hostedLauncherHostnames.has(window.location.hostname);
 const isNetlifyLauncher =
   /\.netlify\.app$/i.test(window.location.hostname) || hostedLauncherHostnames.has(window.location.hostname);
-const PUBLIC_HOST_COMPUTE_MODES = new Set([
-  "emustar-hyperv",
-  "qemu-native-x64",
-  "qemu-native-arm64-windows",
-  "qemu-native-arm64-ubuntu",
-]);
-const publicHostComputeModeAllowed = (value) =>
-  !isNetlifyLauncher || !PUBLIC_HOST_COMPUTE_MODES.has(value);
 
 if (isNetlifyPlaceholderDomain) {
   document.documentElement.classList.add("netlify-domain-notice-page");
@@ -2484,12 +2476,6 @@ const selectStoredIso = async (item, { silent = false } = {}) => {
 };
 
 const selectWindows11Template = async ({ boot = false } = {}) => {
-  if (isNetlifyLauncher) {
-    log(
-      "Windows 11 Template is local-owner only because Hyper-V would use the NebulaVM host's RAM and disk.",
-    );
-    return;
-  }
   if (isMobileOrTabletDevice()) {
     log("Windows 11 Template is available on desktop and laptop browsers only.");
     return;
@@ -3206,13 +3192,18 @@ const connectNetlifyHostRegistry = async () => {
     return host;
   }
 
+  if (!isHyperVMode()) {
+    els.emulatorMode.value = "emustar-hyperv";
+    syncEmulatorDropdown();
+    updateBackendUi();
+  }
+
   state.nativeQemuApiAvailable = true;
   state.nativeQemuReady = true;
-  if (isHyperVMode()) {
-    els.nativeStatus.dataset.mode = "ready";
-    els.nativeStatus.textContent =
-      "Hyper-V launches are local-owner only. Public visitors can connect to an active Remote VM stream.";
-  }
+  els.nativeStatus.dataset.mode = "ready";
+  els.nativeStatus.textContent = host.stale
+    ? "Found a registered Windows host, but it may be stale. Choose an ISO before launching Hyper-V."
+    : "Found the current Windows Hyper-V host. Choose an ISO before launching Hyper-V.";
   updateButtons();
   return host;
 };
@@ -3986,20 +3977,16 @@ const syncEmulatorDropdown = () => {
 
   els.emulatorMenuOptions.forEach((option) => {
     const allowedOnMobile = !isPublicMobileClient || isPublicMobileModeAllowed(option.dataset.emulatorOption);
-    const allowedOnPublicSite = publicHostComputeModeAllowed(option.dataset.emulatorOption);
-    const allowed = allowedOnMobile && allowedOnPublicSite;
-    option.hidden = !allowed;
-    option.disabled = !allowed;
+    option.hidden = !allowedOnMobile;
+    option.disabled = !allowedOnMobile;
     const selected = option.dataset.emulatorOption === selectedValue;
     option.classList.toggle("is-selected", selected);
     option.setAttribute("aria-selected", String(selected));
   });
   [...els.emulatorMode.options].forEach((option) => {
     const allowedOnMobile = !isPublicMobileClient || isPublicMobileModeAllowed(option.value);
-    const allowedOnPublicSite = publicHostComputeModeAllowed(option.value);
-    const allowed = allowedOnMobile && allowedOnPublicSite;
-    option.hidden = !allowed;
-    option.disabled = !allowed;
+    option.hidden = !allowedOnMobile;
+    option.disabled = !allowedOnMobile;
   });
 };
 
@@ -5598,14 +5585,6 @@ const bootAndroid = async () => {
 };
 
 const bootEmulator = async () => {
-  if (!publicHostComputeModeAllowed(els.emulatorMode.value)) {
-    els.emulatorMode.value = "v86";
-    updateBackendUi();
-    log(
-      "Public host-backed launches are disabled to protect the NebulaVM host. Switched to browser-local v86.",
-    );
-    return;
-  }
   if (isPublicMobileClient && !isPublicMobileModeAllowed()) {
     els.emulatorMode.value = "remote-vm";
     updateBackendUi();
@@ -5947,9 +5926,6 @@ const updateBrowserQemuCapabilities = async () => {
 };
 
 const updateBackendUi = () => {
-  if (!publicHostComputeModeAllowed(els.emulatorMode.value)) {
-    els.emulatorMode.value = "v86";
-  }
   if (isPublicMobileClient && !isPublicMobileModeAllowed()) {
     els.emulatorMode.value = "remote-vm";
   }
@@ -5973,7 +5949,7 @@ const updateBackendUi = () => {
   document.documentElement.classList.toggle("android-mode", androidMode);
   els.experimentalWarningPill.hidden = !emustarMode && !androidMode && !remoteMode;
   els.emustarInfoLink.hidden = !emustarMode;
-  els.storedImagesControl.hidden = isNetlifyLauncher || androidMode || nintendoMode;
+  els.storedImagesControl.hidden = androidMode || nintendoMode;
   els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || !emustarMode;
   els.dropZone.hidden = androidMode;
   els.nintendoHelpLink.hidden = !nintendoMode || androidMode;
