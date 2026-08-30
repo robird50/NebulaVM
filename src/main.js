@@ -187,6 +187,7 @@ const state = {
   nativeDisplayReconnectConfig: null,
   lastNativeStopLogKey: "",
   hyperVAutopilotRecoveryAttempted: false,
+  hyperVAutopilotRecoveryInProgress: false,
   hyperVAutopilotRecoveryFailure: "",
   hyperVConsoleTimer: null,
   hyperVConsoleActive: false,
@@ -4405,6 +4406,10 @@ const monitorNativeVm = () => {
         return;
       }
 
+      if (hyperVRuntime && state.hyperVAutopilotRecoveryInProgress) {
+        return;
+      }
+
       if (hyperVRuntime) {
         try {
           await wait(750);
@@ -4421,6 +4426,7 @@ const monitorNativeVm = () => {
 
       if (hyperVRuntime && !state.hyperVAutopilotRecoveryAttempted) {
         state.hyperVAutopilotRecoveryAttempted = true;
+        state.hyperVAutopilotRecoveryInProgress = true;
         log("NebulaVM Autopilot: Hyper-V is confirmed stopped unexpectedly. Diagnosing and attempting one safe restart.");
         showNativeDisplayStatus("NebulaVM Autopilot is repairing the stopped Hyper-V session...");
         try {
@@ -4435,9 +4441,11 @@ const monitorNativeVm = () => {
           }
           state.hyperVAutopilotRecoveryFailure = "";
           await adoptRunningHyperVViewport(recovery, base);
+          state.hyperVAutopilotRecoveryInProgress = false;
           showNativeDisplayStatus("NebulaVM Autopilot restored the Hyper-V display.");
           return;
         } catch (error) {
+          state.hyperVAutopilotRecoveryInProgress = false;
           state.hyperVAutopilotRecoveryFailure = error.message || "the automatic restart failed.";
           log(`NebulaVM Autopilot could not restore Hyper-V: ${state.hyperVAutopilotRecoveryFailure}`);
         }
@@ -4656,6 +4664,7 @@ const prepareBootUi = () => {
     : `${selectedMemoryMb()} MB RAM`;
   setPowerState("Booting", "booting");
   state.hyperVAutopilotRecoveryAttempted = false;
+  state.hyperVAutopilotRecoveryInProgress = false;
   state.hyperVAutopilotRecoveryFailure = "";
   state.startedAt = Date.now();
   clearStatsTimer();
