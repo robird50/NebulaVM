@@ -361,7 +361,6 @@ app.innerHTML = `
               <option value="qemu-native-arm64-windows">QEMU ARM64 / Windows</option>
               <option value="qemu-native-arm64-ubuntu">QEMU ARM64 / Ubuntu</option>
               <option value="remote-vm">Remote VM / browser stream</option>
-              <option value="android">Android</option>
               <option value="nintendo">Nintendo</option>
             </select>
             <div class="emulator-dropdown">
@@ -407,10 +406,6 @@ app.innerHTML = `
                   <img class="emulator-menu-icon" src="/assets/remote-vm-icon.png" alt="" />
                   <span>Remote VM / browser stream</span>
                 </button>
-                <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="android">
-                  <img class="emulator-menu-icon" src="/assets/android-icon.png" alt="" />
-                  <span>Android</span>
-                </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="nintendo">
                   <img class="emulator-menu-icon" src="/assets/nintendo-icon.webp" alt="" />
                   <span>Nintendo</span>
@@ -424,8 +419,7 @@ app.innerHTML = `
 
           <section class="android-config full-span" id="androidConfig" hidden>
             <p class="android-public-limits">
-              Public mobile mode: Android or Remote VM. Android uses adaptive RAM, up to 2 CPU
-              cores, 4 GB storage, portrait Device view, and a 20-minute session limit.
+              Android is disabled on the public site because it runs on the NebulaVM host instead of the visitor's device.
             </p>
             <label class="field full-span">
               <span>Genuine Android system image</span>
@@ -973,18 +967,18 @@ app.innerHTML = `
       <div class="faq-sections">
         <section class="faq-section">
           <h3>General</h3>
-          <details><summary>What is NebulaVM?</summary><p>NebulaVM is an open-source web interface for launching and controlling virtual machines and emulators. Lightweight guests can run with browser technology, while modern 64-bit systems, Hyper-V, QEMU, and Android use a configured host computer.</p></details>
+          <details><summary>What is NebulaVM?</summary><p>NebulaVM is an open-source web interface for launching and controlling virtual machines and emulators. Lightweight guests and game emulators can run with browser technology on the visitor's device, while Hyper-V, Remote VM, and native QEMU depend on a configured host computer.</p></details>
           <details><summary>Is NebulaVM really free?</summary><p>Yes. NebulaVM has no subscriptions, premium plans, hidden fees, or software paywalls. You are still responsible for internet access, computer hardware, and any operating-system licenses you use.</p></details>
-          <details><summary>Do I need to install anything?</summary><p>Not for lightweight browser-compatible guests or for connecting to an already configured NebulaVM host. Running Windows 11, Android, Hyper-V, or native QEMU requires the host computer to have the matching virtualization tools installed and NebulaVM Host running.</p></details>
+          <details><summary>Do I need to install anything?</summary><p>Not for lightweight browser-compatible guests or for connecting to an already configured NebulaVM host. Running Windows 11, Hyper-V, Remote VM, or native QEMU requires a host computer with the matching virtualization tools installed and NebulaVM Host running.</p></details>
           <details><summary>Is NebulaVM open source?</summary><p>Yes. The source code is public on GitHub under the MIT License. Use the Source Code link in the footer to inspect it.</p></details>
-          <details><summary>Which operating systems can I run?</summary><p>Support depends on the selected runtime and guest architecture. Legacy x86 systems, DOS, lightweight Linux distributions, modern Windows through a native host, and installed Android system images are supported to different degrees.</p></details>
+          <details><summary>Which operating systems can I run?</summary><p>Support depends on the selected runtime and guest architecture. Legacy x86 systems, DOS, lightweight Linux distributions, browser game emulators, and modern Windows through a host-backed runtime are supported to different degrees.</p></details>
         </section>
 
         <section class="faq-section">
           <h3>Compatibility</h3>
           <details><summary>Does NebulaVM work on Chromebooks?</summary><p>Yes, a Chromebook can act as the browser client. Host-backed emulators still run on the connected Windows host, which must remain powered on, online, and running NebulaVM Host.</p></details>
-          <details><summary>Can I use NebulaVM on Windows, macOS, or Linux?</summary><p>The web interface works in supported browsers on all three. Native host features currently depend on the runtimes available and configured on the host; Hyper-V and the current Android host are Windows-focused.</p></details>
-          <details><summary>Does it work on mobile devices?</summary><p>Yes, the public mobile build provides restricted Android and Remote VM modes for modern phones and tablets. Android remains experimental and uses lower host resource limits. ISO, Hyper-V, QEMU, and AVD Management controls are unavailable on public mobile.</p></details>
+          <details><summary>Can I use NebulaVM on Windows, macOS, or Linux?</summary><p>The web interface works in supported browsers on all three. Browser-local modes use the visitor's own device resources. Host-backed features depend on the runtimes available and configured on the host.</p></details>
+          <details><summary>Does it work on mobile devices?</summary><p>Yes, the public mobile build focuses on Remote VM access for modern phones and tablets. Android is disabled publicly because it consumes host RAM. ISO, Hyper-V setup, native QEMU, and AVD Management controls are unavailable on public mobile.</p></details>
           <details><summary>Which browsers are supported?</summary><p>Current Chromium-based browsers such as Chrome and Edge provide the best-tested experience. Other modern browsers may work, but fullscreen, large-file handling, keyboard capture, and streamed input can behave differently.</p></details>
         </section>
 
@@ -993,9 +987,9 @@ app.innerHTML = `
           <details><summary>Can I boot my own ISO?</summary><p>Yes. Choose or drop a bootable ISO, select a compatible emulator and architecture, then launch it. Host-backed modes stage the ISO on the host before booting.</p></details>
           <details><summary>Can I install Windows?</summary><p>Yes, with a compatible Windows ISO and a host-backed 64-bit runtime such as Hyper-V or native QEMU. Windows licensing and system requirements still apply.</p></details>
           <details><summary>Does NebulaVM support Linux?</summary><p>Yes. Lightweight Linux images may run in the browser runtime, while larger or 64-bit distributions generally work better through native QEMU or another suitable host runtime.</p></details>
-          <details><summary>Can I save my virtual machine?</summary><p>Persistent virtual disks and saved state are available only where the selected runtime supports them. Ending a temporary Android session deletes its private AVD, while Hyper-V and QEMU can use persistent virtual disks.</p></details>
+          <details><summary>Can I save my virtual machine?</summary><p>Persistent virtual disks and saved state are available only where the selected runtime supports them. Hyper-V and QEMU can use virtual disks, but public host-backed disks may be cleaned up to protect host storage.</p></details>
           <details><summary>Can I upload multiple ISOs?</summary><p>You can keep up to two stored ISOs per approved browser device on the host. Only one boot image is selected for a VM session at a time.</p></details>
-          <details><summary>What hardware settings can I customize?</summary><p>Available controls depend on the runtime and include processor target, processor cores, memory, storage size, video memory, boot order, networking, and Android orientation.</p></details>
+          <details><summary>What hardware settings can I customize?</summary><p>Available controls depend on the runtime and include processor target, processor cores, memory, storage size, video memory, boot order, and networking.</p></details>
           <details><summary>Does NebulaVM support 64-bit operating systems?</summary><p>Yes through compatible native or host-backed runtimes. The lightweight browser runtime has stricter architecture and memory limits and is not a replacement for native 64-bit virtualization.</p></details>
         </section>
 
@@ -1018,7 +1012,7 @@ app.innerHTML = `
 
         <section class="faq-section">
           <h3>Troubleshooting</h3>
-          <details><summary>My VM is stuck on a black screen. What should I do?</summary><p>Check the Mission or Android log first. Wait through an initial cold boot, confirm the host has free memory, try a lower resource setting, and restart the session. If the display never appears, end the session before launching it again.</p></details>
+          <details><summary>My VM is stuck on a black screen. What should I do?</summary><p>Check the Mission log first. Wait through an initial cold boot, confirm the host has free memory, try a lower resource setting, and restart the session. If the display never appears, end the session before launching it again.</p></details>
           <details><summary>Why won't my keyboard or mouse work?</summary><p>Click or tap inside the viewport to focus it. Make sure the VM has finished booting and that the session belongs to the current browser. Fullscreen can improve keyboard capture; mobile input remains experimental.</p></details>
           <details><summary>Why can't I connect to my host?</summary><p>The host may be asleep, offline, blocked by its firewall or network, running an old NebulaVM version, or missing the host service. Keep NebulaVM Host open and confirm that the site reports the host as reachable.</p></details>
           <details><summary>What does "Host Offline" mean?</summary><p>The website cannot currently reach the computer that runs the native emulator. The host must be powered on, connected to the internet, and running the matching NebulaVM Host service.</p></details>
@@ -1614,7 +1608,7 @@ const applyMobileDevMode = () => {
   document.documentElement.classList.add("mobile-dev-bypass");
   document.documentElement.classList.toggle("mobile-public", isPublicMobileClient);
   if (isMobileOrTabletDevice() && !state.running) {
-    els.emulatorMode.value = isPublicMobileClient ? "android" : "v86";
+    els.emulatorMode.value = isPublicMobileClient ? "remote-vm" : "v86";
     els.androidCores.value = "2";
     els.androidMemory.value = "0";
     els.androidStorage.value = "4";
@@ -3864,7 +3858,7 @@ const isRemoteMode = () => els.emulatorMode.value === "remote-vm";
 const isAndroidMode = () => els.emulatorMode.value === "android";
 const isNintendoMode = () => els.emulatorMode.value === "nintendo";
 const isPublicMobileModeAllowed = (value = els.emulatorMode.value) =>
-  value === "android" || value === "remote-vm";
+  value === "remote-vm";
 const isNativeQemuMode = () => isStandaloneQemuMode();
 const isQemuMode = () => isBrowserQemuMode() || isNativeQemuMode();
 const isExternalMode = () => isQemuMode() || isHyperVMode() || isRemoteMode();
@@ -5592,9 +5586,9 @@ const bootAndroid = async () => {
 
 const bootEmulator = async () => {
   if (isPublicMobileClient && !isPublicMobileModeAllowed()) {
-    els.emulatorMode.value = "android";
+    els.emulatorMode.value = "remote-vm";
     updateBackendUi();
-    log("Public mobile mode supports Android and Remote VM only.");
+    log("Public mobile mode supports Remote VM only. Android is disabled because it uses host RAM.");
     return;
   }
   if (!isAndroidMode() && !isNintendoMode() && !isNativeMode() && !isRemoteMode() && !state.isoFile) return;
@@ -5933,7 +5927,7 @@ const updateBrowserQemuCapabilities = async () => {
 
 const updateBackendUi = () => {
   if (isPublicMobileClient && !isPublicMobileModeAllowed()) {
-    els.emulatorMode.value = "android";
+    els.emulatorMode.value = "remote-vm";
   }
   const qemuMode = isQemuMode();
   const nativeMode = isNativeMode();

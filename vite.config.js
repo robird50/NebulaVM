@@ -42,6 +42,7 @@ const reportGmailAccount = "nebulavmsupport@gmail.com";
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
 const publicUrlPath = resolve(workspaceDir, ".nebulavm-public-url");
 const guestCredentialsPath = resolve(workspaceDir, ".nebulavm-guest-credentials.json");
+const publicAndroidEnabled = false;
 
 const localEnvValue = (name) => {
   if (process.env[name]) return process.env[name];
@@ -3033,6 +3034,19 @@ const nativeQemuPlugin = () => ({
 
       const publicMobileRequest = isPublicMobileRequest(req);
 
+      if (
+        !publicAndroidEnabled &&
+        (isAndroidApi || isAndroidStudioApi) &&
+        !(req.method === "POST" && url.pathname === "/api/android-emulator/stop")
+      ) {
+        json(res, 410, {
+          ok: false,
+          available: false,
+          error: "Android is disabled on the public NebulaVM host because it uses host RAM.",
+        });
+        return;
+      }
+
       if (isMobileDevUnlockApi) {
         try {
           const body = await readJsonBody(req);
@@ -3216,7 +3230,7 @@ const nativeQemuPlugin = () => ({
       ) {
         json(res, 403, {
           ok: false,
-          error: "Public mobile mode allows only the restricted Android runtime.",
+          error: "Public mobile mode can only connect to an existing Remote VM stream.",
         });
         return;
       }
