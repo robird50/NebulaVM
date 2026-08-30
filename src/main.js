@@ -216,6 +216,7 @@ const state = {
   windowsTemplateLoading: false,
   windowsTemplateSelected: false,
   windowsTemplateDiskPath: "",
+  bootInProgress: false,
   androidView: "home",
   androidHistory: ["home"],
   androidRecents: [],
@@ -4241,6 +4242,8 @@ const updateButtons = (busy = false) => {
   els.bootButton.disabled =
     !hasBootMedia ||
     Boolean(state.emulator) ||
+    state.bootInProgress ||
+    state.windowsTemplateLoading ||
     mediaWarningBlocksBoot ||
     nativeUnavailable ||
     windowsCredentialsBlocked ||
@@ -5780,17 +5783,24 @@ const bootEmulator = async () => {
     return;
   }
 
-  const qemuDisplayMode = isNativeMode() ? selectedNativeDisplayMode() : "viewport";
-
-  await stopEmulator();
-
-  prepareBootUi();
-  log("Creating virtual machine.");
-  if (!isRemoteMode() && !isAndroidMode() && !isNintendoMode()) {
-    log(`Hardware request: ${selectedProcessorSpeedGhz()} GHz CPU target, ${selectedMemoryMb()} MB RAM.`);
+  if (state.bootInProgress) {
+    log("A boot request is already in progress.");
+    return;
   }
 
+  state.bootInProgress = true;
+  updateButtons(true);
   try {
+    const qemuDisplayMode = isNativeMode() ? selectedNativeDisplayMode() : "viewport";
+
+    await stopEmulator();
+
+    prepareBootUi();
+    log("Creating virtual machine.");
+    if (!isRemoteMode() && !isAndroidMode() && !isNintendoMode()) {
+      log(`Hardware request: ${selectedProcessorSpeedGhz()} GHz CPU target, ${selectedMemoryMb()} MB RAM.`);
+    }
+
     if (isAndroidMode()) {
       await bootAndroid();
     } else if (isNintendoMode()) {
@@ -5810,6 +5820,9 @@ const bootEmulator = async () => {
   } catch (error) {
     log(`Boot failed: ${error.message}`);
     await stopEmulator();
+  } finally {
+    state.bootInProgress = false;
+    updateButtons();
   }
 };
 
@@ -6178,7 +6191,7 @@ const updateBackendUi = () => {
   const currentMemoryMb = selectedMemoryMb();
   if (isNativeWindowsArm64Mode() && currentMemoryMb < 4096) {
     els.memorySize.value = "4294967296";
-  } else if (nativeMode && currentMemoryMb < 2048) {
+  } else if (nativeMode && !emustarMode && currentMemoryMb < 2048) {
     els.memorySize.value = "2147483648";
   }
   syncProcessorSpeedSlider();
