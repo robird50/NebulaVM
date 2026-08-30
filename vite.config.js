@@ -1217,6 +1217,7 @@ let activeNativeRuntimeName = null;
 let hyperVRemoteSessionId = "";
 let hyperVRemoteSessionStartedAt = "";
 let hyperVStatusCache = { expiresAt: 0, data: null };
+let hyperVStatusRevision = 0;
 let hyperVStartTask = null;
 let lastHyperVStart = null;
 let androidRuntime = null;
@@ -2634,7 +2635,10 @@ const withHyperVDisplayStatus = async (status) => {
   return enrichedStatus;
 };
 
-const cacheHyperVStatus = (status, ttlMs = 8000) => {
+const cacheHyperVStatus = (status, ttlMs = 8000, expectedRevision = null) => {
+  if (expectedRevision !== null && expectedRevision !== hyperVStatusRevision) {
+    return hyperVStatusCache.data || status;
+  }
   hyperVStatusCache = {
     expiresAt: Date.now() + ttlMs,
     data: status,
@@ -2643,6 +2647,7 @@ const cacheHyperVStatus = (status, ttlMs = 8000) => {
 };
 
 const clearHyperVStatusCache = () => {
+  hyperVStatusRevision += 1;
   hyperVStatusCache = { expiresAt: 0, data: null };
 };
 
@@ -2666,13 +2671,21 @@ const withHyperVAutopilotAction = (result, action) => ({
   ],
 });
 
-const getHyperVStatus = async ({ maxAgeMs = 8000, timeoutMs = 25000 } = {}) => {
-  if (hyperVStatusCache.data && Date.now() < hyperVStatusCache.expiresAt) {
+const getHyperVStatus = async ({ maxAgeMs = 8000, timeoutMs = 25000, force = false } = {}) => {
+  if (!force && hyperVStatusCache.data && Date.now() < hyperVStatusCache.expiresAt) {
     return hyperVStatusCache.data;
   }
 
-  const status = await withHyperVDisplayStatus(await runHyperVAction("Status", {}, timeoutMs));
-  return cacheHyperVStatus(status, maxAgeMs);
+  const revision = hyperVStatusRevision;
+  const rawStatus = await runHyperVAction("Status", {}, timeoutMs);
+  if (revision !== hyperVStatusRevision && hyperVStatusCache.data) {
+    return hyperVStatusCache.data;
+  }
+  const status = await withHyperVDisplayStatus(rawStatus);
+  if (revision !== hyperVStatusRevision && hyperVStatusCache.data) {
+    return hyperVStatusCache.data;
+  }
+  return cacheHyperVStatus(status, maxAgeMs, revision);
 };
 
 const normalizeArch = (arch) => (arch === "aarch64" ? "aarch64" : "x86_64");
@@ -3523,7 +3536,11 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") {
-          json(res, 200, await getHyperVStatus());
+          json(
+            res,
+            200,
+            await getHyperVStatus({ force: url.searchParams.get("fresh") === "1" }),
+          );
           return;
         }
 
@@ -3594,6 +3611,7 @@ const nativeQemuPlugin = () => ({
             hyperVRemoteSessionId = randomBytes(12).toString("hex");
             hyperVRemoteSessionStartedAt = new Date().toISOString();
             actionResult.replacedRuntime = replacedRuntime;
+            clearHyperVStatusCache();
             return cacheHyperVStatus(await withHyperVDisplayStatus(actionResult));
           })();
           hyperVStartTask = { key: requestKey, promise: startPromise };

@@ -4403,8 +4403,9 @@ const monitorNativeVm = () => {
       if (hyperVRuntime) {
         try {
           await wait(750);
-          const { data: confirmStatus } = await fetchHyperVJson("status");
+          const { data: confirmStatus } = await fetchHyperVJson("status?fresh=1");
           if (confirmStatus.vm?.state === "Running") {
+            log("NebulaVM Autopilot: rejected a stale stopped-status response after confirming Hyper-V is still running.");
             return;
           }
         } catch {

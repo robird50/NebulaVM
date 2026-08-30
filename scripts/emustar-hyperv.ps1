@@ -173,7 +173,7 @@ function Get-LatestHyperVEvent {
 
   if ($PowerOnly) {
     $preferred = $events |
-      Where-Object { $_.Id -in @(12030, 18500, 18502, 18601, 3050, 3122) } |
+      Where-Object { $_.Id -in @(12030, 18502, 3050, 3122) } |
       Sort-Object TimeCreated -Descending |
       Select-Object -First 1
   } else {
@@ -186,7 +186,7 @@ function Get-LatestHyperVEvent {
       Select-Object -First 1
   }
 
-  if (-not $preferred) {
+  if (-not $preferred -and -not $PowerOnly) {
     $preferred = $events | Sort-Object TimeCreated -Descending | Select-Object -First 1
   }
 
