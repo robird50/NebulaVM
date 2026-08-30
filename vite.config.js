@@ -431,6 +431,9 @@ const storedIsoDirectory = resolve(isoImportDirectory, "stored-isos");
 const storedIsoManifestPath = resolve(storedIsoDirectory, "stored-isos.json");
 const storedIsoLimit = 2;
 const storedIsoTtlMs = 3 * 24 * 60 * 60 * 1000;
+const storedIsoTotalLimitBytes = 40 * 1024 * 1024 * 1024;
+const browserUploadTtlMs = 2 * 60 * 60 * 1000;
+const hostStorageReserveBytes = 25 * 1024 * 1024 * 1024;
 const templateIsoDirectory = resolve(workspaceDir, "vm-disks", "templates");
 const templateDiskDirectory = resolve(workspaceDir, "vm-disks", "emustar-hyperv", "disks");
 const windows11TemplateIsoPath = resolve(templateIsoDirectory, "windows-11-template.iso");
@@ -493,6 +496,69 @@ const isPathInsideDirectory = (candidatePath, parentDirectory) => {
   const resolvedParent = resolve(parentDirectory);
   const root = resolvedParent.endsWith(sep) ? resolvedParent : `${resolvedParent}${sep}`;
   return resolvedCandidate.toLowerCase().startsWith(root.toLowerCase());
+};
+
+const formatBytes = (bytes) => {
+  const value = Math.max(0, Number(bytes) || 0);
+  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (value >= 1024 * 1024) return `${Math.ceil(value / 1024 / 1024)} MB`;
+  if (value >= 1024) return `${Math.ceil(value / 1024)} KB`;
+  return `${Math.ceil(value)} bytes`;
+};
+
+const hostDiskFreeBytes = (targetPath = workspaceDir) => {
+  if (process.platform !== "win32") return Number.POSITIVE_INFINITY;
+  const driveName = resolve(targetPath).match(/^([a-zA-Z]):[\\/]/)?.[1]?.toUpperCase() || "C";
+  try {
+    const output = execFileSync(
+      "powershell.exe",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `$drive = Get-PSDrive -Name '${driveName}' -ErrorAction Stop; [int64]$drive.Free`,
+      ],
+      { encoding: "utf8", timeout: 10000, windowsHide: true },
+    ).trim();
+    const value = Number(output.match(/\d+/)?.[0] || 0);
+    return Number.isFinite(value) && value >= 0 ? value : Number.POSITIVE_INFINITY;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+};
+
+const ensureHostStorageReserve = (requiredBytes = 0, action = "continue") => {
+  const needed = Math.max(0, Number(requiredBytes) || 0);
+  const freeBytes = hostDiskFreeBytes(workspaceDir);
+  if (!Number.isFinite(freeBytes)) return;
+  if (freeBytes - needed >= hostStorageReserveBytes) return;
+
+  const shortfall = hostStorageReserveBytes + needed - freeBytes;
+  const error = new Error(
+    `NebulaVM host storage is too low to ${action}. The public host keeps ${formatBytes(hostStorageReserveBytes)} free so uploads and VMs cannot fill the disk. Free about ${formatBytes(shortfall)} on the Windows host, then try again.`,
+  );
+  error.statusCode = 507;
+  throw error;
+};
+
+const cleanupBrowserIsoUploadSessions = (excludeSessionId = "") => {
+  if (!existsSync(browserUploadDirectory)) return;
+  const cutoff = Date.now() - browserUploadTtlMs;
+  const excluded = sanitizeSessionId(excludeSessionId);
+  for (const entry of readdirSync(browserUploadDirectory, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === excluded) continue;
+    const uploadPath = resolve(browserUploadDirectory, entry.name);
+    if (!isPathInsideDirectory(uploadPath, browserUploadDirectory)) continue;
+    try {
+      const stats = statSync(uploadPath);
+      if (stats.mtimeMs <= cutoff) {
+        rmSync(uploadPath, { recursive: true, force: true });
+      }
+    } catch {
+      // Upload cleanup is best effort; active uploads are protected by session IDs.
+    }
+  }
 };
 
 const storedIsoFileKey = ({ fileKey, name, size }) =>
@@ -654,6 +720,37 @@ const cleanupStoredIsos = () => {
     kept.push(item);
   }
 
+  let storedBytes = kept.reduce((total, item) => total + (Number(item.size) || 0), 0);
+  if (storedBytes > storedIsoTotalLimitBytes) {
+    const oldestFirst = [...kept]
+      .map((item, index) => ({ item, index }))
+      .sort(
+        (left, right) =>
+          (Date.parse(left.item.storedAt || "") || 0) - (Date.parse(right.item.storedAt || "") || 0),
+      );
+    const removeIndexes = new Set();
+    for (const { item, index } of oldestFirst) {
+      if (storedBytes <= storedIsoTotalLimitBytes) break;
+      if (item.isoPath && existsSync(item.isoPath) && isPathInsideDirectory(item.isoPath, storedIsoDirectory)) {
+        try {
+          rmSync(item.isoPath, { force: true });
+        } catch {
+          kept[index] = { ...item, pendingDelete: true };
+          changed ||= !item.pendingDelete;
+          continue;
+        }
+      }
+      storedBytes -= Number(item.size) || 0;
+      removeIndexes.add(index);
+      changed = true;
+    }
+    if (removeIndexes.size > 0) {
+      for (let index = kept.length - 1; index >= 0; index -= 1) {
+        if (removeIndexes.has(index)) kept.splice(index, 1);
+      }
+    }
+  }
+
   if (changed) {
     saveStoredIsoManifest(kept);
   }
@@ -713,6 +810,10 @@ const removeStoredIso = (ownerId, id) => {
 };
 
 const storeBrowserIsoOnHost = (ownerId, body) => {
+  cleanupBrowserIsoUploadSessions(body.sessionId);
+  cleanupStoredIsos();
+  ensureHostStorageReserve(0, "save this ISO");
+
   const sourcePath = stripPathQuotes(body.isoPath);
   if (!sourcePath || !isAbsolute(sourcePath) || !existsSync(sourcePath)) {
     throw new Error("The staged ISO was not found on the host computer.");
@@ -727,6 +828,13 @@ const storeBrowserIsoOnHost = (ownerId, body) => {
 
   const name = sanitizeFilename(body.name || body.fileName || sourcePath.split(/[\\/]/).pop() || "stored.iso");
   const size = Number(body.size) || statSync(sourcePath).size;
+  if (size > storedIsoTotalLimitBytes) {
+    const error = new Error(
+      `This ISO is too large to keep as a stored image. Stored images are capped at ${formatBytes(storedIsoTotalLimitBytes)} total on the public host.`,
+    );
+    error.statusCode = 507;
+    throw error;
+  }
   const fileKey = storedIsoFileKey({ fileKey: body.fileKey, name, size });
   const manifestItems = cleanupStoredIsos();
   const current = activeStoredIsos(manifestItems);
@@ -791,6 +899,7 @@ const storeBrowserIsoOnHost = (ownerId, body) => {
   };
   const items = [...manifestItems, item];
   saveStoredIsoManifest(items);
+  cleanupStoredIsos();
 
   return {
     ok: true,
@@ -813,8 +922,12 @@ const decodeHeaderFilename = (value) => {
 
 const saveBrowserIsoUpload = async (req) => {
   const { safeSessionId, sessionDirectory } = browserUploadSessionDirectory(req.headers["x-nebulavm-session"]);
+  cleanupBrowserIsoUploadSessions(safeSessionId);
+  cleanupStoredIsos();
   cleanupBrowserIsoUploadSession(safeSessionId);
   mkdirSync(sessionDirectory, { recursive: true });
+  const contentLength = Number(req.headers["content-length"]) || 0;
+  ensureHostStorageReserve(contentLength, "stage this ISO");
   const headerName = decodeHeaderFilename(req.headers["x-nebulavm-filename"]);
   const baseName = sanitizeFilename(headerName || "browser-upload.iso");
   const mediaName = /\.(iso|img|bin|raw)$/i.test(baseName) ? baseName : `${baseName}.iso`;
@@ -831,6 +944,12 @@ const saveBrowserIsoUpload = async (req) => {
   if (bytesReceived <= 0) {
     rmSync(tempPath, { force: true });
     throw new Error("The browser upload was empty.");
+  }
+  try {
+    ensureHostStorageReserve(0, "finish staging this ISO");
+  } catch (error) {
+    rmSync(tempPath, { force: true });
+    throw error;
   }
   renameSync(tempPath, finalPath);
 
@@ -898,6 +1017,8 @@ const finalizeBrowserIsoUpload = ({ finalPath, tempPath, totalBytes, safeSession
 
 const browserIsoUploadStatus = (req) => {
   const paths = browserIsoUploadPaths(req);
+  cleanupBrowserIsoUploadSessions(paths.safeSessionId);
+  cleanupStoredIsos();
   mkdirSync(paths.sessionDirectory, { recursive: true });
 
   const completed = finalizeBrowserIsoUpload(paths);
@@ -939,6 +1060,8 @@ const browserIsoUploadStatus = (req) => {
 const saveBrowserIsoUploadChunk = async (req) => {
   const paths = browserIsoUploadPaths(req);
   const { safeSessionId, sessionDirectory, totalBytes, finalPath, tempPath } = paths;
+  cleanupBrowserIsoUploadSessions(safeSessionId);
+  cleanupStoredIsos();
   const chunkStart = readHeaderInteger(req, "x-nebulavm-chunk-start");
   const chunkEnd = readHeaderInteger(req, "x-nebulavm-chunk-end");
   if (chunkEnd <= chunkStart || chunkEnd > totalBytes) {
@@ -971,6 +1094,7 @@ const saveBrowserIsoUploadChunk = async (req) => {
     throw new Error("Browser upload is missing an earlier chunk.");
   }
 
+  ensureHostStorageReserve(chunkEnd - currentSize, "continue staging this ISO");
   try {
     await pipeline(req, createWriteStream(tempPath, { flags: chunkStart === 0 ? "w" : "a" }));
   } catch (error) {
@@ -984,6 +1108,12 @@ const saveBrowserIsoUploadChunk = async (req) => {
   if (bytesReceived < chunkEnd) {
     truncateSync(tempPath, chunkStart);
     throw new Error("Browser upload chunk ended before all bytes were received.");
+  }
+  try {
+    ensureHostStorageReserve(0, "continue staging this ISO");
+  } catch (error) {
+    truncateSync(tempPath, chunkStart);
+    throw error;
   }
   if (bytesReceived === totalBytes) {
     return finalizeBrowserIsoUpload(paths);
@@ -1682,20 +1812,20 @@ const startAndroidEmulator = (sessionId, body = {}, { publicMobile = false } = {
   const freeMemoryMb = Math.floor(freemem() / 1024 / 1024);
   const requestedMemoryMb = publicMobile ? 0 : Number(body.memoryMb) || 0;
   const adaptiveCeilingMb =
-    freeMemoryMb >= 5120
+    freeMemoryMb >= 6144
       ? 3072
-      : freeMemoryMb >= 3840
+      : freeMemoryMb >= 4608
         ? 2048
-        : freeMemoryMb >= 1800
+        : freeMemoryMb >= 3072
           ? 1280
           : freeMemoryMb >= 1408
             ? 768
             : 512;
   const modernAndroid = requestedVersion >= 15;
-  const modernAndroidMinimumHostFreeMb = 1800;
+  const modernAndroidMinimumHostFreeMb = 3072;
   if (modernAndroid && freeMemoryMb < modernAndroidMinimumHostFreeMb) {
     const error = new Error(
-      `Android ${requestedVersion} needs about ${modernAndroidMinimumHostFreeMb} MB available on the host to allocate a 1280 MB device. Only ${freeMemoryMb} MB is currently available. Close a few host apps, then try again.`,
+      `Android ${requestedVersion} needs about ${modernAndroidMinimumHostFreeMb} MB free on the public host because the emulator needs extra overhead beyond its 1280 MB device RAM. Only ${freeMemoryMb} MB is currently free. Try an older Android version or wait until the host has more memory.`,
     );
     error.statusCode = 503;
     throw error;
@@ -1718,6 +1848,11 @@ const startAndroidEmulator = (sessionId, body = {}, { publicMobile = false } = {
     storageGb: publicMobile ? 4 : androidInteger(body.storageGb, 8, 4, 32),
     publicMobileRestricted: publicMobile,
   };
+  cleanupOrphanedAndroidSessions();
+  ensureHostStorageReserve(
+    Math.min(specs.storageGb, 8) * 1024 * 1024 * 1024,
+    "create a private Android AVD",
+  );
   const orientation = publicMobile
     ? "portrait"
     : body.orientation === "landscape"

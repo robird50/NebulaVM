@@ -10,6 +10,55 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $vmName = "NebulaVM-EMUSTAR"
 $warnings = [System.Collections.Generic.List[string]]::new()
+$privateDiskTtlHours = 12
+$privateDiskMaxBytes = [int64]80GB
+$hostStorageReserveBytes = [int64]25GB
+
+function Format-NebulaSize {
+  param([int64]$Bytes)
+
+  if ($Bytes -ge 1GB) {
+    return "{0:N1} GB" -f ($Bytes / 1GB)
+  }
+  if ($Bytes -ge 1MB) {
+    return "{0:N0} MB" -f ($Bytes / 1MB)
+  }
+  if ($Bytes -ge 1KB) {
+    return "{0:N0} KB" -f ($Bytes / 1KB)
+  }
+  return "$Bytes bytes"
+}
+
+function Get-NebulaDriveFreeBytes {
+  param([string]$TargetPath)
+
+  $fullPath = [IO.Path]::GetFullPath($TargetPath)
+  $root = [IO.Path]::GetPathRoot($fullPath)
+  if ([string]::IsNullOrWhiteSpace($root)) {
+    throw "NebulaVM could not identify the host drive for storage checks."
+  }
+
+  $driveName = $root.TrimEnd("\").TrimEnd(":")
+  $drive = Get-PSDrive -Name $driveName -ErrorAction Stop
+  return [int64]$drive.Free
+}
+
+function Assert-NebulaStorageReserve {
+  param(
+    [string]$TargetPath,
+    [int64]$NeededBytes = 0,
+    [string]$ActionText = "continue"
+  )
+
+  $freeBytes = Get-NebulaDriveFreeBytes -TargetPath $TargetPath
+  $needed = [math]::Max([int64]0, $NeededBytes)
+  if (($freeBytes - $needed) -ge $hostStorageReserveBytes) {
+    return
+  }
+
+  $shortfall = ($hostStorageReserveBytes + $needed) - $freeBytes
+  throw "NebulaVM host storage is too low to $ActionText. The public host keeps $(Format-NebulaSize $hostStorageReserveBytes) free so private VM disks cannot fill the drive. Free about $(Format-NebulaSize $shortfall) on the Windows host, then try again."
+}
 
 function Read-Config {
   if ([string]::IsNullOrWhiteSpace($ConfigBase64)) {
@@ -308,6 +357,117 @@ function Get-IsolatedTemplateDiskPath {
   return Join-Path $diskDirectory "private-windows-11-template-$shortHash.vhdx"
 }
 
+function Test-ManagedPrivateDiskName {
+  param([string]$Name)
+
+  if ($Name -match "(?i)^windows-11-template-[a-f0-9]+\.vhdx$") {
+    return $false
+  }
+  if ($Name -match "(?i)^private-windows-11-template-[a-f0-9]+\.vhdx$") {
+    return $true
+  }
+  return $Name -match "(?i)^.+-[a-f0-9]{16}\.vhdx$"
+}
+
+function Get-ActiveEmustarDiskPaths {
+  $active = @{}
+  try {
+    $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+    if ($vm) {
+      Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path } |
+        ForEach-Object {
+          $active[[IO.Path]::GetFullPath([string]$_.Path).ToLowerInvariant()] = $true
+        }
+    }
+  } catch {
+    # Active disk detection is best effort. Unknown disks are left alone by later path checks.
+  }
+  return $active
+}
+
+function Remove-ManagedPrivateDisk {
+  param([object]$Disk)
+
+  try {
+    Remove-Item -LiteralPath $Disk.Path -Force -ErrorAction Stop
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Cleanup-EmustarPrivateDisks {
+  param([string]$VmDirectory)
+
+  $diskDirectory = Join-Path $VmDirectory "disks"
+  if (-not (Test-Path -LiteralPath $diskDirectory -PathType Container)) {
+    return
+  }
+
+  $activeDiskPaths = Get-ActiveEmustarDiskPaths
+  $cutoff = (Get-Date).ToUniversalTime().AddHours(-1 * $privateDiskTtlHours)
+  $items = @(
+    Get-ChildItem -LiteralPath $diskDirectory -Filter "*.vhdx" -File -ErrorAction SilentlyContinue |
+      Where-Object { Test-ManagedPrivateDiskName -Name $_.Name } |
+      ForEach-Object {
+        [pscustomobject]@{
+          Path = $_.FullName
+          Key = [IO.Path]::GetFullPath($_.FullName).ToLowerInvariant()
+          Size = [int64]$_.Length
+          LastWriteUtc = $_.LastWriteTimeUtc
+        }
+      }
+  )
+
+  $removedCount = 0
+  $removedBytes = [int64]0
+  foreach ($item in $items) {
+    if ($activeDiskPaths.ContainsKey($item.Key)) {
+      continue
+    }
+    if ($item.LastWriteUtc -gt $cutoff) {
+      continue
+    }
+    if (Remove-ManagedPrivateDisk -Disk $item) {
+      $removedCount += 1
+      $removedBytes += [int64]$item.Size
+    }
+  }
+
+  $remaining = @(
+    Get-ChildItem -LiteralPath $diskDirectory -Filter "*.vhdx" -File -ErrorAction SilentlyContinue |
+      Where-Object { Test-ManagedPrivateDiskName -Name $_.Name } |
+      ForEach-Object {
+        [pscustomobject]@{
+          Path = $_.FullName
+          Key = [IO.Path]::GetFullPath($_.FullName).ToLowerInvariant()
+          Size = [int64]$_.Length
+          LastWriteUtc = $_.LastWriteTimeUtc
+        }
+      } |
+      Sort-Object LastWriteUtc
+  )
+  $totalBytes = [int64]($remaining | Measure-Object -Property Size -Sum).Sum
+  foreach ($item in $remaining) {
+    if ($totalBytes -le $privateDiskMaxBytes) {
+      break
+    }
+    if ($activeDiskPaths.ContainsKey($item.Key)) {
+      continue
+    }
+    if (Remove-ManagedPrivateDisk -Disk $item) {
+      $removedCount += 1
+      $removedBytes += [int64]$item.Size
+      $totalBytes -= [int64]$item.Size
+    }
+  }
+
+  if ($removedCount -gt 0) {
+    $warnings.Add("Cleaned up $removedCount old private Hyper-V disk(s) and reclaimed $(Format-NebulaSize $removedBytes).")
+  }
+}
+
 function Ensure-TemplateChildDisk {
   param(
     [string]$ChildDiskPath,
@@ -515,13 +675,13 @@ function Set-LowHostMemoryProfile {
 
   if ($FixedStartup) {
     $freeMemoryMb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
-    $hardReserveMb = 128
-    $comfortReserveMb = 512
+    $hardReserveMb = 512
+    $comfortReserveMb = 1024
     if ($freeMemoryMb -lt ($MemoryMb + $hardReserveMb)) {
-      throw "Hyper-V needs at least $MemoryMb MB of free host memory, plus a small host cushion, to boot this Windows guest. Only $freeMemoryMb MB is currently free. Close a few applications or browser tabs, then launch it again."
+      throw "Hyper-V needs $MemoryMb MB for this Windows guest plus at least $hardReserveMb MB for the public host. Only $freeMemoryMb MB is currently free. Wait until the host has more memory or choose a lighter VM."
     }
     if ($freeMemoryMb -lt ($MemoryMb + $comfortReserveMb)) {
-      $warnings.Add("Host memory is tight: $freeMemoryMb MB is free for a fixed $MemoryMb MB Windows startup allocation. Hyper-V will still try to boot it.")
+      $warnings.Add("Host memory is tight: $freeMemoryMb MB is free for a fixed $MemoryMb MB Windows startup allocation.")
     }
     Set-VMMemory -VM $Vm -DynamicMemoryEnabled $false -StartupBytes ($MemoryMb * 1MB)
     return
@@ -532,7 +692,7 @@ function Set-LowHostMemoryProfile {
     $freeMemoryMb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
     $preferredStartupMb = [math]::Min($MemoryMb, 1024)
     $minimumBootMb = [math]::Min($MemoryMb, 768)
-    $reserveMb = 512
+    $reserveMb = 768
     $startupMb = if ($freeMemoryMb -ge ($preferredStartupMb + $reserveMb)) {
       $preferredStartupMb
     } else {
@@ -540,7 +700,7 @@ function Set-LowHostMemoryProfile {
     }
     $minimumMb = [math]::Min($startupMb, 512)
     if ($freeMemoryMb -lt ($startupMb + $reserveMb)) {
-      throw "EMUSTAR needs about $($startupMb + $reserveMb) MB of free host memory to boot this ISO, but only $freeMemoryMb MB is currently free. Close a few applications or browser tabs, then launch it again."
+      throw "Hyper-V needs about $($startupMb + $reserveMb) MB of free host memory to boot this ISO, but only $freeMemoryMb MB is currently free. Wait until the host has more memory or choose a lighter VM."
     }
     Set-VMMemory -VM $Vm `
       -DynamicMemoryEnabled $true `
@@ -788,6 +948,16 @@ function Start-Emustar {
     throw "EMUSTAR requires a private device identity before it can create a virtual disk."
   }
   New-Item -ItemType Directory -Path $vmDirectory -Force | Out-Null
+  Cleanup-EmustarPrivateDisks -VmDirectory $vmDirectory
+  $privateDiskCushionBytes = if ($templateDiskProvided) {
+    [int64]8GB
+  } else {
+    [int64]([math]::Min($diskSizeGb, 8) * 1GB)
+  }
+  Assert-NebulaStorageReserve `
+    -TargetPath $vmDirectory `
+    -NeededBytes $privateDiskCushionBytes `
+    -ActionText "create a private Hyper-V disk"
   $vhdPath = if ($templateDiskProvided) {
     Get-IsolatedTemplateDiskPath -VmDirectory $vmDirectory -TemplateDiskPath $templateDiskPath -OwnerId $storageOwnerId
   } else {
@@ -1053,8 +1223,18 @@ function Request-NewEmustarDisk {
     throw "NebulaVM needs this browser's private device identity before it can replace the disk."
   }
   New-Item -ItemType Directory -Path $vmDirectory -Force | Out-Null
+  Cleanup-EmustarPrivateDisks -VmDirectory $vmDirectory
 
   $diskSizeGb = [math]::Min(256, [math]::Max(64, [int]$config.diskSizeGb))
+  $privateDiskCushionBytes = if ($templateDiskProvided) {
+    [int64]8GB
+  } else {
+    [int64]([math]::Min($diskSizeGb, 8) * 1GB)
+  }
+  Assert-NebulaStorageReserve `
+    -TargetPath $vmDirectory `
+    -NeededBytes $privateDiskCushionBytes `
+    -ActionText "replace a private Hyper-V disk"
   $vhdPath = if ($templateDiskProvided) {
     Get-IsolatedTemplateDiskPath -VmDirectory $vmDirectory -TemplateDiskPath $templateDiskPath -OwnerId $storageOwnerId
   } else {
