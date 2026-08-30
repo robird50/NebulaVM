@@ -4424,6 +4424,10 @@ const monitorNativeVm = () => {
         }
       }
 
+      if (hyperVRuntime && state.hyperVAutopilotRecoveryInProgress) {
+        return;
+      }
+
       if (hyperVRuntime && !state.hyperVAutopilotRecoveryAttempted) {
         state.hyperVAutopilotRecoveryAttempted = true;
         state.hyperVAutopilotRecoveryInProgress = true;
@@ -4449,6 +4453,10 @@ const monitorNativeVm = () => {
           state.hyperVAutopilotRecoveryFailure = error.message || "the automatic restart failed.";
           log(`NebulaVM Autopilot could not restore Hyper-V: ${state.hyperVAutopilotRecoveryFailure}`);
         }
+      }
+
+      if (hyperVRuntime && state.hyperVAutopilotRecoveryInProgress) {
+        return;
       }
 
       clearNativeMonitor();
