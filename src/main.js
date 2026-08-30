@@ -4913,7 +4913,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       displayMode,
-      isoPath: els.nativeIsoPath.value.trim(),
+      isoPath: state.windowsTemplateSelected ? "" : els.nativeIsoPath.value.trim(),
       templateDiskPath: state.windowsTemplateSelected ? state.windowsTemplateDiskPath : "",
       guestType: selectedIsoLooksLikeWindows() ? "windows" : "other",
       cpuGhz: selectedProcessorSpeedGhz(),
@@ -4977,7 +4977,11 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   log(`Secure Boot: ${vm.secureBoot ? "enabled" : "not enabled"}.`);
   log(`Virtual TPM: ${vm.tpm ? "enabled" : "not enabled"}.`);
   for (const warning of result.warnings || []) {
-    log(`Hyper-V warning: ${warning}`);
+    log(
+      warning.startsWith("NebulaVM Autopilot:")
+        ? warning
+        : `Hyper-V warning: ${warning}`,
+    );
   }
 
   if (displayMode === "external") {

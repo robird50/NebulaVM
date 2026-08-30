@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $vmName = "NebulaVM-EMUSTAR"
 $warnings = [System.Collections.Generic.List[string]]::new()
+$autopilotActions = [System.Collections.Generic.List[string]]::new()
 $privateDiskTtlHours = 12
 $privateDiskMaxBytes = [int64]80GB
 $hostStorageReserveBytes = [int64]25GB
@@ -789,6 +790,91 @@ function Set-InstalledWindowsBoot {
   }
 }
 
+function Repair-TemplateDvdAttachments {
+  param([object]$Vm)
+
+  $dvdDrives = @(Get-VMDvdDrive -VM $Vm -ErrorAction SilentlyContinue)
+  $cleared = 0
+  $removed = 0
+  for ($index = 0; $index -lt $dvdDrives.Count; $index += 1) {
+    $drive = $dvdDrives[$index]
+    if (-not [string]::IsNullOrWhiteSpace([string]$drive.Path)) {
+      Set-VMDvdDrive -VMDvdDrive $drive -Path $null -ErrorAction Stop
+      $cleared += 1
+    }
+    if ($index -gt 0) {
+      Remove-VMDvdDrive -VMDvdDrive $drive -ErrorAction Stop
+      $removed += 1
+    }
+  }
+
+  if ($cleared -gt 0 -or $removed -gt 0) {
+    $action = "removed $cleared stale DVD image attachment(s) and $removed extra DVD drive(s) before the prepared Windows disk boot."
+    $autopilotActions.Add($action)
+    $warnings.Add("NebulaVM Autopilot: $action")
+  }
+}
+
+function Repair-EmustarDiskAccess {
+  param([string]$DiskPath)
+
+  if ([string]::IsNullOrWhiteSpace($DiskPath) -or -not (Test-Path -LiteralPath $DiskPath -PathType Leaf)) {
+    return
+  }
+
+  try {
+    $grant = "*S-1-5-83-0:(M)"
+    & icacls.exe $DiskPath /grant $grant /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      throw "icacls exited with code $LASTEXITCODE"
+    }
+  } catch {
+    $warnings.Add("NebulaVM Autopilot could not refresh Hyper-V access to the private disk: $($_.Exception.Message)")
+  }
+}
+
+function Get-EmustarStartFailureReason {
+  $events = @()
+  foreach ($logName in @(
+    "Microsoft-Windows-Hyper-V-Worker-Admin",
+    "Microsoft-Windows-Hyper-V-VMMS-Admin"
+  )) {
+    try {
+      $events += Get-WinEvent -FilterHashtable @{
+        LogName = $logName
+        StartTime = (Get-Date).AddMinutes(-3)
+        Level = 2
+      } -MaxEvents 30 -ErrorAction Stop |
+        Where-Object { $_.Message -match [regex]::Escape($vmName) }
+    } catch {
+      continue
+    }
+  }
+
+  $orderedEvents = @($events | Sort-Object TimeCreated -Descending)
+  foreach ($candidate in @(
+    @{ Pattern = "(?i)0x80070570|corrupt|unreadable"; Reason = "a stale or damaged virtual media attachment" },
+    @{ Pattern = "(?i)0x80070005|access is denied|permission"; Reason = "Hyper-V did not have permission to open an attached disk" },
+    @{ Pattern = "(?i)0x8007000E|not enough memory|memory resources"; Reason = "the host could not reserve the requested VM memory" },
+    @{ Pattern = "(?i)0x80070020|being used by another process|location is in use"; Reason = "another Hyper-V operation was still using an attached device" },
+    @{ Pattern = "(?i)synthetic scsi|failed to power on"; Reason = "a Hyper-V virtual storage controller could not power on" }
+  )) {
+    if ($orderedEvents | Where-Object { $_.Message -match $candidate.Pattern } | Select-Object -First 1) {
+      return $candidate.Reason
+    }
+  }
+
+  $latest = $orderedEvents | Select-Object -First 1
+  if ($latest) {
+    $message = ([string]$latest.Message -replace "\s+", " ").Trim()
+    if ($message.Length -gt 500) {
+      $message = $message.Substring(0, 500) + "..."
+    }
+    return $message
+  }
+  return "Hyper-V rejected the first start attempt without recording a specific host event"
+}
+
 function Get-EmustarVmIdText {
   param([object]$Vm)
 
@@ -964,6 +1050,10 @@ function Start-Emustar {
     Get-IsolatedDiskPath -VmDirectory $vmDirectory -IsoPath $isoPath -OwnerId $storageOwnerId
   }
 
+  if ($templateDiskProvided -and $vm) {
+    Repair-TemplateDvdAttachments -Vm $vm
+  }
+
   if ($vm -and $vm.State -eq "Running") {
     $mountedIso = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue |
       Select-Object -First 1 |
@@ -1011,6 +1101,7 @@ function Start-Emustar {
           displayMode = [string]$config.displayMode
           vm = Get-VmSnapshot -Vm $vm
           warnings = $warnings
+          autopilotActions = $autopilotActions
         }
       }
       $warnings.Add("EMUSTAR restarted the existing VM to apply the requested memory settings.")
@@ -1024,6 +1115,7 @@ function Start-Emustar {
   if ($templateDiskProvided) {
     Ensure-TemplateChildDisk -ChildDiskPath $vhdPath -ParentDiskPath $templateDiskPath
     Ensure-WindowsTemplateWallpaper -VhdPath $vhdPath
+    Repair-EmustarDiskAccess -DiskPath $vhdPath
   }
 
   if (-not $vm) {
@@ -1080,9 +1172,7 @@ function Start-Emustar {
 
   $dvd = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($templateDiskProvided -or -not $isoProvided) {
-    if ($dvd) {
-      Set-VMDvdDrive -VMDvdDrive $dvd -Path $null
-    }
+    Repair-TemplateDvdAttachments -Vm $vm
   } else {
     if ($dvd) {
       Set-VMDvdDrive -VMDvdDrive $dvd -Path $isoPath
@@ -1124,9 +1214,25 @@ function Start-Emustar {
         if ($_.Exception.Message -match "(?i)not enough memory|memory resources|0x8007000E") {
           throw "EMUSTAR could not reserve enough host memory. Close a few applications or browser tabs, then launch it again."
         }
-        throw
+        if (-not $templateDiskProvided) {
+          throw
+        }
+
+        $rootReason = Get-EmustarStartFailureReason
+        Repair-TemplateDvdAttachments -Vm $vm
+        Repair-EmustarDiskAccess -DiskPath $vhdPath
+        $action = "found the root cause as $rootReason; repaired the prepared disk devices and permissions, then retried once."
+        $autopilotActions.Add($action)
+        $warnings.Add("NebulaVM Autopilot: $action")
+        try {
+          Start-VM -VM $vm -ErrorAction Stop | Out-Null
+        } catch {
+          throw "NebulaVM Autopilot could not recover the Hyper-V start. Root cause: $rootReason. Retry failed: $($_.Exception.Message)"
+        }
       }
-      $warnings.Add("EMUSTAR detected that Hyper-V had already started the VM and attached to it.")
+      if ($vm.State -eq "Running") {
+        $warnings.Add("EMUSTAR detected that Hyper-V had already started the VM and attached to it.")
+      }
     }
   } elseif ($vm.State -ne "Running") {
     throw "EMUSTAR cannot start while Hyper-V is in state '$($vm.State)'."
@@ -1157,6 +1263,7 @@ function Start-Emustar {
     displayMode = [string]$config.displayMode
     vm = Get-VmSnapshot -Vm $vm
     warnings = $warnings
+    autopilotActions = $autopilotActions
   }
 }
 

@@ -1217,6 +1217,8 @@ let activeNativeRuntimeName = null;
 let hyperVRemoteSessionId = "";
 let hyperVRemoteSessionStartedAt = "";
 let hyperVStatusCache = { expiresAt: 0, data: null };
+let hyperVStartTask = null;
+let lastHyperVStart = null;
 let androidRuntime = null;
 let androidImageCache = { expiresAt: 0, items: [] };
 let lastAndroidEmulatorExit = null;
@@ -2644,6 +2646,26 @@ const clearHyperVStatusCache = () => {
   hyperVStatusCache = { expiresAt: 0, data: null };
 };
 
+const hyperVStartKey = (config) =>
+  JSON.stringify({
+    storageOwnerId: config.storageOwnerId,
+    isoPath: config.isoPath,
+    templateDiskPath: config.templateDiskPath,
+    memoryMb: config.memoryMb,
+    displayWidth: config.displayWidth,
+    displayHeight: config.displayHeight,
+    bootOrder: config.bootOrder,
+    diskSizeGb: config.diskSizeGb,
+  });
+
+const withHyperVAutopilotAction = (result, action) => ({
+  ...result,
+  warnings: [
+    ...(result.warnings || []),
+    `NebulaVM Autopilot: ${action}`,
+  ],
+});
+
 const getHyperVStatus = async ({ maxAgeMs = 8000, timeoutMs = 25000 } = {}) => {
   if (hyperVStatusCache.data && Date.now() < hyperVStatusCache.expiresAt) {
     return hyperVStatusCache.data;
@@ -3506,23 +3528,89 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") {
-          const body = await readJsonBody(req);
+          const requestedBody = await readJsonBody(req);
+          const body = requestedBody.templateDiskPath
+            ? { ...requestedBody, isoPath: "" }
+            : requestedBody;
           assertStoredIsoAccess(req, body.isoPath);
-          let replacedRuntime = null;
-          if (nativeVm) {
-            const stopped = await stopNativeVmIfRunning();
-            replacedRuntime = stopped?.runtime || "QEMU";
-          }
           const storageOwnerId = storedIsoOwnerId(req);
-          const result = await runHyperVAction("Start", {
-              ...body,
-              storageOwnerId,
-              vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
-            }, 120000);
-          hyperVRemoteSessionId = randomBytes(12).toString("hex");
-          hyperVRemoteSessionStartedAt = new Date().toISOString();
-          result.replacedRuntime = replacedRuntime;
-          json(res, 200, cacheHyperVStatus(await withHyperVDisplayStatus(result)));
+          const startConfig = {
+            ...body,
+            storageOwnerId,
+            vmDirectory: resolve(workspaceDir, "vm-disks", "emustar-hyperv"),
+          };
+          const requestKey = hyperVStartKey(startConfig);
+
+          if (hyperVStartTask) {
+            if (hyperVStartTask.key !== requestKey) {
+              json(res, 409, {
+                ok: false,
+                error: "Hyper-V is finishing another VM start. Wait a moment, then launch again.",
+              });
+              return;
+            }
+            const joinedResult = await hyperVStartTask.promise;
+            json(
+              res,
+              200,
+              withHyperVAutopilotAction(
+                joinedResult,
+                "joined a duplicate start request instead of restarting the running VM.",
+              ),
+            );
+            return;
+          }
+
+          if (
+            lastHyperVStart?.key === requestKey &&
+            Date.now() - lastHyperVStart.finishedAt < 45_000
+          ) {
+            clearHyperVStatusCache();
+            const currentStatus = await getHyperVStatus({ maxAgeMs: 0, timeoutMs: 25000 });
+            if (currentStatus.vm?.state === "Running") {
+              json(
+                res,
+                200,
+                withHyperVAutopilotAction(
+                  {
+                    ...lastHyperVStart.result,
+                    ...currentStatus,
+                    attachedExisting: true,
+                  },
+                  "ignored a repeated start because this exact VM is already running.",
+                ),
+              );
+              return;
+            }
+          }
+
+          const startPromise = (async () => {
+            let replacedRuntime = null;
+            if (nativeVm) {
+              const stopped = await stopNativeVmIfRunning();
+              replacedRuntime = stopped?.runtime || "QEMU";
+            }
+            const actionResult = await runHyperVAction("Start", startConfig, 120000);
+            hyperVRemoteSessionId = randomBytes(12).toString("hex");
+            hyperVRemoteSessionStartedAt = new Date().toISOString();
+            actionResult.replacedRuntime = replacedRuntime;
+            return cacheHyperVStatus(await withHyperVDisplayStatus(actionResult));
+          })();
+          hyperVStartTask = { key: requestKey, promise: startPromise };
+
+          try {
+            const result = await startPromise;
+            lastHyperVStart = {
+              key: requestKey,
+              finishedAt: Date.now(),
+              result,
+            };
+            json(res, 200, result);
+          } finally {
+            if (hyperVStartTask?.promise === startPromise) {
+              hyperVStartTask = null;
+            }
+          }
           return;
         }
 
