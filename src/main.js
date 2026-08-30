@@ -233,6 +233,11 @@ const state = {
   androidStudioFrameUrl: null,
   androidStudioCleanup: null,
   screenAppFullscreen: false,
+  safetyHeartbeatTimer: null,
+  safetyHeartbeatBusy: false,
+  safetyMonitoringActive: false,
+  safetyLastFrameAt: 0,
+  safetyStopNotice: "",
 };
 
 app.innerHTML = `
@@ -799,6 +804,10 @@ app.innerHTML = `
         </div>
 
         <div class="screen-shell" id="screenShell">
+          <div class="admin-monitoring-pill" id="adminMonitoringPill" hidden>
+            <span aria-hidden="true"></span>
+            Admin is monitoring for safety purposes
+          </div>
           <button class="screen-fullscreen-exit" id="screenFullscreenExitButton" type="button" hidden>
             Exit
           </button>
@@ -1263,6 +1272,7 @@ const els = {
   saveStateButton: document.querySelector("#saveStateButton"),
   loadStateButton: document.querySelector("#loadStateButton"),
   fullscreenButton: document.querySelector("#fullscreenButton"),
+  adminMonitoringPill: document.querySelector("#adminMonitoringPill"),
   screenFullscreenExitButton: document.querySelector("#screenFullscreenExitButton"),
   virtualKeyboardButton: document.querySelector("#virtualKeyboardButton"),
   virtualKeyboard: document.querySelector("#virtualKeyboard"),
@@ -1818,6 +1828,148 @@ const log = (message) => {
   const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   els.logOutput.textContent += `[${time}] ${message}\n`;
   els.logOutput.scrollTop = els.logOutput.scrollHeight;
+};
+
+const setSafetyMonitoringActive = (active) => {
+  const next = Boolean(active && state.running);
+  state.safetyMonitoringActive = next;
+  els.screenShell.classList.toggle("is-admin-monitored", next);
+  els.adminMonitoringPill.hidden = !next;
+};
+
+const safetyMediaName = () => {
+  if (isAndroidMode()) return androidVersionLabel();
+  if (state.windowsTemplateSelected) return "Windows 11 Template";
+  if (state.isoFile?.name) return state.isoFile.name;
+  const nativePath = els.nativeIsoPath.value.trim();
+  if (nativePath) return nativePath.split(/[\\/]/).pop() || nativePath;
+  if (isRemoteMode()) return els.remoteVmUrl.value.trim() || "Remote VM stream";
+  return els.machineTitle.textContent.trim() || "No media name";
+};
+
+const safetyEmulatorName = () => {
+  const label = getEmulatorLabel(els.emulatorMode.value);
+  return isNativeQemuMode() ? `Native ${label}` : label;
+};
+
+const safetyRequest = async (path, options = {}) => {
+  const base = String(state.nativeQemuApiBase || "").replace(/\/$/, "");
+  if (!base || !state.nativeHostToken) throw new Error("Safety monitor bridge is offline.");
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+  headers.set("X-NebulaVM-Device", state.nativeDeviceId);
+  headers.set("X-NebulaVM-Session", state.nativeSessionId);
+  return fetch(`${base}/api/nebulavm-monitor/${path}`, {
+    cache: "no-store",
+    ...options,
+    headers,
+  });
+};
+
+const visibleSafetyCanvas = () => {
+  const frameCanvas = (frame) => {
+    try {
+      return frame?.contentDocument?.querySelector("canvas") || null;
+    } catch {
+      return null;
+    }
+  };
+  const candidates = [
+    frameCanvas(state.nintendoFrame),
+    frameCanvas(els.remoteFrame),
+    els.nativeDisplay.querySelector("canvas"),
+    els.androidDisplay.querySelector("canvas"),
+    els.screenContainer.querySelector(".vga-canvas"),
+  ];
+  return candidates.find((canvas) => canvas && canvas.width > 1 && canvas.height > 1) || null;
+};
+
+const safetyFallbackCanvas = () => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 960;
+  canvas.height = 540;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#03070c";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#65dcff";
+  context.font = "700 26px sans-serif";
+  context.fillText(safetyEmulatorName(), 34, 54);
+  context.fillStyle = "#e8f3ff";
+  context.font = "22px monospace";
+  const source = !els.qemuTerminal.hidden
+    ? els.qemuTerminal.textContent
+    : els.androidSurface?.innerText || "The VM display is active.";
+  String(source || "The VM display is active.")
+    .split(/\r?\n/)
+    .slice(-18)
+    .forEach((line, index) => context.fillText(line.slice(0, 72), 34, 100 + index * 23));
+  return canvas;
+};
+
+const safetyFrameBlob = async () => {
+  const source = visibleSafetyCanvas() || safetyFallbackCanvas();
+  const target = document.createElement("canvas");
+  const scale = Math.min(1, 960 / source.width, 540 / source.height);
+  target.width = Math.max(1, Math.round(source.width * scale));
+  target.height = Math.max(1, Math.round(source.height * scale));
+  target.getContext("2d").drawImage(source, 0, 0, target.width, target.height);
+  return new Promise((resolveBlob) => target.toBlob(resolveBlob, "image/jpeg", 0.7));
+};
+
+const uploadSafetyFrame = async () => {
+  if (!state.safetyMonitoringActive || Date.now() - state.safetyLastFrameAt < 900) return;
+  const frame = await safetyFrameBlob().catch(() => null);
+  if (!frame) return;
+  state.safetyLastFrameAt = Date.now();
+  await safetyRequest(`frame?sessionId=${encodeURIComponent(state.nativeSessionId)}`, {
+    method: "POST",
+    headers: { "Content-Type": frame.type || "image/jpeg" },
+    body: frame,
+  });
+};
+
+const sendSafetyHeartbeat = async () => {
+  if (state.safetyHeartbeatBusy) return;
+  if (!state.running) {
+    setSafetyMonitoringActive(false);
+    return;
+  }
+  state.safetyHeartbeatBusy = true;
+  try {
+    const response = await safetyRequest("heartbeat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: state.nativeSessionId,
+        emulator: safetyEmulatorName(),
+        media: safetyMediaName(),
+        startedAt: new Date(state.startedAt || Date.now()).toISOString(),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Safety monitor heartbeat failed.");
+    setSafetyMonitoringActive(data.monitoring);
+    if (data.stopRequested) {
+      await stopEmulator();
+      state.safetyStopNotice = data.stopMessage || "Admin stopped your VM";
+      els.screenPlaceholder.hidden = false;
+      els.placeholderTitle.textContent = state.safetyStopNotice;
+      els.placeholderMeta.textContent = "This session was ended by the NebulaVM administrator for safety purposes.";
+      log(state.safetyStopNotice);
+      return;
+    }
+    if (data.monitoring) await uploadSafetyFrame();
+  } catch {
+    setSafetyMonitoringActive(false);
+  } finally {
+    state.safetyHeartbeatBusy = false;
+  }
+};
+
+const startSafetyHeartbeat = () => {
+  window.clearInterval(state.safetyHeartbeatTimer);
+  state.safetyHeartbeatTimer = window.setInterval(sendSafetyHeartbeat, 2000);
+  void sendSafetyHeartbeat();
 };
 
 const nativeQemuBridgeMessage = isNetlifyLauncher
@@ -4332,6 +4484,7 @@ const createDemoBootImage = () => {
 };
 
 const stopEmulator = async () => {
+  setSafetyMonitoringActive(false);
   clearNativeMonitor();
   clearNativeDisplayReconnect({ clearConfig: true });
   setHyperVRemoteSessionId("");
@@ -6821,6 +6974,7 @@ window.addEventListener("pagehide", () => {
   }
 });
 window.addEventListener("beforeunload", () => {
+  window.clearInterval(state.safetyHeartbeatTimer);
   stopAndroidLeaseHeartbeat();
   void cleanupStagedHostIso({ keepalive: true, silent: true, cleanupPartial: true });
   void stopEmulator();
@@ -6837,6 +6991,7 @@ log("NebulaVM ready.");
 renderStoredIsoSlots();
 updateBackendUi();
 void connectNetlifyHostRegistry();
+startSafetyHeartbeat();
 state.nativeStatusRefreshTimer = window.setInterval(() => {
   if (!isNativeMode()) return;
   if (state.hostStagedIsoUploading) return;

@@ -2784,6 +2784,48 @@ input[type="text"] {
   background-size: 28px 28px;
 }
 
+.screen-shell.is-admin-monitored {
+  border-color: #38e978;
+  box-shadow:
+    0 0 0 2px rgba(56, 233, 120, 0.72),
+    0 0 28px rgba(56, 233, 120, 0.2);
+}
+
+.admin-monitoring-pill {
+  position: absolute;
+  z-index: 86;
+  top: 12px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 150px);
+  min-height: 36px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(56, 233, 120, 0.88);
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: rgba(4, 22, 13, 0.94);
+  color: #b7ffd1;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-align: center;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
+}
+
+.admin-monitoring-pill > span {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #38e978;
+  box-shadow: 0 0 12px rgba(56, 233, 120, 0.82);
+}
+
+.admin-monitoring-pill[hidden] {
+  display: none;
+}
+
 .screen-shell:fullscreen,
 .screen-shell.is-fullscreen {
   width: var(--screen-visual-width);

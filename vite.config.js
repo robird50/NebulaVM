@@ -282,6 +282,23 @@ const readJsonBody = (req) =>
     req.on("error", rejectBody);
   });
 
+const readBinaryBody = (req, maxBytes = 2 * 1024 * 1024) =>
+  new Promise((resolveBody, rejectBody) => {
+    const chunks = [];
+    let totalBytes = 0;
+    req.on("data", (chunk) => {
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        rejectBody(new Error("Monitoring frame is too large."));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolveBody(Buffer.concat(chunks)));
+    req.on("error", rejectBody);
+  });
+
 const mobileDevAttempts = new Map();
 const mobileDevMaxAttempts = 5;
 const mobileDevLockMs = 5 * 60 * 1000;
@@ -1214,6 +1231,56 @@ const hyperVConsoleFramePath = resolve(workspaceDir, "vm-disks", "emustar-hyperv
 const androidStudioFrameScriptPath = resolve(workspaceDir, "scripts", "android-studio-frame.ps1");
 const androidStudioInputScriptPath = resolve(workspaceDir, "scripts", "android-studio-input.ps1");
 const androidStudioFramePath = resolve(workspaceDir, "vm-disks", "android-studio-frame.jpg");
+const safetySessions = new Map();
+const safetySessionTtlMs = 12_000;
+const safetyMonitorLeaseMs = 6_000;
+const safetyFrameMaxBytes = 2 * 1024 * 1024;
+
+const safetyClientIp = (req) =>
+  normalizeIp(
+    req.headers["cf-connecting-ip"] ||
+      String(req.headers["x-forwarded-for"] || "").split(",")[0] ||
+      req.socket?.remoteAddress ||
+      "",
+  );
+
+const safetyClientLocation = (req) => {
+  const city = String(req.headers["cf-ipcity"] || "").trim();
+  const region = String(req.headers["cf-region"] || "").trim();
+  const country = String(req.headers["cf-ipcountry"] || "").trim();
+  return [city, region, country].filter(Boolean).join(", ") || "Location unavailable";
+};
+
+const cleanupSafetySessions = () => {
+  const now = Date.now();
+  for (const [id, session] of safetySessions) {
+    if (now - Number(session.lastSeen || 0) > safetySessionTtlMs) {
+      safetySessions.delete(id);
+      continue;
+    }
+    if (Number(session.monitorUntil || 0) <= now) {
+      session.monitorUntil = 0;
+    }
+  }
+};
+
+const safetySessionId = (value) => {
+  const id = sanitizeSessionId(value);
+  if (!id || id.length < 8) throw new Error("Invalid safety session identifier.");
+  return id;
+};
+
+const safetySessionSummary = (session) => ({
+  id: session.id,
+  ipv4: isIpv6(session.ip) ? "IPv6 connection" : session.ip || "Unknown",
+  location: session.location,
+  emulator: session.emulator,
+  media: session.media,
+  startedAt: session.startedAt,
+  lastSeen: new Date(session.lastSeen).toISOString(),
+  monitoring: Number(session.monitorUntil || 0) > Date.now(),
+  hasFrame: Boolean(session.frame?.length),
+});
 
 const workspaceUserHome = () => {
   if (process.platform === "win32") {
@@ -2913,6 +2980,20 @@ const startNativeVm = async (body) => {
   };
 };
 
+const stopSafetySession = async (session) => {
+  session.stopRequested = true;
+  session.stopMessage = "Admin stopped your VM";
+  if (session.emulator.toLowerCase().includes("hyper-v")) {
+    await runHyperVAction("Stop", {}, 120000).catch(() => null);
+    hyperVRemoteSessionId = "";
+    hyperVRemoteSessionStartedAt = "";
+    clearHyperVStatusCache();
+  } else if (session.emulator.toLowerCase().includes("native qemu")) {
+    await stopNativeVmIfRunning();
+  }
+  return { ok: true, message: session.stopMessage };
+};
+
 const nativeQemuPlugin = () => ({
   name: "nebulavm-native-qemu",
   configureServer(server) {
@@ -3004,6 +3085,8 @@ const nativeQemuPlugin = () => ({
       const isAndroidApi = url.pathname.startsWith("/api/android-emulator");
       const isAndroidStudioApi = url.pathname.startsWith("/api/android-studio");
       const isHostApi = url.pathname.startsWith("/api/emustar-host/");
+      const isSafetyMonitorApi = url.pathname.startsWith("/api/nebulavm-monitor/");
+      const isSafetyAdminApi = url.pathname.startsWith("/api/nebulavm-admin/");
       const isMobileDevUnlockApi =
         url.pathname === "/api/mobile-dev-unlock" || url.pathname === "/.netlify/functions/mobile-dev-unlock";
       const isReportProblemApi =
@@ -3016,6 +3099,8 @@ const nativeQemuPlugin = () => ({
         !isAndroidApi &&
         !isAndroidStudioApi &&
         !isHostApi &&
+        !isSafetyMonitorApi &&
+        !isSafetyAdminApi &&
         !isMobileDevUnlockApi &&
         !isReportProblemApi &&
         !isCommitHistoryApi
@@ -3029,6 +3114,57 @@ const nativeQemuPlugin = () => ({
       if (req.method === "OPTIONS") {
         res.statusCode = 204;
         res.end();
+        return;
+      }
+
+      if (isSafetyAdminApi) {
+        if (!isLoopbackRequest(req)) {
+          json(res, 403, { ok: false, error: "NebulaVM Admin Console is available on this PC only." });
+          return;
+        }
+        try {
+          cleanupSafetySessions();
+          if (req.method === "GET" && url.pathname === "/api/nebulavm-admin/sessions") {
+            json(res, 200, {
+              ok: true,
+              sessions: [...safetySessions.values()].map(safetySessionSummary),
+            });
+            return;
+          }
+          if (req.method === "POST" && url.pathname === "/api/nebulavm-admin/monitor") {
+            const body = await readJsonBody(req);
+            const id = safetySessionId(body.sessionId);
+            const session = safetySessions.get(id);
+            if (!session) throw new Error("That VM session is no longer active.");
+            session.monitorUntil = body.active ? Date.now() + safetyMonitorLeaseMs : 0;
+            json(res, 200, { ok: true, monitoring: Boolean(body.active) });
+            return;
+          }
+          if (req.method === "GET" && url.pathname === "/api/nebulavm-admin/preview") {
+            const id = safetySessionId(url.searchParams.get("sessionId"));
+            const session = safetySessions.get(id);
+            if (!session?.frame?.length) {
+              json(res, 404, { ok: false, error: "Preview is waiting for the monitored browser." });
+              return;
+            }
+            res.statusCode = 200;
+            res.setHeader("Content-Type", session.frameMimeType || "image/jpeg");
+            res.setHeader("Cache-Control", "no-store");
+            res.end(session.frame);
+            return;
+          }
+          if (req.method === "POST" && url.pathname === "/api/nebulavm-admin/stop") {
+            const body = await readJsonBody(req);
+            const id = safetySessionId(body.sessionId);
+            const session = safetySessions.get(id);
+            if (!session) throw new Error("That VM session is no longer active.");
+            json(res, 200, await stopSafetySession(session));
+            return;
+          }
+          json(res, 404, { ok: false, error: "Unknown NebulaVM Admin Console endpoint." });
+        } catch (error) {
+          json(res, 400, { ok: false, error: error.message });
+        }
         return;
       }
 
@@ -3236,6 +3372,54 @@ const nativeQemuPlugin = () => ({
       }
 
       try {
+        if (req.method === "POST" && url.pathname === "/api/nebulavm-monitor/heartbeat") {
+          const body = await readJsonBody(req);
+          const id = safetySessionId(body.sessionId || req.headers["x-nebulavm-session"]);
+          const now = Date.now();
+          const existing = safetySessions.get(id) || {};
+          const session = {
+            ...existing,
+            id,
+            ip: safetyClientIp(req),
+            location: safetyClientLocation(req),
+            emulator: String(body.emulator || "Unknown emulator").slice(0, 80),
+            media: String(body.media || "No media name").slice(0, 260),
+            startedAt: existing.startedAt || body.startedAt || new Date(now).toISOString(),
+            lastSeen: now,
+          };
+          safetySessions.set(id, session);
+          cleanupSafetySessions();
+          const monitoring = Number(session.monitorUntil || 0) > now;
+          const stopRequested = Boolean(session.stopRequested);
+          const stopMessage = session.stopMessage || "Admin stopped your VM";
+          if (stopRequested) {
+            session.stopRequested = false;
+            session.stopMessage = "";
+          }
+          json(res, 200, { ok: true, monitoring, stopRequested, stopMessage });
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/nebulavm-monitor/frame") {
+          const id = safetySessionId(
+            url.searchParams.get("sessionId") || req.headers["x-nebulavm-session"],
+          );
+          const session = safetySessions.get(id);
+          if (!session || Number(session.monitorUntil || 0) <= Date.now()) {
+            json(res, 409, { ok: false, error: "Fullscreen safety monitoring is not active." });
+            return;
+          }
+          const frame = await readBinaryBody(req, safetyFrameMaxBytes);
+          if (!frame.length) throw new Error("Monitoring frame is empty.");
+          session.frame = frame;
+          session.frameMimeType = /^image\/(jpeg|png|webp)$/i.test(String(req.headers["content-type"] || ""))
+            ? String(req.headers["content-type"])
+            : "image/jpeg";
+          session.lastFrameAt = Date.now();
+          json(res, 200, { ok: true });
+          return;
+        }
+
         if (req.method === "GET" && url.pathname === "/api/emustar-host/info") {
           const configuredHost = server.config.server.host;
           const sharingEnabled =
