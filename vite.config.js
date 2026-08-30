@@ -1219,6 +1219,7 @@ let hyperVRemoteSessionStartedAt = "";
 let hyperVStatusCache = { expiresAt: 0, data: null };
 let hyperVStatusRevision = 0;
 let hyperVStartTask = null;
+let hyperVRecoveryTask = null;
 let lastHyperVStart = null;
 let androidRuntime = null;
 let androidImageCache = { expiresAt: 0, items: [] };
@@ -3638,6 +3639,31 @@ const nativeQemuPlugin = () => ({
           hyperVRemoteSessionStartedAt = "";
           clearHyperVStatusCache();
           json(res, 200, result);
+          return;
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/auto-recover") {
+          if (!hyperVRecoveryTask) {
+            hyperVRecoveryTask = (async () => {
+              clearHyperVStatusCache();
+              const actionResult = await runHyperVAction("AutoRecover", {}, 90000);
+              if (actionResult.vm?.state === "Running") {
+                hyperVRemoteSessionId = hyperVRemoteSessionId || randomBytes(12).toString("hex");
+                hyperVRemoteSessionStartedAt = hyperVRemoteSessionStartedAt || new Date().toISOString();
+              }
+              clearHyperVStatusCache();
+              return cacheHyperVStatus(await withHyperVDisplayStatus(actionResult));
+            })();
+          }
+
+          const recoveryPromise = hyperVRecoveryTask;
+          try {
+            json(res, 200, await recoveryPromise);
+          } finally {
+            if (hyperVRecoveryTask === recoveryPromise) {
+              hyperVRecoveryTask = null;
+            }
+          }
           return;
         }
 

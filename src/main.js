@@ -186,6 +186,8 @@ const state = {
   nativeDisplayReconnectAttempts: 0,
   nativeDisplayReconnectConfig: null,
   lastNativeStopLogKey: "",
+  hyperVAutopilotRecoveryAttempted: false,
+  hyperVAutopilotRecoveryFailure: "",
   hyperVConsoleTimer: null,
   hyperVConsoleActive: false,
   hyperVConsoleCleanup: null,
@@ -4341,7 +4343,10 @@ const hyperVStopSummary = (status) => {
     status?.vm?.status && status.vm.status !== "Operating normally"
       ? ` Hyper-V status: ${status.vm.status}.`
       : "";
-  const base = `Hyper-V reports this VM is no longer running, so NebulaVM closed the browser display.${vmState}${vmStatus}`;
+  const recoveryNote = state.hyperVAutopilotRecoveryFailure
+    ? ` NebulaVM Autopilot attempted one repair: ${state.hyperVAutopilotRecoveryFailure}`
+    : "";
+  const base = `Hyper-V reports this VM is no longer running, so NebulaVM closed the browser display.${vmState}${vmStatus}${recoveryNote}`;
 
   if (!event?.message) {
     return `${base} Windows has not reported a specific shutdown reason yet.`;
@@ -4411,6 +4416,30 @@ const monitorNativeVm = () => {
         } catch {
           // A failed confirmation should not tear down an otherwise healthy session.
           return;
+        }
+      }
+
+      if (hyperVRuntime && !state.hyperVAutopilotRecoveryAttempted) {
+        state.hyperVAutopilotRecoveryAttempted = true;
+        log("NebulaVM Autopilot: Hyper-V is confirmed stopped unexpectedly. Diagnosing and attempting one safe restart.");
+        showNativeDisplayStatus("NebulaVM Autopilot is repairing the stopped Hyper-V session...");
+        try {
+          const { response, data: recovery, base } = await fetchHyperVJson("auto-recover", {
+            method: "POST",
+          });
+          if (!response.ok || !recovery.ok || recovery.vm?.state !== "Running") {
+            throw new Error(recovery.error || "Hyper-V did not return to the running state.");
+          }
+          for (const warning of recovery.warnings || []) {
+            log(warning.startsWith("NebulaVM Autopilot:") ? warning : `Hyper-V warning: ${warning}`);
+          }
+          state.hyperVAutopilotRecoveryFailure = "";
+          await adoptRunningHyperVViewport(recovery, base);
+          showNativeDisplayStatus("NebulaVM Autopilot restored the Hyper-V display.");
+          return;
+        } catch (error) {
+          state.hyperVAutopilotRecoveryFailure = error.message || "the automatic restart failed.";
+          log(`NebulaVM Autopilot could not restore Hyper-V: ${state.hyperVAutopilotRecoveryFailure}`);
         }
       }
 
@@ -4626,6 +4655,8 @@ const prepareBootUi = () => {
     ? `${selectedNintendoRamGb()} GB RAM`
     : `${selectedMemoryMb()} MB RAM`;
   setPowerState("Booting", "booting");
+  state.hyperVAutopilotRecoveryAttempted = false;
+  state.hyperVAutopilotRecoveryFailure = "";
   state.startedAt = Date.now();
   clearStatsTimer();
   state.statsTimer = window.setInterval(updateUptime, 1000);

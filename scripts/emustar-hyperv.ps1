@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet("Status", "Start", "Stop", "RequestNewDisk", "Reset", "OpenConsole", "CloseConsole", "ResizeDisplay")]
+  [ValidateSet("Status", "Start", "AutoRecover", "Stop", "RequestNewDisk", "Reset", "OpenConsole", "CloseConsole", "ResizeDisplay")]
   [string]$Action,
 
   [string]$ConfigBase64 = ""
@@ -1276,6 +1276,67 @@ function Stop-Emustar {
   return [ordered]@{ ok = $true; vm = Get-VmSnapshot -Vm (Get-VM -Name $vmName -ErrorAction SilentlyContinue) }
 }
 
+function Recover-Emustar {
+  Assert-HyperVReady
+  $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+  if (-not $vm) {
+    throw "NebulaVM Autopilot cannot recover Hyper-V because its VM no longer exists. Launch it again to rebuild the VM."
+  }
+
+  if ($vm.State -eq "Running") {
+    $action = "confirmed Hyper-V is still running and canceled the unnecessary restart."
+    $autopilotActions.Add($action)
+    $warnings.Add("NebulaVM Autopilot: $action")
+  } else {
+    if ($vm.State -eq "Stopping") {
+      $vm = Stop-EmustarForConfiguration -Vm $vm
+    }
+    if ($vm.State -notin @("Off", "Saved")) {
+      throw "NebulaVM Autopilot cannot safely recover Hyper-V while it is in state '$($vm.State)'."
+    }
+
+    $disk = Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1
+    $diskPath = if ($disk) { [string]$disk.Path } else { "" }
+    if ([string]::IsNullOrWhiteSpace($diskPath) -or -not (Test-Path -LiteralPath $diskPath -PathType Leaf)) {
+      throw "NebulaVM Autopilot found that the VM's virtual disk is missing. Request a new disk or launch the template again."
+    }
+
+    $preparedWindowsDisk = [IO.Path]::GetFileName($diskPath) -match "^private-windows-11-template-.*\.vhdx$"
+    if ($preparedWindowsDisk) {
+      Repair-TemplateDvdAttachments -Vm $vm
+    }
+    Repair-EmustarDiskAccess -DiskPath $diskPath
+
+    try {
+      Start-VM -VM $vm -ErrorAction Stop | Out-Null
+    } catch {
+      $rootReason = Get-EmustarStartFailureReason
+      if (-not $preparedWindowsDisk) {
+        throw "NebulaVM Autopilot could not restart Hyper-V. Root cause: $rootReason."
+      }
+      Repair-TemplateDvdAttachments -Vm $vm
+      Repair-EmustarDiskAccess -DiskPath $diskPath
+      try {
+        Start-VM -VM $vm -ErrorAction Stop | Out-Null
+      } catch {
+        throw "NebulaVM Autopilot could not recover Hyper-V. Root cause: $rootReason. Retry failed: $($_.Exception.Message)"
+      }
+    }
+
+    $action = "confirmed the VM stopped unexpectedly, repaired its attached devices and disk access, and restarted it once."
+    $autopilotActions.Add($action)
+    $warnings.Add("NebulaVM Autopilot: $action")
+  }
+
+  return [ordered]@{
+    ok = $true
+    recovered = $true
+    vm = Get-VmSnapshot -Vm (Get-VM -Name $vmName -ErrorAction Stop)
+    warnings = $warnings
+    autopilotActions = $autopilotActions
+  }
+}
+
 function Remove-EmustarDiskFile {
   param([string]$Path)
 
@@ -1584,6 +1645,7 @@ try {
   $result = switch ($Action) {
     "Status" { Get-Status }
     "Start" { Start-Emustar }
+    "AutoRecover" { Recover-Emustar }
     "Stop" { Stop-Emustar }
     "RequestNewDisk" { Request-NewEmustarDisk }
     "Reset" { Reset-Emustar }
