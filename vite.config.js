@@ -65,6 +65,10 @@ const localEnvValue = (name) => {
   return "";
 };
 
+// Host-backed VM launches stay local unless the owner explicitly opts in.
+// Browser visitors should use runtimes that execute on their own device.
+const publicHostComputeEnabled = localEnvValue("NEBULAVM_PUBLIC_HOST_COMPUTE") === "1";
+
 const resolveHostAccessToken = () => {
   const environmentToken = String(process.env.NEBULAVM_HOST_TOKEN || "").trim();
   if (environmentToken) return environmentToken;
@@ -3209,6 +3213,29 @@ const nativeQemuPlugin = () => ({
 
       if (!isAuthorizedHostRequest(req, url)) {
         json(res, 401, { error: "This Hyper-V host link is missing a valid access token." });
+        return;
+      }
+
+      const publicHostRequest = !isLoopbackRequest(req);
+      const startsHostCompute =
+        req.method === "POST" &&
+        (url.pathname === "/api/emustar-hyperv/start" ||
+          url.pathname === "/api/emustar-hyperv/request-new-disk" ||
+          url.pathname === "/api/emustar-hyperv/reset" ||
+          url.pathname === "/api/native-qemu/start");
+      const writesHostStorage = isHostApi && url.pathname !== "/api/emustar-host/info";
+
+      if (
+        !publicHostComputeEnabled &&
+        publicHostRequest &&
+        (startsHostCompute || writesHostStorage)
+      ) {
+        json(res, 403, {
+          ok: false,
+          available: false,
+          error:
+            "Public host-backed VM launches and storage are disabled. Use v86, QEMU Wasm, or Nintendo to run on this device, or connect to a Remote VM that the host owner started locally.",
+        });
         return;
       }
 
