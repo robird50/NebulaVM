@@ -81,10 +81,13 @@ Install the startup task from an elevated PowerShell window:
 powershell.exe -ExecutionPolicy Bypass -File scripts\install-host-autostart.ps1
 ```
 
-The task runs in the installing user's interactive Windows session after sign-in,
-keeps Vite and the tunnel alive, and allows hidden Hyper-V and Android Studio
-windows to be mirrored into the browser. Keep that Windows user signed in; a
-Session 0 or `SYSTEM` host cannot capture interactive application windows.
+The installer creates a host task plus an independent one-minute watchdog. The
+host task keeps Vite and the tunnel alive, while the watchdog detects a stale
+"Running" task, replaces only failed NebulaVM processes, and republishes the
+public registry. Both run in the installing user's interactive Windows session
+so hidden Hyper-V and Android Studio windows can be mirrored into the browser.
+Keep that Windows user signed in; a Session 0 or `SYSTEM` host cannot capture
+interactive application windows.
 
 ## Windows 11 Guest
 
