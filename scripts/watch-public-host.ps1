@@ -144,17 +144,15 @@ if (-not $createdNew) {
 }
 
 try {
-  $publicUrl = Get-PublicUrl
-  if ((Test-LocalHost) -and (Test-PublicHost $publicUrl)) {
-    Publish-Registry $publicUrl
-    exit 0
-  }
-
-  Start-Sleep -Seconds 5
-  $publicUrl = Get-PublicUrl
-  if ((Test-LocalHost) -and (Test-PublicHost $publicUrl)) {
-    Publish-Registry $publicUrl
-    exit 0
+  for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+    $publicUrl = Get-PublicUrl
+    if ((Test-LocalHost) -and (Test-PublicHost $publicUrl)) {
+      Publish-Registry $publicUrl
+      exit 0
+    }
+    if ($attempt -lt 3) {
+      Start-Sleep -Seconds 10
+    }
   }
 
   Restart-NebulaHost
