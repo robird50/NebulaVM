@@ -8,12 +8,35 @@ $cloudflaredPath = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
 $publicUrlPath = Join-Path $projectRoot ".nebulavm-public-url"
 $hostTokenPath = Join-Path $projectRoot ".nebulavm-host-token"
 $cloudflaredLogPath = Join-Path $projectRoot ".nebulavm-cloudflared.log"
+$autopilotEventPath = Join-Path $projectRoot ".nebulavm-autopilot-events.jsonl"
+$autopilotRunId = [Guid]::NewGuid().ToString("N")
 $netlifyRegistryUrl = if ($env:NEBULAVM_REGISTRY_URL) {
   $env:NEBULAVM_REGISTRY_URL
 } else {
   "https://nebulavm.online/.netlify/functions/host-registry"
 }
 $lastRegistryPublish = Get-Date 0
+
+function Write-AutopilotEvent {
+  param(
+    [string]$Kind,
+    [string]$Message
+  )
+
+  if (Test-Path -LiteralPath $autopilotEventPath) {
+    $eventLog = Get-Item -LiteralPath $autopilotEventPath -ErrorAction SilentlyContinue
+    if ($eventLog -and $eventLog.Length -gt 262144) {
+      Move-Item -LiteralPath $autopilotEventPath -Destination "$autopilotEventPath.old" -Force
+    }
+  }
+  [ordered]@{
+    id = [Guid]::NewGuid().ToString("N")
+    runId = $autopilotRunId
+    timestamp = (Get-Date).ToUniversalTime().ToString("o")
+    kind = $Kind
+    message = $Message
+  } | ConvertTo-Json -Compress | Add-Content -LiteralPath $autopilotEventPath -Encoding UTF8
+}
 
 function Get-NebulaHostToken {
   if (-not (Test-Path -LiteralPath $hostTokenPath)) {
@@ -159,6 +182,7 @@ function Test-TunnelRejected {
 }
 
 function Start-NebulaTunnel {
+  Write-AutopilotEvent -Kind "command" -Message "Starting a replacement Cloudflare bridge for the NebulaVM host."
   Stop-NebulaTunnels
   Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $cloudflaredLogPath -Force -ErrorAction SilentlyContinue
@@ -176,7 +200,7 @@ function Start-NebulaTunnel {
     -WindowStyle Hidden `
     -PassThru
 
-  $deadline = (Get-Date).AddSeconds(180)
+  $deadline = (Get-Date).AddSeconds(90)
   while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 2
     $process.Refresh()
@@ -187,6 +211,7 @@ function Start-NebulaTunnel {
     $publicUrl = Get-PublicUrlFromLog
     if ($publicUrl -and (Test-NebulaPublicHost $publicUrl)) {
       Set-Content -LiteralPath $publicUrlPath -Value $publicUrl -Encoding ASCII
+      Write-AutopilotEvent -Kind "file" -Message "Wrote the live bridge to .nebulavm-public-url."
       return @{
         Process = $process
         PublicUrl = $publicUrl
@@ -225,6 +250,9 @@ function Publish-NetlifyRegistry([string]$PublicUrl, [switch]$Force) {
     -Body $body `
     -TimeoutSec 15 | Out-Null
   $script:lastRegistryPublish = Get-Date
+  if ($Force) {
+    Write-AutopilotEvent -Kind "success" -Message "Published the verified bridge to the public host registry."
+  }
 }
 
 $createdNew = $false
@@ -266,6 +294,7 @@ try {
         }
       }
     } catch {
+      Write-AutopilotEvent -Kind "error" -Message "Host supervisor retry: $($_.Exception.Message)"
       Add-Content `
         -LiteralPath $cloudflaredLogPath `
         -Value "[$(Get-Date -Format o)] Host supervisor: $($_.Exception.Message)"

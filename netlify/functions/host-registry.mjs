@@ -2,7 +2,7 @@ import { getStore } from "@netlify/blobs";
 
 const STORE_NAME = "nebulavm-host-registry";
 const CURRENT_KEY = "current";
-const MAX_AGE_MS = 1000 * 60 * 30;
+const MAX_AGE_MS = 1000 * 90;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

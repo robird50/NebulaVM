@@ -175,8 +175,13 @@ if (-not $createdNew) {
 try {
   for ($attempt = 1; $attempt -le 3; $attempt += 1) {
     $publicUrl = Get-PublicUrl
-    if ((Test-LocalHost) -and (Test-PublicHost $publicUrl)) {
+    $localHostReady = Test-LocalHost
+    if ($localHostReady -and (Test-PublicHost $publicUrl)) {
       Publish-Registry $publicUrl
+      exit 0
+    }
+    if ($localHostReady) {
+      Write-AutopilotEvent -Kind "check" -Message "The local host is healthy; its supervisor is rebuilding the public bridge."
       exit 0
     }
     Write-AutopilotEvent -Kind "check" -Message "Host health check $attempt of 3 did not find a working public bridge."

@@ -190,6 +190,7 @@ const state = {
   hyperVAutopilotRecoveryInProgress: false,
   hyperVAutopilotRecoveryFailure: "",
   hostAutopilotRecoveryInProgress: false,
+  hostAutopilotRecoveryPromise: null,
   autopilotActivityStartedAt: 0,
   autopilotActivityExpectedMs: 26000,
   autopilotActivityTimer: null,
@@ -2152,105 +2153,116 @@ const finishAutopilotActivity = (success, message) => {
 };
 
 const recoverHostedHyperVConnection = async () => {
-  if (
-    !isNetlifyLauncher ||
-    state.hostAutopilotRecoveryInProgress ||
-    state.hyperVAutopilotRecoveryInProgress
-  ) {
-    return;
-  }
+  if (!isNetlifyLauncher || state.hyperVAutopilotRecoveryInProgress) return false;
+  if (state.hostAutopilotRecoveryPromise) return state.hostAutopilotRecoveryPromise;
 
   state.hostAutopilotRecoveryInProgress = true;
-  startAutopilotActivity({
-    expectedMs: Math.max(90000, expectedAutopilotRecoveryMs()),
-    command:
-      'powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\\scripts\\watch-public-host.ps1"',
-    etaBasis: "The Windows watchdog checks the host every minute and safely rebuilds a failed bridge.",
-    firstMessage:
-      "The public Windows host is unreachable. Autopilot is waiting for the independent host watchdog to replace the failed bridge.",
-    steps: [
-      { id: "confirm", label: "Confirm the public Hyper-V host is unreachable", status: "completed" },
-      { id: "watchdog", label: "Wait for the Windows host watchdog", status: "active" },
-      { id: "registry", label: "Discover the replacement public bridge", status: "pending" },
-      { id: "bridge", label: "Verify the Hyper-V API through the new tunnel", status: "pending" },
-      { id: "template", label: "Confirm the Windows 11 Template is available", status: "pending" },
-    ],
-  });
-  log("NebulaVM Autopilot: the public Hyper-V host is offline. Waiting for the Windows watchdog to restore it.");
+  const recoveryTask = (async () => {
+    startAutopilotActivity({
+      expectedMs: 180000,
+      command:
+        'powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\\scripts\\watch-public-host.ps1"',
+      etaBasis: "The Windows watchdog checks the host every minute and safely rebuilds a failed bridge.",
+      firstMessage:
+        "The public Windows host is unreachable. Autopilot is waiting for the independent host watchdog to replace the failed bridge.",
+      steps: [
+        { id: "confirm", label: "Confirm the public Hyper-V host is unreachable", status: "completed" },
+        { id: "watchdog", label: "Wait for the Windows host watchdog", status: "active" },
+        { id: "registry", label: "Discover the replacement public bridge", status: "pending" },
+        { id: "bridge", label: "Verify the Hyper-V API through the new tunnel", status: "pending" },
+        { id: "template", label: "Confirm the Windows 11 Template is available", status: "pending" },
+      ],
+    });
+    log("NebulaVM Autopilot: the public Hyper-V host is offline. Waiting for the Windows watchdog to restore it.");
 
-  const deadline = Date.now() + 180000;
-  let announcedBridge = "";
-  let registryCheck = 0;
-  try {
-    while (Date.now() < deadline) {
-      registryCheck += 1;
-      const host = await fetchNetlifyHostRegistry();
-      if (host?.publicUrl) {
-        try {
-          const { response, data, base } = await requestHyperVJsonFromBases("status", undefined, [host.publicUrl]);
-          appendAutopilotTerminal(`[http] public bridge status -> ${response.status}`, { kind: "check" });
-          if (!response.ok || !data.available) {
-            throw new Error(data.error || "The replacement Hyper-V bridge is not ready yet.");
+    const deadline = Date.now() + 180000;
+    let announcedBridge = "";
+    let registryCheck = 0;
+    try {
+      while (Date.now() < deadline) {
+        registryCheck += 1;
+        const host = await fetchNetlifyHostRegistry();
+        if (host?.publicUrl) {
+          try {
+            const { response, data, base } = await requestHyperVJsonFromBases("status", undefined, [host.publicUrl]);
+            appendAutopilotTerminal(`[http] public bridge status -> ${response.status}`, { kind: "check" });
+            if (!response.ok || !data.available) {
+              throw new Error(data.error || "The replacement Hyper-V bridge is not ready yet.");
+            }
+
+            setAutopilotStep("watchdog", "completed");
+            setAutopilotStep("registry", "completed");
+            setAutopilotStep("bridge", "completed");
+            setAutopilotStep("template", "active");
+            if (announcedBridge !== base) {
+              announcedBridge = base;
+              startAutopilotEventPolling(base);
+              await fetchAutopilotHostEvents(base);
+              appendAutopilotTerminal(`[registry] active bridge -> ${new URL(base).host}`, { kind: "file" });
+              appendAutopilotMessage("The watchdog registered a live replacement bridge. I am checking the Windows template now.");
+            }
+
+            const headers = new Headers();
+            headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+            headers.set("X-NebulaVM-Device", state.nativeDeviceId);
+            const templateResponse = await fetch(`${base}/api/emustar-host/windows11-template`, {
+              cache: "no-store",
+              headers,
+            });
+            const template = await templateResponse.json();
+            appendAutopilotTerminal(`[http] Windows 11 Template check -> ${templateResponse.status}`, {
+              kind: templateResponse.ok ? "success" : "error",
+            });
+            if (!templateResponse.ok || !template.ok || !template.available) {
+              throw new Error(template.error || "The Windows 11 Template is not available yet.");
+            }
+
+            setAutopilotStep("template", "completed");
+            state.nativeQemuApiBase = base;
+            state.nativeQemuApiAvailable = true;
+            state.nativeQemuReady = true;
+            els.nativeStatus.dataset.mode = "ready";
+            els.nativeStatus.textContent = "Autopilot restored the public Windows Hyper-V host. The Windows 11 Template is ready.";
+            updateButtons();
+            finishAutopilotActivity(
+              true,
+              "Host recovery finished. The public bridge and Windows 11 Template are responding again.",
+            );
+            log("NebulaVM Autopilot restored the public Hyper-V host and verified the Windows 11 Template.");
+            return true;
+          } catch {
+            if (registryCheck === 1 || registryCheck % 5 === 0) {
+              appendAutopilotTerminal(
+                `[bridge] check ${registryCheck}: the registered public bridge is not responding.`,
+                { kind: "check" },
+              );
+            }
           }
-
-          setAutopilotStep("watchdog", "completed");
-          setAutopilotStep("registry", "completed");
-          setAutopilotStep("bridge", "completed");
-          setAutopilotStep("template", "active");
-          if (announcedBridge !== base) {
-            announcedBridge = base;
-            startAutopilotEventPolling(base);
-            await fetchAutopilotHostEvents(base);
-            appendAutopilotTerminal(`[registry] active bridge -> ${new URL(base).host}`, { kind: "file" });
-            appendAutopilotMessage("The watchdog registered a live replacement bridge. I am checking the Windows template now.");
-          }
-
-          const headers = new Headers();
-          headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
-          headers.set("X-NebulaVM-Device", state.nativeDeviceId);
-          const templateResponse = await fetch(`${base}/api/emustar-host/windows11-template`, {
-            cache: "no-store",
-            headers,
+        } else if (registryCheck === 1 || registryCheck % 5 === 0) {
+          appendAutopilotTerminal(`[registry] check ${registryCheck}: no live bridge is registered yet.`, {
+            kind: "check",
           });
-          const template = await templateResponse.json();
-          appendAutopilotTerminal(`[http] Windows 11 Template check -> ${templateResponse.status}`, {
-            kind: templateResponse.ok ? "success" : "error",
-          });
-          if (!templateResponse.ok || !template.ok || !template.available) {
-            throw new Error(template.error || "The Windows 11 Template is not available yet.");
-          }
-
-          setAutopilotStep("template", "completed");
-          state.nativeQemuApiBase = base;
-          state.nativeQemuApiAvailable = true;
-          state.nativeQemuReady = true;
-          els.nativeStatus.dataset.mode = "ready";
-          els.nativeStatus.textContent = "Autopilot restored the public Windows Hyper-V host. The Windows 11 Template is ready.";
-          updateButtons();
-          finishAutopilotActivity(
-            true,
-            "Host recovery finished. The public bridge and Windows 11 Template are responding again.",
-          );
-          log("NebulaVM Autopilot restored the public Hyper-V host and verified the Windows 11 Template.");
-          return;
-        } catch {
-          // A registry record can briefly point at the old tunnel while the watchdog replaces it.
         }
-      } else if (registryCheck === 1 || registryCheck % 5 === 0) {
-        appendAutopilotTerminal(`[registry] check ${registryCheck}: no live bridge is registered yet.`, {
-          kind: "check",
-        });
+        await wait(3000);
       }
-      await wait(3000);
+      throw new Error("The Windows watchdog did not restore the public host within three minutes.");
+    } catch (error) {
+      const activeStep = state.autopilotActivitySteps.find((step) => step.status === "active");
+      if (activeStep) setAutopilotStep(activeStep.id, "failed");
+      finishAutopilotActivity(false, `Host recovery stopped: ${error.message}`);
+      log(`NebulaVM Autopilot could not restore the public Hyper-V host: ${error.message}`);
+      return false;
     }
-    throw new Error("The Windows watchdog did not restore the public host within three minutes.");
-  } catch (error) {
-    const activeStep = state.autopilotActivitySteps.find((step) => step.status === "active");
-    if (activeStep) setAutopilotStep(activeStep.id, "failed");
-    finishAutopilotActivity(false, `Host recovery stopped: ${error.message}`);
-    log(`NebulaVM Autopilot could not restore the public Hyper-V host: ${error.message}`);
+  })();
+
+  state.hostAutopilotRecoveryPromise = recoveryTask;
+  try {
+    return await recoveryTask;
   } finally {
     state.hostAutopilotRecoveryInProgress = false;
+    if (state.hostAutopilotRecoveryPromise === recoveryTask) {
+      state.hostAutopilotRecoveryPromise = null;
+    }
   }
 };
 
@@ -3057,7 +3069,7 @@ const selectStoredIso = async (item, { silent = false } = {}) => {
   return item.isoPath;
 };
 
-const selectWindows11Template = async ({ boot = false } = {}) => {
+const selectWindows11Template = async ({ boot = false, allowRecovery = true } = {}) => {
   if (isMobileOrTabletDevice()) {
     log("Windows 11 Template is available on desktop and laptop browsers only.");
     return;
@@ -3101,10 +3113,16 @@ const selectWindows11Template = async ({ boot = false } = {}) => {
     }
   } catch (error) {
     clearWindowsTemplateSelection();
-    log(`Windows 11 Template unavailable: ${error.message}`);
-    if (isHostedHyperVOfflineError(error)) {
-      void recoverHostedHyperVConnection();
+    if (isHostedHyperVOfflineError(error) && allowRecovery) {
+      log("Windows 11 Template is waiting for Autopilot to restore the public host.");
+      const recovered = await recoverHostedHyperVConnection();
+      if (recovered) {
+        log("Autopilot restored the host. Retrying Windows 11 Template automatically.");
+        await selectWindows11Template({ boot, allowRecovery: false });
+        return;
+      }
     }
+    log(`Windows 11 Template unavailable: ${error.message}`);
   } finally {
     state.windowsTemplateLoading = false;
     updateButtons();
@@ -3699,7 +3717,7 @@ const fetchNetlifyHostRegistry = async () => {
     const response = await fetch("/.netlify/functions/host-registry", { cache: "no-store" });
     if (!response.ok) return null;
     const data = await response.json();
-    if (!data.ok || !data.host?.publicUrl || !data.host?.accessToken) return null;
+    if (!data.ok || data.stale || !data.host?.publicUrl || !data.host?.accessToken) return null;
 
     const publicUrl = String(data.host.publicUrl).replace(/\/$/, "");
     state.nativeQemuApiBase = publicUrl;

@@ -1219,6 +1219,7 @@ let hyperVRemoteSessionId = "";
 let hyperVRemoteSessionStartedAt = "";
 let hyperVStatusCache = { expiresAt: 0, data: null };
 let hyperVStatusRevision = 0;
+let hyperVStatusTask = null;
 let hyperVStartTask = null;
 let hyperVRecoveryTask = null;
 let lastHyperVStart = null;
@@ -2347,7 +2348,19 @@ const runHyperVAction = (action, config = {}, timeoutMs = 30000) =>
       callback();
     };
     const timeout = setTimeout(() => {
-      child.kill();
+      try {
+        if (process.platform === "win32" && child.pid) {
+          execFileSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+            stdio: "ignore",
+            windowsHide: true,
+            timeout: 5000,
+          });
+        } else {
+          child.kill("SIGKILL");
+        }
+      } catch {
+        child.kill();
+      }
       finish(() => rejectAction(new Error(`${action} timed out while waiting for Hyper-V.`)));
     }, timeoutMs);
     child.stdout.on("data", (chunk) => {
@@ -2679,15 +2692,29 @@ const getHyperVStatus = async ({ maxAgeMs = 8000, timeoutMs = 25000, force = fal
   }
 
   const revision = hyperVStatusRevision;
-  const rawStatus = await runHyperVAction("Status", {}, timeoutMs);
-  if (revision !== hyperVStatusRevision && hyperVStatusCache.data) {
-    return hyperVStatusCache.data;
+  if (hyperVStatusTask?.revision === revision) {
+    return hyperVStatusTask.promise;
   }
-  const status = await withHyperVDisplayStatus(rawStatus);
-  if (revision !== hyperVStatusRevision && hyperVStatusCache.data) {
-    return hyperVStatusCache.data;
+
+  const statusPromise = (async () => {
+    const rawStatus = await runHyperVAction("Status", {}, timeoutMs);
+    if (revision !== hyperVStatusRevision && hyperVStatusCache.data) {
+      return hyperVStatusCache.data;
+    }
+    const status = await withHyperVDisplayStatus(rawStatus);
+    if (revision !== hyperVStatusRevision && hyperVStatusCache.data) {
+      return hyperVStatusCache.data;
+    }
+    return cacheHyperVStatus(status, maxAgeMs, revision);
+  })();
+  hyperVStatusTask = { revision, promise: statusPromise };
+  try {
+    return await statusPromise;
+  } finally {
+    if (hyperVStatusTask?.promise === statusPromise) {
+      hyperVStatusTask = null;
+    }
   }
-  return cacheHyperVStatus(status, maxAgeMs, revision);
 };
 
 const normalizeArch = (arch) => (arch === "aarch64" ? "aarch64" : "x86_64");
