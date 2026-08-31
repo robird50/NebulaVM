@@ -189,6 +189,11 @@ const state = {
   hyperVAutopilotRecoveryAttempted: false,
   hyperVAutopilotRecoveryInProgress: false,
   hyperVAutopilotRecoveryFailure: "",
+  autopilotActivityStartedAt: 0,
+  autopilotActivityExpectedMs: 26000,
+  autopilotActivityTimer: null,
+  autopilotActivityMessages: [],
+  autopilotActivitySteps: [],
   hyperVConsoleTimer: null,
   hyperVConsoleActive: false,
   hyperVConsoleCleanup: null,
@@ -797,6 +802,10 @@ app.innerHTML = `
           <div class="metric-row">
             <span id="uptimeMetric">00:00</span>
             <span class="host-memory-pill" id="hostMemoryMetric" hidden>Checking host memory...</span>
+            <button class="autopilot-working-pill" id="autopilotWorkingPill" type="button" aria-haspopup="dialog" hidden>
+              <span aria-hidden="true"></span>
+              Autopilot working...
+            </button>
             <div class="android-view-switch" id="androidViewSwitch" role="group" aria-label="Android viewport mode" hidden>
               <button class="is-active" type="button" data-android-viewport-mode="device" aria-pressed="true">Device</button>
               <button type="button" data-android-viewport-mode="management" aria-pressed="false">AVD Management</button>
@@ -1121,6 +1130,45 @@ app.innerHTML = `
     </section>
   </div>
 
+  <div class="display-choice-overlay popup-motion-overlay" id="autopilotDialog" role="dialog" aria-modal="true" aria-labelledby="autopilotDialogTitle" hidden>
+    <section class="display-choice-panel autopilot-panel popup-motion-panel" id="autopilotPanel" tabindex="-1">
+      <header class="autopilot-heading">
+        <div>
+          <p class="kicker">NEBULAVM SELF-RECOVERY</p>
+          <h2 id="autopilotDialogTitle">Autopilot activity</h2>
+        </div>
+        <button class="autopilot-close" id="autopilotCloseButton" type="button" aria-label="Close Autopilot activity">x</button>
+      </header>
+      <section class="autopilot-eta" aria-label="Recovery time estimate">
+        <div>
+          <span>Estimated time remaining</span>
+          <strong id="autopilotEta">00:00:26</strong>
+        </div>
+        <div class="autopilot-progress" aria-hidden="true"><span id="autopilotProgressBar"></span></div>
+        <small id="autopilotEtaBasis">Learning from this recovery.</small>
+      </section>
+      <section class="autopilot-feed-section">
+        <h3>What Autopilot is doing</h3>
+        <div class="autopilot-feed" id="autopilotMessages" aria-live="polite"></div>
+      </section>
+      <section class="autopilot-command-section">
+        <div class="autopilot-section-heading">
+          <h3>Approved host command</h3>
+          <span>Read-only preview</span>
+        </div>
+        <pre><code id="autopilotCommand"></code></pre>
+      </section>
+      <section class="autopilot-checklist-section">
+        <h3>Recovery checklist</h3>
+        <ol class="autopilot-checklist" id="autopilotChecklist"></ol>
+      </section>
+      <footer class="autopilot-footer">
+        <span><i aria-hidden="true"></i> Safe commands only</span>
+        <button class="secondary" id="autopilotDoneButton" type="button">Close</button>
+      </footer>
+    </section>
+  </div>
+
   <div class="display-choice-overlay popup-motion-overlay" id="keepIsoDialog" role="dialog" aria-modal="true" aria-labelledby="keepIsoTitle" hidden>
     <section class="display-choice-panel keep-iso-panel popup-motion-panel">
       <img class="keep-iso-art" src="/assets/stored-iso-host.png" alt="" />
@@ -1276,6 +1324,17 @@ const els = {
   saveStateButton: document.querySelector("#saveStateButton"),
   loadStateButton: document.querySelector("#loadStateButton"),
   fullscreenButton: document.querySelector("#fullscreenButton"),
+  autopilotWorkingPill: document.querySelector("#autopilotWorkingPill"),
+  autopilotDialog: document.querySelector("#autopilotDialog"),
+  autopilotPanel: document.querySelector("#autopilotPanel"),
+  autopilotCloseButton: document.querySelector("#autopilotCloseButton"),
+  autopilotDoneButton: document.querySelector("#autopilotDoneButton"),
+  autopilotEta: document.querySelector("#autopilotEta"),
+  autopilotEtaBasis: document.querySelector("#autopilotEtaBasis"),
+  autopilotProgressBar: document.querySelector("#autopilotProgressBar"),
+  autopilotMessages: document.querySelector("#autopilotMessages"),
+  autopilotCommand: document.querySelector("#autopilotCommand"),
+  autopilotChecklist: document.querySelector("#autopilotChecklist"),
   adminMonitoringPill: document.querySelector("#adminMonitoringPill"),
   screenFullscreenExitButton: document.querySelector("#screenFullscreenExitButton"),
   virtualKeyboardButton: document.querySelector("#virtualKeyboardButton"),
@@ -1329,6 +1388,7 @@ const els = {
 
 const MEMORY_STEPS = [64, 128, 256, 512, 1024, 2048, 4096, 6144];
 const BYTES_PER_MEGABYTE = 1024 * 1024;
+const AUTOPILOT_RECOVERY_HISTORY_KEY = "nebulavm.autopilot.recovery-durations";
 
 const updateSliderTrack = (slider) => {
   const minimum = Number(slider.min) || 0;
@@ -1832,6 +1892,133 @@ const log = (message) => {
   const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   els.logOutput.textContent += `[${time}] ${message}\n`;
   els.logOutput.scrollTop = els.logOutput.scrollHeight;
+};
+
+const formatAutopilotDuration = (milliseconds) => {
+  const seconds = Math.max(0, Math.ceil(Number(milliseconds || 0) / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  return [hours, minutes, remainingSeconds].map((value) => String(value).padStart(2, "0")).join(":");
+};
+
+const autopilotRecoveryHistory = () => {
+  try {
+    const values = JSON.parse(window.localStorage.getItem(AUTOPILOT_RECOVERY_HISTORY_KEY) || "[]");
+    return Array.isArray(values)
+      ? values.filter((value) => Number.isFinite(value) && value >= 3000 && value <= 120000).slice(-8)
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const expectedAutopilotRecoveryMs = () => {
+  const history = autopilotRecoveryHistory().sort((a, b) => a - b);
+  if (!history.length) return 26000;
+  const middle = Math.floor(history.length / 2);
+  return history.length % 2 ? history[middle] : Math.round((history[middle - 1] + history[middle]) / 2);
+};
+
+const saveAutopilotRecoveryDuration = (duration) => {
+  const history = [...autopilotRecoveryHistory(), Math.round(duration)].slice(-8);
+  window.localStorage.setItem(AUTOPILOT_RECOVERY_HISTORY_KEY, JSON.stringify(history));
+};
+
+const renderAutopilotChecklist = () => {
+  els.autopilotChecklist.replaceChildren();
+  for (const step of state.autopilotActivitySteps) {
+    const item = document.createElement("li");
+    item.dataset.status = step.status;
+    const marker = document.createElement("span");
+    marker.setAttribute("aria-hidden", "true");
+    marker.textContent = step.status === "completed" ? "OK" : step.status === "failed" ? "!" : "";
+    const label = document.createElement("span");
+    label.textContent = step.label;
+    item.append(marker, label);
+    els.autopilotChecklist.append(item);
+  }
+};
+
+const setAutopilotStep = (id, status) => {
+  const step = state.autopilotActivitySteps.find((item) => item.id === id);
+  if (!step) return;
+  step.status = status;
+  renderAutopilotChecklist();
+};
+
+const appendAutopilotMessage = (message, tone = "working") => {
+  const text = String(message || "").replace(/\s+/g, " ").trim();
+  if (!text || state.autopilotActivityMessages.at(-1)?.text === text) return;
+  const entry = { text, tone, time: new Date() };
+  state.autopilotActivityMessages.push(entry);
+  const article = document.createElement("article");
+  article.className = "autopilot-message";
+  article.dataset.tone = tone;
+  const time = document.createElement("time");
+  time.dateTime = entry.time.toISOString();
+  time.textContent = entry.time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const copy = document.createElement("p");
+  copy.textContent = text;
+  article.append(time, copy);
+  els.autopilotMessages.append(article);
+  els.autopilotMessages.scrollTop = els.autopilotMessages.scrollHeight;
+};
+
+const updateAutopilotEta = () => {
+  if (!state.autopilotActivityStartedAt) return;
+  const elapsed = Date.now() - state.autopilotActivityStartedAt;
+  const remaining = Math.max(0, state.autopilotActivityExpectedMs - elapsed);
+  els.autopilotEta.textContent = formatAutopilotDuration(remaining);
+  const progress = Math.min(94, (elapsed / Math.max(1, state.autopilotActivityExpectedMs)) * 100);
+  els.autopilotProgressBar.style.width = `${progress}%`;
+};
+
+const startAutopilotActivity = () => {
+  if (state.autopilotActivityTimer) window.clearInterval(state.autopilotActivityTimer);
+  const history = autopilotRecoveryHistory();
+  state.autopilotActivityStartedAt = Date.now();
+  state.autopilotActivityExpectedMs = expectedAutopilotRecoveryMs();
+  state.autopilotActivityMessages = [];
+  state.autopilotActivitySteps = [
+    { id: "confirm", label: "Confirm that Hyper-V actually stopped", status: "completed" },
+    { id: "inspect", label: "Inspect the attached disk and virtual devices", status: "active" },
+    { id: "repair", label: "Repair safe disk access and stale attachments", status: "pending" },
+    { id: "restart", label: "Restart the Hyper-V virtual machine once", status: "pending" },
+    { id: "display", label: "Reconnect the browser display", status: "pending" },
+  ];
+  els.autopilotMessages.replaceChildren();
+  els.autopilotCommand.textContent =
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\\scripts\\emustar-hyperv.ps1" -Action AutoRecover';
+  els.autopilotEtaBasis.textContent = history.length
+    ? `Estimate based on ${history.length} recent successful ${history.length === 1 ? "recovery" : "recoveries"}.`
+    : "First-run estimate; Autopilot will learn from successful recoveries.";
+  els.autopilotProgressBar.style.width = "0%";
+  els.autopilotWorkingPill.hidden = false;
+  renderAutopilotChecklist();
+  appendAutopilotMessage(
+    "Hyper-V is confirmed off. I am inspecting its disk and attached devices before allowing one safe restart.",
+  );
+  updateAutopilotEta();
+  state.autopilotActivityTimer = window.setInterval(updateAutopilotEta, 1000);
+};
+
+const finishAutopilotActivity = (success, message) => {
+  if (state.autopilotActivityTimer) window.clearInterval(state.autopilotActivityTimer);
+  state.autopilotActivityTimer = null;
+  const elapsed = Math.max(0, Date.now() - state.autopilotActivityStartedAt);
+  if (success) {
+    saveAutopilotRecoveryDuration(elapsed);
+    els.autopilotEta.textContent = "00:00:00";
+    els.autopilotProgressBar.style.width = "100%";
+    els.autopilotEtaBasis.textContent = `Recovered in ${formatAutopilotDuration(elapsed)}. Future estimates will use this result.`;
+  } else {
+    els.autopilotEta.textContent = "Stopped";
+    els.autopilotEtaBasis.textContent = "Autopilot stopped instead of repeating an unsafe repair loop.";
+  }
+  appendAutopilotMessage(message, success ? "success" : "error");
+  els.autopilotWorkingPill.hidden = true;
+  state.autopilotActivityStartedAt = 0;
 };
 
 const setSafetyMonitoringActive = (active) => {
@@ -4431,6 +4618,7 @@ const monitorNativeVm = () => {
       if (hyperVRuntime && !state.hyperVAutopilotRecoveryAttempted) {
         state.hyperVAutopilotRecoveryAttempted = true;
         state.hyperVAutopilotRecoveryInProgress = true;
+        startAutopilotActivity();
         log("NebulaVM Autopilot: Hyper-V is confirmed stopped unexpectedly. Diagnosing and attempting one safe restart.");
         showNativeDisplayStatus("NebulaVM Autopilot is repairing the stopped Hyper-V session...");
         try {
@@ -4440,17 +4628,33 @@ const monitorNativeVm = () => {
           if (!response.ok || !recovery.ok || recovery.vm?.state !== "Running") {
             throw new Error(recovery.error || "Hyper-V did not return to the running state.");
           }
+          setAutopilotStep("inspect", "completed");
+          setAutopilotStep("repair", "completed");
+          setAutopilotStep("restart", "completed");
+          setAutopilotStep("display", "active");
           for (const warning of recovery.warnings || []) {
             log(warning.startsWith("NebulaVM Autopilot:") ? warning : `Hyper-V warning: ${warning}`);
+            appendAutopilotMessage(warning.replace(/^NebulaVM Autopilot:\s*/i, ""), "success");
           }
+          appendAutopilotMessage(
+            "The virtual machine is running again. I am reconnecting its browser display now.",
+          );
           state.hyperVAutopilotRecoveryFailure = "";
           await adoptRunningHyperVViewport(recovery, base);
+          setAutopilotStep("display", "completed");
           state.hyperVAutopilotRecoveryInProgress = false;
           showNativeDisplayStatus("NebulaVM Autopilot restored the Hyper-V display.");
+          finishAutopilotActivity(true, "Recovery finished. Hyper-V and its browser display are responding again.");
           return;
         } catch (error) {
           state.hyperVAutopilotRecoveryInProgress = false;
           state.hyperVAutopilotRecoveryFailure = error.message || "the automatic restart failed.";
+          const activeStep = state.autopilotActivitySteps.find((step) => step.status === "active");
+          if (activeStep) setAutopilotStep(activeStep.id, "failed");
+          finishAutopilotActivity(
+            false,
+            `Automatic recovery stopped safely: ${state.hyperVAutopilotRecoveryFailure}`,
+          );
           log(`NebulaVM Autopilot could not restore Hyper-V: ${state.hyperVAutopilotRecoveryFailure}`);
         }
       }
@@ -6423,6 +6627,18 @@ els.emustarInfoDialog.addEventListener("click", (event) => {
     closePopupTo(els.emustarInfoDialog, els.emustarInfoLink);
   }
 });
+const closeAutopilotDialog = () => {
+  closePopupTo(els.autopilotDialog, els.autopilotWorkingPill);
+};
+els.autopilotWorkingPill.addEventListener("click", () => {
+  els.autopilotPanel.scrollTop = 0;
+  openPopupFrom(els.autopilotDialog, els.autopilotWorkingPill, els.autopilotPanel);
+});
+els.autopilotCloseButton.addEventListener("click", closeAutopilotDialog);
+els.autopilotDoneButton.addEventListener("click", closeAutopilotDialog);
+els.autopilotDialog.addEventListener("click", (event) => {
+  if (event.target === els.autopilotDialog) closeAutopilotDialog();
+});
 const closeNintendoHelpDialog = () => {
   closePopupTo(els.nintendoHelpDialog, els.nintendoHelpLink);
 };
@@ -6837,6 +7053,9 @@ document.addEventListener("keydown", (event) => {
     }
     if (!els.problemReportDialog.hidden) {
       closeProblemReportDialog();
+    }
+    if (!els.autopilotDialog.hidden) {
+      closeAutopilotDialog();
     }
   }
 });
