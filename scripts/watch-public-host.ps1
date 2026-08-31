@@ -8,6 +8,8 @@ $vitePath = Join-Path $projectRoot "node_modules\vite\bin\vite.js"
 $publicUrlPath = Join-Path $projectRoot ".nebulavm-public-url"
 $hostTokenPath = Join-Path $projectRoot ".nebulavm-host-token"
 $watchdogLogPath = Join-Path $projectRoot ".nebulavm-watchdog.log"
+$autopilotEventPath = Join-Path $projectRoot ".nebulavm-autopilot-events.jsonl"
+$autopilotRunId = [Guid]::NewGuid().ToString("N")
 $registryUrl = if ($env:NEBULAVM_REGISTRY_URL) {
   $env:NEBULAVM_REGISTRY_URL
 } else {
@@ -22,6 +24,27 @@ function Write-WatchdogLog([string]$Message) {
     }
   }
   Add-Content -LiteralPath $watchdogLogPath -Value "[$(Get-Date -Format o)] $Message"
+}
+
+function Write-AutopilotEvent {
+  param(
+    [string]$Kind,
+    [string]$Message
+  )
+
+  if (Test-Path -LiteralPath $autopilotEventPath) {
+    $eventLog = Get-Item -LiteralPath $autopilotEventPath -ErrorAction SilentlyContinue
+    if ($eventLog -and $eventLog.Length -gt 262144) {
+      Move-Item -LiteralPath $autopilotEventPath -Destination "$autopilotEventPath.old" -Force
+    }
+  }
+  [ordered]@{
+    id = [Guid]::NewGuid().ToString("N")
+    runId = $autopilotRunId
+    timestamp = (Get-Date).ToUniversalTime().ToString("o")
+    kind = $Kind
+    message = $Message
+  } | ConvertTo-Json -Compress | Add-Content -LiteralPath $autopilotEventPath -Encoding UTF8
 }
 
 function Get-HostToken {
@@ -109,14 +132,18 @@ function Get-NebulaProcesses {
 }
 
 function Restart-NebulaHost {
-  Write-WatchdogLog "The host failed two health checks. Restarting only NebulaVM Host and its tunnel."
+  Write-WatchdogLog "The host failed three health checks. Restarting only NebulaVM Host and its tunnel."
+  Write-AutopilotEvent -Kind "command" -Message "Restarting only the NebulaVM Host task and public tunnel."
   Stop-ScheduledTask -TaskName $hostTaskName -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 2
 
   foreach ($process in (Get-NebulaProcesses)) {
     Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
   }
-  Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $publicUrlPath) {
+    Remove-Item -LiteralPath $publicUrlPath -Force -ErrorAction SilentlyContinue
+    Write-AutopilotEvent -Kind "file" -Message "Removed the stale .nebulavm-public-url bridge record."
+  }
   Start-ScheduledTask -TaskName $hostTaskName -ErrorAction Stop
 
   $deadline = (Get-Date).AddMinutes(2)
@@ -125,6 +152,8 @@ function Restart-NebulaHost {
     $publicUrl = Get-PublicUrl
     if ((Test-LocalHost) -and (Test-PublicHost $publicUrl)) {
       Publish-Registry $publicUrl
+      Write-AutopilotEvent -Kind "file" -Message "The host wrote a live bridge to .nebulavm-public-url."
+      Write-AutopilotEvent -Kind "success" -Message "Published the replacement bridge to the public registry."
       Write-WatchdogLog "Recovery succeeded and the public registry was refreshed."
       return
     }
@@ -150,6 +179,7 @@ try {
       Publish-Registry $publicUrl
       exit 0
     }
+    Write-AutopilotEvent -Kind "check" -Message "Host health check $attempt of 3 did not find a working public bridge."
     if ($attempt -lt 3) {
       Start-Sleep -Seconds 10
     }
@@ -157,6 +187,7 @@ try {
 
   Restart-NebulaHost
 } catch {
+  Write-AutopilotEvent -Kind "error" -Message "Recovery failed: $($_.Exception.Message)"
   Write-WatchdogLog "Recovery failed: $($_.Exception.Message)"
   exit 1
 } finally {

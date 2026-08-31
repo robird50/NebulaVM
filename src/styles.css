@@ -2834,7 +2834,7 @@ input[type="text"] {
 }
 
 .autopilot-feed-section h3,
-.autopilot-command-section h3,
+.autopilot-terminal-section h3,
 .autopilot-checklist-section h3 {
   margin: 0;
   color: #e9f2f4;
@@ -2842,7 +2842,7 @@ input[type="text"] {
 }
 
 .autopilot-feed-section,
-.autopilot-command-section,
+.autopilot-terminal-section,
 .autopilot-checklist-section {
   display: grid;
   gap: 10px;
@@ -2888,19 +2888,86 @@ input[type="text"] {
   line-height: 1.45;
 }
 
-.autopilot-command-section pre {
-  margin: 0;
-  overflow: auto;
-  padding: 14px;
+.autopilot-terminal {
+  overflow: hidden;
   border: 1px solid rgba(245, 217, 78, 0.25);
   border-radius: 6px;
   background: #060a0d;
+  box-shadow: inset 0 0 32px rgba(0, 0, 0, 0.38);
+}
+
+.autopilot-terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #11191d;
+}
+
+.autopilot-terminal-bar span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff6b78;
+}
+
+.autopilot-terminal-bar span:nth-child(2) {
+  background: #f5d94e;
+}
+
+.autopilot-terminal-bar span:nth-child(3) {
+  background: #4ade80;
+}
+
+.autopilot-terminal-bar b {
+  margin-left: 4px;
+  color: #8fa1aa;
+  font-size: 0.72rem;
+}
+
+.autopilot-terminal-output {
+  min-height: 150px;
+  max-height: 245px;
+  overflow: auto;
+  padding: 13px 14px;
   color: #f6e68e;
   font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   font-size: 0.78rem;
   line-height: 1.55;
+}
+
+.autopilot-terminal-line {
+  min-height: 1.55em;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  animation: autopilot-message-rise 220ms ease-out both;
+}
+
+.autopilot-terminal-line[data-kind="system"],
+.autopilot-terminal-line[data-kind="inspect"],
+.autopilot-terminal-line[data-kind="check"] {
+  color: #9ddff2;
+}
+
+.autopilot-terminal-line[data-kind="file"] {
+  color: #c9a8ff;
+}
+
+.autopilot-terminal-line[data-kind="success"] {
+  color: #8ff0ad;
+}
+
+.autopilot-terminal-line[data-kind="error"] {
+  color: #ff8d98;
+}
+
+.autopilot-terminal-line[data-typing="true"]::after {
+  content: "_";
+  margin-left: 2px;
+  color: #dfffb8;
+  animation: autopilot-cursor 620ms steps(1) infinite;
 }
 
 .autopilot-checklist {
@@ -3008,6 +3075,12 @@ input[type="text"] {
   }
 }
 
+@keyframes autopilot-cursor {
+  50% {
+    opacity: 0;
+  }
+}
+
 @media (max-width: 620px) {
   .autopilot-panel {
     max-height: calc(100dvh - 20px);
@@ -3017,6 +3090,12 @@ input[type="text"] {
   .autopilot-message {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+
+  .autopilot-terminal-output {
+    min-height: 135px;
+    max-height: 210px;
+    font-size: 0.72rem;
   }
 
   .autopilot-footer {
@@ -3029,6 +3108,11 @@ input[type="text"] {
   .autopilot-working-pill > span,
   .autopilot-checklist li[data-status="active"] > span:first-child,
   .autopilot-message {
+    animation: none;
+  }
+
+  .autopilot-terminal-line,
+  .autopilot-terminal-line[data-typing="true"]::after {
     animation: none;
   }
 }

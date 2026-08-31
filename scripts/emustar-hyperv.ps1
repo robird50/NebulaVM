@@ -11,9 +11,35 @@ $ProgressPreference = "SilentlyContinue"
 $vmName = "NebulaVM-EMUSTAR"
 $warnings = [System.Collections.Generic.List[string]]::new()
 $autopilotActions = [System.Collections.Generic.List[string]]::new()
+$autopilotEventPath = Join-Path (Split-Path -Parent $PSScriptRoot) ".nebulavm-autopilot-events.jsonl"
+$autopilotRunId = [Guid]::NewGuid().ToString("N")
 $privateDiskTtlHours = 12
 $privateDiskMaxBytes = [int64]80GB
 $hostStorageReserveBytes = [int64]25GB
+
+function Write-AutopilotEvent {
+  param(
+    [string]$Kind,
+    [string]$Message
+  )
+
+  if ($Action -ne "AutoRecover" -or [string]::IsNullOrWhiteSpace($Message)) {
+    return
+  }
+  if (Test-Path -LiteralPath $autopilotEventPath) {
+    $eventLog = Get-Item -LiteralPath $autopilotEventPath -ErrorAction SilentlyContinue
+    if ($eventLog -and $eventLog.Length -gt 262144) {
+      Move-Item -LiteralPath $autopilotEventPath -Destination "$autopilotEventPath.old" -Force
+    }
+  }
+  [ordered]@{
+    id = [Guid]::NewGuid().ToString("N")
+    runId = $autopilotRunId
+    timestamp = (Get-Date).ToUniversalTime().ToString("o")
+    kind = $Kind
+    message = $Message
+  } | ConvertTo-Json -Compress | Add-Content -LiteralPath $autopilotEventPath -Encoding UTF8
+}
 
 function Format-NebulaSize {
   param([int64]$Bytes)
@@ -810,6 +836,7 @@ function Repair-TemplateDvdAttachments {
 
   if ($cleared -gt 0 -or $removed -gt 0) {
     $action = "removed $cleared stale DVD image attachment(s) and $removed extra DVD drive(s) before the prepared Windows disk boot."
+    Write-AutopilotEvent -Kind "file" -Message $action
     $autopilotActions.Add($action)
     $warnings.Add("NebulaVM Autopilot: $action")
   }
@@ -823,11 +850,14 @@ function Repair-EmustarDiskAccess {
   }
 
   try {
+    $diskName = [IO.Path]::GetFileName($DiskPath)
+    Write-AutopilotEvent -Kind "file" -Message "Refreshing Hyper-V access for $diskName."
     $grant = "*S-1-5-83-0:(M)"
     & icacls.exe $DiskPath /grant $grant /C /Q | Out-Null
     if ($LASTEXITCODE -ne 0) {
       throw "icacls exited with code $LASTEXITCODE"
     }
+    Write-AutopilotEvent -Kind "success" -Message "Hyper-V access is ready for $diskName."
   } catch {
     $warnings.Add("NebulaVM Autopilot could not refresh Hyper-V access to the private disk: $($_.Exception.Message)")
   }
@@ -1278,6 +1308,7 @@ function Stop-Emustar {
 
 function Recover-Emustar {
   Assert-HyperVReady
+  Write-AutopilotEvent -Kind "inspect" -Message "Inspecting NebulaVM-EMUSTAR and its attached devices."
   $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
   if (-not $vm) {
     throw "NebulaVM Autopilot cannot recover Hyper-V because its VM no longer exists. Launch it again to rebuild the VM."
@@ -1285,10 +1316,12 @@ function Recover-Emustar {
 
   if ($vm.State -eq "Running") {
     $action = "confirmed Hyper-V is still running and canceled the unnecessary restart."
+    Write-AutopilotEvent -Kind "success" -Message $action
     $autopilotActions.Add($action)
     $warnings.Add("NebulaVM Autopilot: $action")
   } else {
     if ($vm.State -eq "Stopping") {
+      Write-AutopilotEvent -Kind "command" -Message "Waiting for the stopping VM to reach a safe state."
       $vm = Stop-EmustarForConfiguration -Vm $vm
     }
     if ($vm.State -notin @("Off", "Saved")) {
@@ -1308,6 +1341,7 @@ function Recover-Emustar {
     Repair-EmustarDiskAccess -DiskPath $diskPath
 
     try {
+      Write-AutopilotEvent -Kind "command" -Message "Starting NebulaVM-EMUSTAR once."
       Start-VM -VM $vm -ErrorAction Stop | Out-Null
     } catch {
       $rootReason = Get-EmustarStartFailureReason
@@ -1317,6 +1351,7 @@ function Recover-Emustar {
       Repair-TemplateDvdAttachments -Vm $vm
       Repair-EmustarDiskAccess -DiskPath $diskPath
       try {
+        Write-AutopilotEvent -Kind "command" -Message "Retrying the repaired Hyper-V start once."
         Start-VM -VM $vm -ErrorAction Stop | Out-Null
       } catch {
         throw "NebulaVM Autopilot could not recover Hyper-V. Root cause: $rootReason. Retry failed: $($_.Exception.Message)"
@@ -1324,6 +1359,7 @@ function Recover-Emustar {
     }
 
     $action = "confirmed the VM stopped unexpectedly, repaired its attached devices and disk access, and restarted it once."
+    Write-AutopilotEvent -Kind "success" -Message $action
     $autopilotActions.Add($action)
     $warnings.Add("NebulaVM Autopilot: $action")
   }
@@ -1655,6 +1691,7 @@ try {
   }
   $result | ConvertTo-Json -Depth 8 -Compress
 } catch {
+  Write-AutopilotEvent -Kind "error" -Message $_.Exception.Message
   [ordered]@{
     ok = $false
     error = $_.Exception.Message

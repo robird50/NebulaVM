@@ -41,6 +41,7 @@ const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const reportGmailAccount = "nebulavmsupport@gmail.com";
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
 const publicUrlPath = resolve(workspaceDir, ".nebulavm-public-url");
+const autopilotEventPath = resolve(workspaceDir, ".nebulavm-autopilot-events.jsonl");
 const guestCredentialsPath = resolve(workspaceDir, ".nebulavm-guest-credentials.json");
 const publicAndroidEnabled = false;
 
@@ -3630,6 +3631,25 @@ const nativeQemuPlugin = () => ({
               hyperVStartTask = null;
             }
           }
+          return;
+        }
+
+        if (req.method === "GET" && url.pathname === "/api/emustar-host/autopilot-activity") {
+          const events = existsSync(autopilotEventPath)
+            ? readFileSync(autopilotEventPath, "utf8")
+                .split(/\r?\n/)
+                .filter(Boolean)
+                .slice(-80)
+                .flatMap((line) => {
+                  try {
+                    const event = JSON.parse(line.replace(/^\uFEFF/, ""));
+                    return event?.id && event?.timestamp && event?.message ? [event] : [];
+                  } catch {
+                    return [];
+                  }
+                })
+            : [];
+          json(res, 200, { ok: true, events });
           return;
         }
 

@@ -195,6 +195,12 @@ const state = {
   autopilotActivityTimer: null,
   autopilotActivityMessages: [],
   autopilotActivitySteps: [],
+  autopilotTerminalQueue: [],
+  autopilotTerminalBusy: false,
+  autopilotTerminalTimer: null,
+  autopilotTerminalPollTimer: null,
+  autopilotTerminalBase: "",
+  autopilotTerminalSeenEvents: new Set(),
   hyperVConsoleTimer: null,
   hyperVConsoleActive: false,
   hyperVConsoleCleanup: null,
@@ -1152,12 +1158,15 @@ app.innerHTML = `
         <h3>What Autopilot is doing</h3>
         <div class="autopilot-feed" id="autopilotMessages" aria-live="polite"></div>
       </section>
-      <section class="autopilot-command-section">
+      <section class="autopilot-terminal-section">
         <div class="autopilot-section-heading">
-          <h3>Approved host command</h3>
-          <span>Read-only preview</span>
+          <h3>Live recovery terminal</h3>
+          <span id="autopilotTerminalStatus">Waiting</span>
         </div>
-        <pre><code id="autopilotCommand"></code></pre>
+        <div class="autopilot-terminal" id="autopilotTerminal" role="log" aria-live="polite" aria-label="Live Autopilot command output">
+          <div class="autopilot-terminal-bar"><span></span><span></span><span></span><b>NebulaVM Host</b></div>
+          <div class="autopilot-terminal-output" id="autopilotCommand"></div>
+        </div>
       </section>
       <section class="autopilot-checklist-section">
         <h3>Recovery checklist</h3>
@@ -1335,6 +1344,8 @@ const els = {
   autopilotProgressBar: document.querySelector("#autopilotProgressBar"),
   autopilotMessages: document.querySelector("#autopilotMessages"),
   autopilotCommand: document.querySelector("#autopilotCommand"),
+  autopilotTerminal: document.querySelector("#autopilotTerminal"),
+  autopilotTerminalStatus: document.querySelector("#autopilotTerminalStatus"),
   autopilotChecklist: document.querySelector("#autopilotChecklist"),
   adminMonitoringPill: document.querySelector("#adminMonitoringPill"),
   screenFullscreenExitButton: document.querySelector("#screenFullscreenExitButton"),
@@ -1966,6 +1977,109 @@ const appendAutopilotMessage = (message, tone = "working") => {
   els.autopilotMessages.scrollTop = els.autopilotMessages.scrollHeight;
 };
 
+const stopAutopilotEventPolling = () => {
+  if (state.autopilotTerminalPollTimer) window.clearInterval(state.autopilotTerminalPollTimer);
+  state.autopilotTerminalPollTimer = null;
+  state.autopilotTerminalBase = "";
+};
+
+const resetAutopilotTerminal = () => {
+  if (state.autopilotTerminalTimer) window.clearTimeout(state.autopilotTerminalTimer);
+  stopAutopilotEventPolling();
+  state.autopilotTerminalQueue = [];
+  state.autopilotTerminalBusy = false;
+  state.autopilotTerminalTimer = null;
+  state.autopilotTerminalSeenEvents = new Set();
+  els.autopilotCommand.replaceChildren();
+  els.autopilotTerminalStatus.textContent = "Starting";
+  els.autopilotTerminal.dataset.active = "true";
+};
+
+const drainAutopilotTerminal = () => {
+  if (state.autopilotTerminalBusy || !state.autopilotTerminalQueue.length) return;
+  state.autopilotTerminalBusy = true;
+  const entry = state.autopilotTerminalQueue.shift();
+  const line = document.createElement("div");
+  line.className = "autopilot-terminal-line";
+  line.dataset.kind = entry.kind;
+  line.dataset.typing = entry.type ? "true" : "false";
+  els.autopilotCommand.append(line);
+
+  let index = 0;
+  const finishLine = () => {
+    line.dataset.typing = "false";
+    state.autopilotTerminalBusy = false;
+    els.autopilotCommand.scrollTop = els.autopilotCommand.scrollHeight;
+    state.autopilotTerminalTimer = window.setTimeout(drainAutopilotTerminal, entry.type ? 90 : 25);
+  };
+  const typeNext = () => {
+    const nextLength = Math.min(entry.text.length, index + (entry.type ? 1 : entry.text.length));
+    line.textContent = entry.text.slice(0, nextLength);
+    index = nextLength;
+    els.autopilotCommand.scrollTop = els.autopilotCommand.scrollHeight;
+    if (index >= entry.text.length) {
+      finishLine();
+      return;
+    }
+    state.autopilotTerminalTimer = window.setTimeout(typeNext, 11);
+  };
+  typeNext();
+};
+
+const appendAutopilotTerminal = (message, { kind = "output", type = false } = {}) => {
+  const text = String(message || "").trim();
+  if (!text) return;
+  state.autopilotTerminalQueue.push({ text, kind, type });
+  drainAutopilotTerminal();
+};
+
+const fetchAutopilotHostEvents = async (base = state.autopilotTerminalBase) => {
+  if (!base) return;
+  const cutoff = Math.max(0, state.autopilotActivityStartedAt - 70000);
+  try {
+    const headers = new Headers();
+    headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
+    headers.set("X-NebulaVM-Device", state.nativeDeviceId);
+    const response = await fetch(`${base.replace(/\/$/, "")}/api/emustar-host/autopilot-activity`, {
+      cache: "no-store",
+      headers,
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    for (const event of data.events || []) {
+      if (
+        state.autopilotTerminalSeenEvents.has(event.id) ||
+        !Number.isFinite(Date.parse(event.timestamp)) ||
+        Date.parse(event.timestamp) < cutoff
+      ) {
+        continue;
+      }
+      state.autopilotTerminalSeenEvents.add(event.id);
+      const kind = ["command", "file", "success", "error", "check", "inspect"].includes(event.kind)
+        ? event.kind
+        : "output";
+      appendAutopilotTerminal(`[${kind}] ${event.message}`, {
+        kind,
+        type: kind === "command",
+      });
+    }
+  } catch {
+    // The event endpoint can disappear briefly while the public bridge is being replaced.
+  }
+};
+
+const startAutopilotEventPolling = (base) => {
+  const normalized = String(base || "").replace(/\/$/, "");
+  if (!normalized || state.autopilotTerminalBase === normalized) return;
+  stopAutopilotEventPolling();
+  state.autopilotTerminalBase = normalized;
+  void fetchAutopilotHostEvents(normalized);
+  state.autopilotTerminalPollTimer = window.setInterval(
+    () => void fetchAutopilotHostEvents(normalized),
+    700,
+  );
+};
+
 const updateAutopilotEta = () => {
   if (!state.autopilotActivityStartedAt) return;
   const elapsed = Date.now() - state.autopilotActivityStartedAt;
@@ -1988,9 +2102,15 @@ const startAutopilotActivity = ({ expectedMs, steps, command, firstMessage, etaB
     { id: "restart", label: "Restart the Hyper-V virtual machine once", status: "pending" },
     { id: "display", label: "Reconnect the browser display", status: "pending" },
   ];
+  resetAutopilotTerminal();
   els.autopilotMessages.replaceChildren();
-  els.autopilotCommand.textContent =
+  const recoveryCommand =
     command || 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\\scripts\\emustar-hyperv.ps1" -Action AutoRecover';
+  appendAutopilotTerminal("NebulaVM Recovery Console", { kind: "system" });
+  appendAutopilotTerminal(`PS C:\\NebulaVM> ${recoveryCommand}`, { kind: "command", type: true });
+  appendAutopilotTerminal("[observe] Streaming verified host activity. File entries appear only when a file is actually changed.", {
+    kind: "inspect",
+  });
   els.autopilotEtaBasis.textContent =
     etaBasis ||
     (history.length
@@ -2021,6 +2141,12 @@ const finishAutopilotActivity = (success, message) => {
     els.autopilotEtaBasis.textContent = "Autopilot stopped instead of repeating an unsafe repair loop.";
   }
   appendAutopilotMessage(message, success ? "success" : "error");
+  appendAutopilotTerminal(success ? "[exit 0] Recovery completed." : "[exit 1] Recovery stopped safely.", {
+    kind: success ? "success" : "error",
+  });
+  els.autopilotTerminalStatus.textContent = success ? "Completed" : "Stopped";
+  els.autopilotTerminal.dataset.active = "false";
+  stopAutopilotEventPolling();
   els.autopilotWorkingPill.hidden = true;
   state.autopilotActivityStartedAt = 0;
 };
@@ -2054,12 +2180,15 @@ const recoverHostedHyperVConnection = async () => {
 
   const deadline = Date.now() + 180000;
   let announcedBridge = "";
+  let registryCheck = 0;
   try {
     while (Date.now() < deadline) {
+      registryCheck += 1;
       const host = await fetchNetlifyHostRegistry();
       if (host?.publicUrl) {
         try {
           const { response, data, base } = await requestHyperVJsonFromBases("status", undefined, [host.publicUrl]);
+          appendAutopilotTerminal(`[http] public bridge status -> ${response.status}`, { kind: "check" });
           if (!response.ok || !data.available) {
             throw new Error(data.error || "The replacement Hyper-V bridge is not ready yet.");
           }
@@ -2070,6 +2199,9 @@ const recoverHostedHyperVConnection = async () => {
           setAutopilotStep("template", "active");
           if (announcedBridge !== base) {
             announcedBridge = base;
+            startAutopilotEventPolling(base);
+            await fetchAutopilotHostEvents(base);
+            appendAutopilotTerminal(`[registry] active bridge -> ${new URL(base).host}`, { kind: "file" });
             appendAutopilotMessage("The watchdog registered a live replacement bridge. I am checking the Windows template now.");
           }
 
@@ -2081,6 +2213,9 @@ const recoverHostedHyperVConnection = async () => {
             headers,
           });
           const template = await templateResponse.json();
+          appendAutopilotTerminal(`[http] Windows 11 Template check -> ${templateResponse.status}`, {
+            kind: templateResponse.ok ? "success" : "error",
+          });
           if (!templateResponse.ok || !template.ok || !template.available) {
             throw new Error(template.error || "The Windows 11 Template is not available yet.");
           }
@@ -2101,6 +2236,10 @@ const recoverHostedHyperVConnection = async () => {
         } catch {
           // A registry record can briefly point at the old tunnel while the watchdog replaces it.
         }
+      } else if (registryCheck === 1 || registryCheck % 5 === 0) {
+        appendAutopilotTerminal(`[registry] check ${registryCheck}: no live bridge is registered yet.`, {
+          kind: "check",
+        });
       }
       await wait(3000);
     }
@@ -4723,12 +4862,18 @@ const monitorNativeVm = () => {
         state.hyperVAutopilotRecoveryAttempted = true;
         state.hyperVAutopilotRecoveryInProgress = true;
         startAutopilotActivity();
+        startAutopilotEventPolling(state.nativeQemuApiBase);
         log("NebulaVM Autopilot: Hyper-V is confirmed stopped unexpectedly. Diagnosing and attempting one safe restart.");
         showNativeDisplayStatus("NebulaVM Autopilot is repairing the stopped Hyper-V session...");
         try {
           const { response, data: recovery, base } = await fetchHyperVJson("auto-recover", {
             method: "POST",
           });
+          appendAutopilotTerminal(`[http] POST /api/emustar-hyperv/auto-recover -> ${response.status}`, {
+            kind: response.ok ? "success" : "error",
+          });
+          startAutopilotEventPolling(base);
+          await fetchAutopilotHostEvents(base);
           if (!response.ok || !recovery.ok || recovery.vm?.state !== "Running") {
             throw new Error(recovery.error || "Hyper-V did not return to the running state.");
           }
