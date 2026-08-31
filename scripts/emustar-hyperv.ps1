@@ -233,6 +233,9 @@ function Get-Status {
     }
   }
 
+  $vmSnapshot = Get-VmSnapshot -Vm $vm
+  $includeDiagnosticEvents = -not $vm -or $vm.State.ToString() -ne "Running"
+
   return [ordered]@{
     ok = $true
     engine = "Microsoft Hyper-V"
@@ -241,9 +244,9 @@ function Get-Status {
     cmdletsReady = $cmdletsReady
     serviceState = $serviceState
     available = $featureState -eq "Enabled" -and $cmdletsReady
-    vm = Get-VmSnapshot -Vm $vm
-    lastHyperVEvent = Get-LatestHyperVEvent
-    lastHyperVPowerEvent = Get-LatestHyperVEvent -PowerOnly
+    vm = $vmSnapshot
+    lastHyperVEvent = if ($includeDiagnosticEvents) { Get-LatestHyperVEvent } else { $null }
+    lastHyperVPowerEvent = if ($includeDiagnosticEvents) { Get-LatestHyperVEvent -PowerOnly } else { $null }
   }
 }
 

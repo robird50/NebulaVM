@@ -5484,6 +5484,12 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
   void updateEmustarHostInfo();
 
   const vm = result.vm || {};
+  if (Number(vm.memoryMb) > 0 && Number(vm.memoryMb) !== selectedMemoryMb()) {
+    els.memorySize.value = String(Number(vm.memoryMb) * BYTES_PER_MEGABYTE);
+    syncMemorySliderFromSelect();
+    els.ramMetric.textContent = `${Number(vm.memoryMb)} MB RAM`;
+    log(`Hyper-V allocated ${Number(vm.memoryMb)} MB RAM after applying the host-safe minimum.`);
+  }
   log(`Hyper-V started ${vm.name || "the Windows VM"}.`);
   if (result.recoveredFromSlowStart) {
     log("Recovered the Hyper-V browser display from host status after the start request stalled.");

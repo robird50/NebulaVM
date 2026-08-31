@@ -2404,7 +2404,19 @@ const runPowerShellJson = (label, args, timeoutMs = 30000) =>
       callback();
     };
     const timeout = setTimeout(() => {
-      child.kill();
+      try {
+        if (process.platform === "win32" && child.pid) {
+          execFileSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+            stdio: "ignore",
+            windowsHide: true,
+            timeout: 5000,
+          });
+        } else {
+          child.kill("SIGKILL");
+        }
+      } catch {
+        child.kill();
+      }
       finish(() => rejectAction(new Error(`${label} timed out.`)));
     }, timeoutMs);
     child.stdout.on("data", (chunk) => {
@@ -2691,9 +2703,23 @@ const getHyperVStatus = async ({ maxAgeMs = 8000, timeoutMs = 25000, force = fal
     return hyperVStatusCache.data;
   }
 
-  const revision = hyperVStatusRevision;
+  let revision = hyperVStatusRevision;
   if (hyperVStatusTask?.revision === revision) {
-    return hyperVStatusTask.promise;
+    const activeTask = hyperVStatusTask;
+    if (!force) return activeTask.promise;
+
+    try {
+      await activeTask.promise;
+    } catch {
+      // A forced confirmation still needs a newer probe after the active one fails.
+    }
+    revision = hyperVStatusRevision;
+    if (
+      hyperVStatusTask?.revision === revision &&
+      hyperVStatusTask.promise !== activeTask.promise
+    ) {
+      return hyperVStatusTask.promise;
+    }
   }
 
   const statusPromise = (async () => {
