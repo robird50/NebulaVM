@@ -185,6 +185,7 @@ const state = {
   nativeDisplayReconnectTimer: null,
   nativeDisplayReconnectAttempts: 0,
   nativeDisplayReconnectConfig: null,
+  nativeDisplayDisconnectLogged: false,
   lastNativeStopLogKey: "",
   hyperVAutopilotRecoveryAttempted: false,
   hyperVAutopilotRecoveryInProgress: false,
@@ -4025,7 +4026,10 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   const connectTimeout = window.setTimeout(() => {
     if (connected || state.nativeRfb !== rfb || !state.emulator) return;
     state.nativeRfb = null;
-    log(`${runtimeName} display connection timed out.`);
+    if (!state.nativeDisplayDisconnectLogged) {
+      log(`${runtimeName} display connection timed out. NebulaVM will keep retrying quietly.`);
+      state.nativeDisplayDisconnectLogged = true;
+    }
     try {
       rfb.disconnect();
     } catch {
@@ -4039,6 +4043,7 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   });
   rfb.addEventListener("connect", () => {
     connected = true;
+    state.nativeDisplayDisconnectLogged = false;
     window.clearTimeout(connectTimeout);
     clearNativeDisplayReconnect();
     state.nativeDisplayReconnectConfig = { base, vncPath, runtimeName, password };
@@ -4054,7 +4059,10 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
       state.nativeRfb = null;
     }
     if (state.emulator) {
-      log(`${runtimeName} display disconnected.`);
+      if (!state.nativeDisplayDisconnectLogged) {
+        log(`${runtimeName} display disconnected. NebulaVM will keep retrying quietly.`);
+        state.nativeDisplayDisconnectLogged = true;
+      }
       if (wasCurrentDisplay && selectedNativeDisplayMode() === "viewport") {
         scheduleNativeDisplayReconnect(`${runtimeName} display disconnected`);
       }
@@ -4115,6 +4123,7 @@ const clearNativeDisplayReconnect = ({ resetAttempts = true, clearConfig = false
   }
   if (resetAttempts) {
     state.nativeDisplayReconnectAttempts = 0;
+    state.nativeDisplayDisconnectLogged = false;
   }
   if (clearConfig) {
     state.nativeDisplayReconnectConfig = null;
@@ -4769,7 +4778,7 @@ const clearStatsTimer = () => {
 
 const clearNativeMonitor = () => {
   if (state.nativeMonitorTimer) {
-    window.clearInterval(state.nativeMonitorTimer);
+    window.clearTimeout(state.nativeMonitorTimer);
     state.nativeMonitorTimer = null;
   }
 };
@@ -4813,7 +4822,8 @@ const hyperVStopSummary = (status) => {
 
 const monitorNativeVm = () => {
   clearNativeMonitor();
-  state.nativeMonitorTimer = window.setInterval(async () => {
+  const pollNativeVm = async () => {
+    state.nativeMonitorTimer = null;
     if (!state.emulator || !isNativeMode()) {
       clearNativeMonitor();
       return;
@@ -4847,7 +4857,8 @@ const monitorNativeVm = () => {
           !state.nativeRfb &&
           selectedNativeDisplayMode() === "viewport" &&
           !status.vncReady &&
-          !state.hyperVConsoleActive
+          !state.hyperVConsoleActive &&
+          !state.nativeDisplayReconnectConfig
         ) {
           startHyperVSetupConsole(state.nativeQemuApiBase || window.location.origin);
         }
@@ -4956,8 +4967,14 @@ const monitorNativeVm = () => {
       updateButtons();
     } catch {
       // A temporary status request failure should not disconnect a running VM.
+    } finally {
+      if (state.emulator && isNativeMode() && !state.nativeMonitorTimer) {
+        state.nativeMonitorTimer = window.setTimeout(pollNativeVm, 5000);
+      }
     }
-  }, 2000);
+  };
+
+  state.nativeMonitorTimer = window.setTimeout(pollNativeVm, 2000);
 };
 
 const setSelectedFile = (file) => {
