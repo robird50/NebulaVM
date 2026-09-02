@@ -2,6 +2,10 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $pidPath = Join-Path $projectRoot ".nebulavm-transfer-process-id"
+$scheduledTask = "NebulaVM Dedicated Host Transfer"
+Get-ScheduledTask -TaskName $scheduledTask -ErrorAction SilentlyContinue |
+  Stop-ScheduledTask -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $scheduledTask -Confirm:$false -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $pidPath -PathType Leaf) {
   $transferPid = [int](Get-Content -LiteralPath $pidPath -Raw)
   Stop-Process -Id $transferPid -Force -ErrorAction SilentlyContinue

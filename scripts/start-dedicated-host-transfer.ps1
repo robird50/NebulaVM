@@ -59,8 +59,12 @@ $pidPath = Join-Path $projectRoot ".nebulavm-transfer-process-id"
 $outputLogPath = Join-Path $projectRoot ".nebulavm-transfer-output.log"
 $errorLogPath = Join-Path $projectRoot ".nebulavm-transfer-error.log"
 $firewallRule = "NebulaVM Dedicated Host Transfer"
+$scheduledTask = "NebulaVM Dedicated Host Transfer"
 
 Remove-Item -LiteralPath $sourceArchive, $configPath, $readyPath, $pidPath, $outputLogPath, $errorLogPath -Force -ErrorAction SilentlyContinue
+Get-ScheduledTask -TaskName $scheduledTask -ErrorAction SilentlyContinue |
+  Stop-ScheduledTask -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $scheduledTask -Confirm:$false -ErrorAction SilentlyContinue
 & git -C $projectRoot archive --format=zip --output=$sourceArchive HEAD
 if ($LASTEXITCODE -ne 0) {
   throw "Could not build the dedicated-host source archive."
@@ -101,6 +105,7 @@ $token = ([BitConverter]::ToString($tokenBytes) -replace "-", "").ToLowerInvaria
   bindAddress = "0.0.0.0"
   port = $Port
   readyPath = $readyPath
+  pidPath = $pidPath
   files = $files
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $configPath -Encoding UTF8
 
@@ -120,22 +125,33 @@ $serverPath = Join-Path $PSScriptRoot "dedicated-host-transfer-server.mjs"
 if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
   throw "Node.js was not found at $nodePath."
 }
-$process = Start-Process `
-  -FilePath $nodePath `
-  -ArgumentList @($serverPath, $configPath) `
-  -WorkingDirectory $projectRoot `
-  -WindowStyle Hidden `
-  -RedirectStandardOutput $outputLogPath `
-  -RedirectStandardError $errorLogPath `
-  -PassThru
-$process.Id | Set-Content -LiteralPath $pidPath -Encoding ASCII
+$action = New-ScheduledTaskAction `
+  -Execute $nodePath `
+  -Argument ('"{0}" "{1}"' -f $serverPath, $configPath) `
+  -WorkingDirectory $projectRoot
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(12)
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet `
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries `
+  -ExecutionTimeLimit (New-TimeSpan -Days 2)
+Register-ScheduledTask `
+  -TaskName $scheduledTask `
+  -Action $action `
+  -Trigger $trigger `
+  -Principal $principal `
+  -Settings $settings `
+  -Description "Temporary private NebulaVM host migration service." `
+  -Force | Out-Null
+Start-ScheduledTask -TaskName $scheduledTask
 
 $deadline = (Get-Date).AddSeconds(15)
 while ((Get-Date) -lt $deadline -and -not (Test-Path -LiteralPath $readyPath)) {
   Start-Sleep -Milliseconds 250
 }
 if (-not (Test-Path -LiteralPath $readyPath)) {
-  throw "The private transfer service did not start."
+  $task = Get-ScheduledTaskInfo -TaskName $scheduledTask -ErrorAction SilentlyContinue
+  throw "The private transfer service did not start. Scheduled task result: $($task.LastTaskResult)"
 }
 
 $baseUri = "http://${localAddress}:$Port"

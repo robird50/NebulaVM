@@ -97,6 +97,7 @@ const server = createServer((request, response) => {
 });
 
 server.listen(Number(config.port), String(config.bindAddress || "0.0.0.0"), () => {
+  if (config.pidPath) writeFileSync(config.pidPath, String(process.pid), "ascii");
   writeFileSync(config.readyPath, new Date().toISOString(), "utf8");
 });
 
