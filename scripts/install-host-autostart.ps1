@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $supervisorPath = Join-Path $PSScriptRoot "start-public-host.ps1"
 $watchdogPath = Join-Path $PSScriptRoot "watch-public-host.ps1"
+$hiddenLauncherPath = Join-Path $PSScriptRoot "run-powershell-hidden.vbs"
 $taskName = "NebulaVM Host"
 $watchdogTaskName = "NebulaVM Host Watchdog"
 $interactiveUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -12,8 +13,8 @@ if ([string]::IsNullOrWhiteSpace($interactiveUser) -or $interactiveUser -eq "NT 
 }
 
 $action = New-ScheduledTaskAction `
-  -Execute "powershell.exe" `
-  -Argument "-NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$supervisorPath`"" `
+  -Execute "wscript.exe" `
+  -Argument "//B //NoLogo `"$hiddenLauncherPath`" `"$supervisorPath`"" `
   -WorkingDirectory $projectRoot
 
 $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $interactiveUser
@@ -28,6 +29,7 @@ $settings = New-ScheduledTaskSettingsSet `
   -RestartCount 999 `
   -RestartInterval (New-TimeSpan -Minutes 1) `
   -ExecutionTimeLimit ([TimeSpan]::Zero) `
+  -Hidden `
   -MultipleInstances IgnoreNew
 
 Register-ScheduledTask `
@@ -40,8 +42,8 @@ Register-ScheduledTask `
   -Force | Out-Null
 
 $watchdogAction = New-ScheduledTaskAction `
-  -Execute "powershell.exe" `
-  -Argument "-NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$watchdogPath`"" `
+  -Execute "wscript.exe" `
+  -Argument "//B //NoLogo `"$hiddenLauncherPath`" `"$watchdogPath`"" `
   -WorkingDirectory $projectRoot
 $watchdogTrigger = New-ScheduledTaskTrigger `
   -Once `
@@ -53,6 +55,7 @@ $watchdogSettings = New-ScheduledTaskSettingsSet `
   -RestartCount 3 `
   -RestartInterval (New-TimeSpan -Minutes 1) `
   -ExecutionTimeLimit (New-TimeSpan -Minutes 3) `
+  -Hidden `
   -MultipleInstances IgnoreNew
 
 Register-ScheduledTask `

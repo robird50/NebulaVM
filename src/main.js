@@ -3092,6 +3092,10 @@ const selectWindows11Template = async ({ boot = false, allowRecovery = true } = 
     els.emulatorMode.value = "emustar-hyperv";
     els.processorMode.value = "x64";
     els.nativeIsoPath.value = template.isoPath;
+    if (selectedMemoryMb() < 2048) {
+      els.memorySize.value = String(2048 * BYTES_PER_MEGABYTE);
+      syncMemorySliderFromSelect();
+    }
     els.windowsPasswordOff.checked = true;
     els.windowsPassword.value = "";
     applyWindowsTemplateBootLocks();

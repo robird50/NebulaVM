@@ -1087,7 +1087,7 @@ function Start-Emustar {
     Repair-TemplateDvdAttachments -Vm $vm
   }
 
-  if ($vm -and $vm.State -eq "Running") {
+  if ($vm -and $vm.State -in @("Running", "Saved")) {
     $mountedIso = Get-VMDvdDrive -VM $vm -ErrorAction SilentlyContinue |
       Select-Object -First 1 |
       ForEach-Object { [string]$_.Path }
@@ -1105,7 +1105,13 @@ function Start-Emustar {
       $configuredMemory = Get-VMMemory -VM $vm
       $requestedMaximumBytes = $memoryMb * 1MB
       $requiredStartupBytes = [math]::Min($memoryMb, 768) * 1MB
-      $memoryMatches = if ($isWindowsGuest) {
+      $lowMemoryWindowsHost = $isWindowsGuest -and
+        (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory -le 10GB
+      $memoryMatches = if ($lowMemoryWindowsHost) {
+        [bool]$configuredMemory.DynamicMemoryEnabled -and
+          [int64]$configuredMemory.Maximum -eq [int64]$requestedMaximumBytes -and
+          [int64]$configuredMemory.Startup -ge [int64]$requiredStartupBytes
+      } elseif ($isWindowsGuest) {
         -not [bool]$configuredMemory.DynamicMemoryEnabled -and
           [int64]$configuredMemory.Startup -eq [int64]$requestedMaximumBytes
       } else {
@@ -1113,6 +1119,11 @@ function Start-Emustar {
           [int64]$configuredMemory.Startup -ge [int64]$requiredStartupBytes
       }
       if ($memoryMatches) {
+        if ($vm.State -eq "Saved") {
+          Start-VM -VM $vm -ErrorAction Stop | Out-Null
+          $vm = Get-VM -Name $vmName -ErrorAction Stop
+          $warnings.Add("Hyper-V resumed the saved Windows session without repeating a cold boot.")
+        }
         if ([string]$config.displayMode -eq "external") {
           Start-Process "$env:SystemRoot\System32\vmconnect.exe" -ArgumentList "localhost", $vmName
         } else {
@@ -1198,8 +1209,10 @@ function Start-Emustar {
     $warnings.Add("Attached the private virtual disk for this device and ISO.")
   }
 
-  Set-VM -VM $vm -AutomaticStartAction Start -AutomaticStopAction ShutDown -CheckpointType Disabled
-  Set-LowHostMemoryProfile -Vm $vm -MemoryMb $memoryMb -FixedStartup $isWindowsGuest
+  Set-VM -VM $vm -AutomaticStartAction Nothing -AutomaticStopAction Save -CheckpointType Disabled
+  $useFixedWindowsMemory = $isWindowsGuest -and
+    (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory -gt 10GB
+  Set-LowHostMemoryProfile -Vm $vm -MemoryMb $memoryMb -FixedStartup $useFixedWindowsMemory
   Set-VMProcessor -VM $vm -Count $processorCount
   Set-EmustarVideoMode -Vm $vm -Width $displaySize.Width -Height $displaySize.Height
 
@@ -1303,10 +1316,18 @@ function Start-Emustar {
 function Stop-Emustar {
   Assert-HyperVReady
   $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
-  if ($vm -and $vm.State -ne "Off") {
+  if ($vm -and $vm.State -in @("Running", "Paused", "Suspended")) {
+    Save-VM -VM $vm -ErrorAction Stop
+    $vm = Get-VM -Name $vmName -ErrorAction Stop
+    $warnings.Add("Saved the Hyper-V session so its RAM is released and the next launch can resume quickly.")
+  } elseif ($vm -and $vm.State -notin @("Off", "Saved")) {
     $vm = Stop-EmustarForConfiguration -Vm $vm
   }
-  return [ordered]@{ ok = $true; vm = Get-VmSnapshot -Vm (Get-VM -Name $vmName -ErrorAction SilentlyContinue) }
+  return [ordered]@{
+    ok = $true
+    vm = Get-VmSnapshot -Vm (Get-VM -Name $vmName -ErrorAction SilentlyContinue)
+    warnings = $warnings
+  }
 }
 
 function Recover-Emustar {
