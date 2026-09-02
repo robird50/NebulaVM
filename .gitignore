@@ -15,6 +15,7 @@ vm-disks/
 .nebulavm-admin-token
 .nebulavm-host-token
 .nebulavm-public-url
+.nebulavm-transfer-*
 .nebulavm-guest-credentials.json
 .nebulavm-hyperv-session.json
 .nebulavm-autopilot-events.jsonl
