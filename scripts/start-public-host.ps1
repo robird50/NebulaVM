@@ -174,6 +174,27 @@ function Get-NebulaTunnelProcesses {
   }
 }
 
+function Get-ExistingNebulaTunnel {
+  $publicUrl = if (Test-Path -LiteralPath $publicUrlPath) {
+    (Get-Content -LiteralPath $publicUrlPath -Raw).Trim()
+  } else {
+    ""
+  }
+  $tunnelProcess = Get-NebulaTunnelProcesses | Select-Object -First 1
+  if (-not $tunnelProcess -or -not (Test-NebulaPublicHost $publicUrl)) {
+    return $null
+  }
+
+  try {
+    return @{
+      Process = Get-Process -Id $tunnelProcess.ProcessId -ErrorAction Stop
+      PublicUrl = $publicUrl
+    }
+  } catch {
+    return $null
+  }
+}
+
 function Stop-NebulaTunnels {
   foreach ($tunnelProcess in (Get-NebulaTunnelProcesses)) {
     Stop-Process -Id $tunnelProcess.ProcessId -Force -ErrorAction SilentlyContinue
@@ -296,7 +317,12 @@ try {
   while ($true) {
     try {
       Start-NebulaHost
-      $tunnel = Start-NebulaTunnel
+      $tunnel = Get-ExistingNebulaTunnel
+      if ($tunnel) {
+        Write-AutopilotEvent -Kind "check" -Message "Adopted the healthy public bridge and resumed its registry heartbeat."
+      } else {
+        $tunnel = Start-NebulaTunnel
+      }
       Publish-NetlifyRegistry -PublicUrl $tunnel.PublicUrl -Force
 
       $consecutiveHealthFailures = 0

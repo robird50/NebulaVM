@@ -215,6 +215,7 @@ try {
     $publicUrl = Get-PublicUrl
     $localHostReady = Test-LocalHost
     if ($localHostReady -and (Test-PublicHost $publicUrl)) {
+      Start-NebulaSupervisor
       Publish-Registry $publicUrl
       exit 0
     }

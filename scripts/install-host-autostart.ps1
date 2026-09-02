@@ -12,6 +12,10 @@ if ([string]::IsNullOrWhiteSpace($interactiveUser) -or $interactiveUser -eq "NT 
   throw "Run this installer from the Windows account that will use NebulaVM Host, not as SYSTEM."
 }
 
+Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+Stop-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+
 $action = New-ScheduledTaskAction `
   -Execute "wscript.exe" `
   -Argument "//B //NoLogo `"$hiddenLauncherPath`" `"$supervisorPath`"" `

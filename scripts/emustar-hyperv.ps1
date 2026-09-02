@@ -722,11 +722,14 @@ function Set-LowHostMemoryProfile {
     $freeMemoryMb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
     $preferredStartupMb = [math]::Min($MemoryMb, 1024)
     $minimumBootMb = [math]::Min($MemoryMb, 768)
-    $reserveMb = 768
+    $absoluteMinimumMb = [math]::Min($MemoryMb, 512)
+    $reserveMb = 512
     $startupMb = if ($freeMemoryMb -ge ($preferredStartupMb + $reserveMb)) {
       $preferredStartupMb
-    } else {
+    } elseif ($freeMemoryMb -ge ($minimumBootMb + $reserveMb)) {
       $minimumBootMb
+    } else {
+      $absoluteMinimumMb
     }
     $minimumMb = [math]::Min($startupMb, 512)
     if ($freeMemoryMb -lt ($startupMb + $reserveMb)) {
@@ -1108,6 +1111,7 @@ function Start-Emustar {
       $lowMemoryWindowsHost = $isWindowsGuest -and
         (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory -le 10GB
       $memoryMatches = if ($lowMemoryWindowsHost) {
+        $requiredStartupBytes = [math]::Min($memoryMb, 512) * 1MB
         [bool]$configuredMemory.DynamicMemoryEnabled -and
           [int64]$configuredMemory.Maximum -eq [int64]$requestedMaximumBytes -and
           [int64]$configuredMemory.Startup -ge [int64]$requiredStartupBytes
