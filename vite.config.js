@@ -40,6 +40,7 @@ import { getCommitHistory } from "./lib/commitHistory.mjs";
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const reportGmailAccount = "nebulavmsupport@gmail.com";
 const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
+const adminTokenPath = resolve(workspaceDir, ".nebulavm-admin-token");
 const publicUrlPath = resolve(workspaceDir, ".nebulavm-public-url");
 const autopilotEventPath = resolve(workspaceDir, ".nebulavm-autopilot-events.jsonl");
 const guestCredentialsPath = resolve(workspaceDir, ".nebulavm-guest-credentials.json");
@@ -81,6 +82,21 @@ const resolveHostAccessToken = () => {
 };
 
 const hostAccessToken = resolveHostAccessToken();
+
+const resolveAdminAccessToken = () => {
+  const environmentToken = String(process.env.NEBULAVM_ADMIN_TOKEN || "").trim();
+  if (/^[a-f0-9]{64}$/i.test(environmentToken)) return environmentToken.toLowerCase();
+  if (existsSync(adminTokenPath)) {
+    const savedToken = readFileSync(adminTokenPath, "utf8").trim();
+    if (/^[a-f0-9]{64}$/i.test(savedToken)) return savedToken.toLowerCase();
+  }
+
+  const token = randomBytes(32).toString("hex");
+  writeFileSync(adminTokenPath, token, { encoding: "utf8", mode: 0o600 });
+  return token;
+};
+
+const adminAccessToken = resolveAdminAccessToken();
 
 const sanitizeGuestUsername = (value) => {
   const username = String(value || "Nebula").trim();
@@ -175,6 +191,12 @@ const requestAccessToken = (req, url) => {
 
 const isAuthorizedHostRequest = (req, url) =>
   isLoopbackRequest(req) || requestAccessToken(req, url) === hostAccessToken;
+
+const isAuthorizedAdminRequest = (req, url) => {
+  if (isLoopbackRequest(req)) return true;
+  const token = requestAccessToken(req, url);
+  return /^[a-f0-9]{64}$/i.test(token) && safeEqualHex(token.toLowerCase(), adminAccessToken);
+};
 
 const primaryLanAddress = () =>
   new Promise((resolveAddress) => {
@@ -3449,8 +3471,8 @@ const nativeQemuPlugin = () => ({
       }
 
       if (isSafetyAdminApi) {
-        if (!isLoopbackRequest(req)) {
-          json(res, 403, { ok: false, error: "NebulaVM Admin Console is available on this PC only." });
+        if (!isAuthorizedAdminRequest(req, url)) {
+          json(res, 403, { ok: false, error: "This device is not authorized for NebulaVM administration." });
           return;
         }
         try {

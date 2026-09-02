@@ -12,6 +12,7 @@ android-app/nebulavm-release.jks
 .env.*
 !.env.example
 vm-disks/
+.nebulavm-admin-token
 .nebulavm-host-token
 .nebulavm-public-url
 .nebulavm-guest-credentials.json
