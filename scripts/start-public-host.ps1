@@ -67,6 +67,18 @@ function Test-NebulaHost {
   }
 }
 
+function Test-NebulaHostPort {
+  $client = [Net.Sockets.TcpClient]::new()
+  try {
+    $connection = $client.ConnectAsync("127.0.0.1", 5174)
+    return $connection.Wait(1000) -and $client.Connected
+  } catch {
+    return $false
+  } finally {
+    $client.Dispose()
+  }
+}
+
 function Get-NebulaHostProcesses {
   try {
     return @(
@@ -115,6 +127,19 @@ function Test-NebulaPublicHost([string]$PublicUrl) {
 function Start-NebulaHost {
   if (Test-NebulaHost) {
     return
+  }
+
+  # A healthy Vite process can still be finishing startup when the supervisor
+  # begins. Give that existing listener time to answer instead of racing it
+  # with a second strict-port process.
+  if (Test-NebulaHostPort) {
+    $existingHostDeadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $existingHostDeadline) {
+      if (Test-NebulaHost) {
+        return
+      }
+      Start-Sleep -Milliseconds 500
+    }
   }
 
   Stop-NebulaHostProcesses

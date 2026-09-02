@@ -131,6 +131,44 @@ function Get-NebulaProcesses {
   }
 }
 
+function Get-NebulaSupervisorProcesses {
+  try {
+    return @(
+      Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Stop |
+        Where-Object {
+          $_.ProcessId -ne $PID -and
+          $_.CommandLine -like "*$hostScriptPath*"
+        }
+    )
+  } catch {
+    return @()
+  }
+}
+
+function Start-NebulaSupervisor {
+  if (@(Get-NebulaSupervisorProcesses).Count -gt 0) {
+    return
+  }
+
+  Write-AutopilotEvent -Kind "command" -Message "Starting the missing NebulaVM public bridge now."
+  Start-ScheduledTask -TaskName $hostTaskName -ErrorAction Stop
+}
+
+function Wait-ForPublicHost([int]$TimeoutSeconds = 45) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    $publicUrl = Get-PublicUrl
+    if ((Test-LocalHost) -and (Test-PublicHost $publicUrl)) {
+      Publish-Registry $publicUrl
+      Write-AutopilotEvent -Kind "success" -Message "The public Hyper-V bridge is online and verified."
+      Write-WatchdogLog "The public bridge was restored without restarting the local host."
+      return $true
+    }
+    Start-Sleep -Seconds 2
+  }
+  return $false
+}
+
 function Restart-NebulaHost {
   Write-WatchdogLog "The host failed three health checks. Restarting only NebulaVM Host and its tunnel."
   Write-AutopilotEvent -Kind "command" -Message "Restarting only the NebulaVM Host task and public tunnel."
@@ -181,8 +219,13 @@ try {
       exit 0
     }
     if ($localHostReady) {
-      Write-AutopilotEvent -Kind "check" -Message "The local host is healthy; its supervisor is rebuilding the public bridge."
-      exit 0
+      Write-AutopilotEvent -Kind "check" -Message "The local host is healthy, but its public bridge is missing."
+      Start-NebulaSupervisor
+      if (Wait-ForPublicHost) {
+        exit 0
+      }
+      Write-AutopilotEvent -Kind "check" -Message "The bridge did not recover quickly, so Autopilot is restarting only NebulaVM networking."
+      break
     }
     Write-AutopilotEvent -Kind "check" -Message "Host health check $attempt of 3 did not find a working public bridge."
     if ($attempt -lt 3) {
