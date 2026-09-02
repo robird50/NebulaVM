@@ -2474,6 +2474,7 @@ const requestHyperVJsonFromBases = async (path, options, bridgeBases) => {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
       headers.set("X-NebulaVM-Device", state.nativeDeviceId);
+      headers.set("X-NebulaVM-Session", state.nativeSessionId);
       const response = await fetch(`${base}/api/emustar-hyperv/${path}`, {
         cache: "no-store",
         ...options,
@@ -2522,6 +2523,8 @@ const requestHyperVFrameFromBases = async (contentOnly, bridgeBases) => {
       if (state.nativeHostToken) {
         headers.set("Authorization", `Bearer ${state.nativeHostToken}`);
       }
+      headers.set("X-NebulaVM-Device", state.nativeDeviceId);
+      headers.set("X-NebulaVM-Session", state.nativeSessionId);
       const frameUrl = new URL("/api/emustar-hyperv/console-frame", base);
       if (contentOnly) frameUrl.searchParams.set("contentOnly", "1");
       const response = await fetch(frameUrl, {
@@ -3873,6 +3876,8 @@ const nativeWebSocketUrl = (base, path) => {
   if (state.nativeHostToken) {
     url.searchParams.set("token", state.nativeHostToken);
   }
+  url.searchParams.set("device", state.nativeDeviceId);
+  url.searchParams.set("browserSession", state.nativeSessionId);
   return url.toString();
 };
 

@@ -144,16 +144,21 @@ const showMessage = (title, detail, state = "Waiting") => {
   stateLabel.textContent = state;
 };
 
-const remoteHeaders = (token, extra = {}) => ({
-  ...extra,
-  Authorization: `Bearer ${token}`,
-  "X-NebulaVM-Client-Class": "remote-console",
-});
+const remoteHeaders = (token, extra = {}) => {
+  const headers = {
+    ...extra,
+    Authorization: `Bearer ${token}`,
+    "X-NebulaVM-Client-Class": "remote-console",
+  };
+  if (expectedSessionId) headers["X-NebulaVM-Remote-Session"] = expectedSessionId;
+  return headers;
+};
 
 const websocketUrl = (base, path, token) => {
   const url = new URL(path, base);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("token", token);
+  if (expectedSessionId) url.searchParams.set("remoteSession", expectedSessionId);
   return url.toString();
 };
 

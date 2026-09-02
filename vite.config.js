@@ -43,6 +43,7 @@ const hostTokenPath = resolve(workspaceDir, ".nebulavm-host-token");
 const publicUrlPath = resolve(workspaceDir, ".nebulavm-public-url");
 const autopilotEventPath = resolve(workspaceDir, ".nebulavm-autopilot-events.jsonl");
 const guestCredentialsPath = resolve(workspaceDir, ".nebulavm-guest-credentials.json");
+const hyperVSessionPath = resolve(workspaceDir, ".nebulavm-hyperv-session.json");
 const publicAndroidEnabled = false;
 
 const localEnvValue = (name) => {
@@ -246,6 +247,7 @@ const setNativeQemuCors = (req, res) => {
       "X-NebulaVM-Client-Class",
       "X-NebulaVM-Filename",
       "X-NebulaVM-Device",
+      "X-NebulaVM-Remote-Session",
       "X-NebulaVM-Session",
       "X-NebulaVM-Total-Bytes",
       "X-NebulaVM-Upload-Id",
@@ -1215,8 +1217,35 @@ let nativeVm = null;
 let nativeVmOutput = "";
 let lastNativeExit = null;
 let activeNativeRuntimeName = null;
-let hyperVRemoteSessionId = "";
-let hyperVRemoteSessionStartedAt = "";
+const hyperVSessionLeaseMs = 45_000;
+const emptyHyperVSessionLease = () => ({
+  deviceId: "",
+  browserSessionId: "",
+  remoteSessionId: "",
+  remoteSessionStartedAt: "",
+  diskPath: "",
+  lastSeen: 0,
+});
+const loadHyperVSessionLease = () => {
+  if (!existsSync(hyperVSessionPath)) return emptyHyperVSessionLease();
+  try {
+    const saved = JSON.parse(readFileSync(hyperVSessionPath, "utf8").replace(/^\uFEFF/, ""));
+    return {
+      deviceId: normalizeStoredIsoOwnerId(saved.deviceId),
+      browserSessionId: sanitizeSessionId(saved.browserSessionId),
+      remoteSessionId: sanitizeSessionId(saved.remoteSessionId),
+      remoteSessionStartedAt: String(saved.remoteSessionStartedAt || ""),
+      diskPath: String(saved.diskPath || ""),
+      lastSeen: Number(saved.lastSeen) || 0,
+    };
+  } catch {
+    return emptyHyperVSessionLease();
+  }
+};
+let hyperVSessionLease = loadHyperVSessionLease();
+let hyperVRemoteSessionId = hyperVSessionLease.remoteSessionId;
+let hyperVRemoteSessionStartedAt = hyperVSessionLease.remoteSessionStartedAt;
+let hyperVRemoteConnectionCount = 0;
 let hyperVStatusCache = { expiresAt: 0, data: null };
 let hyperVStatusRevision = 0;
 let hyperVStatusTask = null;
@@ -1241,6 +1270,148 @@ const safetySessions = new Map();
 const safetySessionTtlMs = 12_000;
 const safetyMonitorLeaseMs = 6_000;
 const safetyFrameMaxBytes = 2 * 1024 * 1024;
+
+const saveHyperVSessionLease = () => {
+  if (!hyperVSessionLease.deviceId) {
+    rmSync(hyperVSessionPath, { force: true });
+    return;
+  }
+  writeFileSync(hyperVSessionPath, JSON.stringify(hyperVSessionLease, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+};
+
+const clearHyperVSessionLease = () => {
+  hyperVSessionLease = emptyHyperVSessionLease();
+  hyperVRemoteConnectionCount = 0;
+  rmSync(hyperVSessionPath, { force: true });
+};
+
+const hyperVRequestIdentity = (req, url = null) => ({
+  deviceId: normalizeStoredIsoOwnerId(
+    req.headers["x-nebulavm-device"] || url?.searchParams.get("device") || "",
+  ),
+  browserSessionId: sanitizeSessionId(
+    req.headers["x-nebulavm-session"] || url?.searchParams.get("browserSession") || "",
+  ),
+  remoteSessionId: sanitizeSessionId(
+    req.headers["x-nebulavm-remote-session"] || url?.searchParams.get("remoteSession") || "",
+  ),
+});
+
+const isHyperVOwnerRequest = (req, url = null) => {
+  const identity = hyperVRequestIdentity(req, url);
+  return Boolean(
+    identity.deviceId &&
+      hyperVSessionLease.deviceId &&
+      identity.deviceId === hyperVSessionLease.deviceId,
+  );
+};
+
+const isHyperVRemoteRequest = (req, url = null) => {
+  const identity = hyperVRequestIdentity(req, url);
+  return Boolean(
+    identity.remoteSessionId &&
+      hyperVRemoteSessionId &&
+      identity.remoteSessionId === hyperVRemoteSessionId,
+  );
+};
+
+const touchHyperVSessionLease = (req = null, url = null) => {
+  if (!hyperVSessionLease.deviceId) return;
+  const identity = req ? hyperVRequestIdentity(req, url) : {};
+  if (
+    req &&
+    identity.deviceId !== hyperVSessionLease.deviceId &&
+    identity.remoteSessionId !== hyperVRemoteSessionId
+  ) {
+    return;
+  }
+  hyperVSessionLease.lastSeen = Date.now();
+  if (identity.browserSessionId) {
+    hyperVSessionLease.browserSessionId = identity.browserSessionId;
+  }
+  saveHyperVSessionLease();
+};
+
+const hyperVSessionLeaseIsActive = () =>
+  Boolean(
+    hyperVSessionLease.deviceId &&
+      (hyperVRemoteConnectionCount > 0 ||
+        Date.now() - Number(hyperVSessionLease.lastSeen || 0) < hyperVSessionLeaseMs),
+  );
+
+const hyperVAccessError = (message, statusCode = 403) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const assertHyperVDisplayAccess = (req, url = null) => {
+  if (isHyperVOwnerRequest(req, url) || isHyperVRemoteRequest(req, url)) {
+    touchHyperVSessionLease(req, url);
+    return;
+  }
+  throw hyperVAccessError(
+    "This Hyper-V display belongs to another private browser session. Start your own session when the host becomes available.",
+  );
+};
+
+const claimHyperVSession = (req, status) => {
+  const identity = hyperVRequestIdentity(req);
+  if (!identity.deviceId) {
+    throw hyperVAccessError("Hyper-V needs a valid private device identity.", 400);
+  }
+  hyperVSessionLease = {
+    deviceId: identity.deviceId,
+    browserSessionId: identity.browserSessionId,
+    remoteSessionId: hyperVRemoteSessionId,
+    remoteSessionStartedAt: hyperVRemoteSessionStartedAt,
+    diskPath: String(status?.vm?.diskPath || ""),
+    lastSeen: Date.now(),
+  };
+  saveHyperVSessionLease();
+};
+
+const hyperVStatusForRequest = (req, url, status) => {
+  if (status.vm?.state !== "Running") {
+    if (isHyperVOwnerRequest(req, url)) {
+      touchHyperVSessionLease(req, url);
+      return { ...status, occupied: false, ownsSession: true };
+    }
+    return {
+      ...status,
+      vm: null,
+      guestAddress: null,
+      vncPath: "",
+      vncReady: false,
+      vncPassword: "",
+      remoteSessionId: "",
+      remoteSessionStartedAt: "",
+      occupied: false,
+      ownsSession: false,
+    };
+  }
+  if (isHyperVOwnerRequest(req, url) || isHyperVRemoteRequest(req, url)) {
+    touchHyperVSessionLease(req, url);
+    return { ...status, occupied: false, ownsSession: true };
+  }
+  return {
+    ...status,
+    vm: null,
+    guestAddress: null,
+    vncPath: "",
+    vncReady: false,
+    vncPassword: "",
+    remoteSessionId: "",
+    remoteSessionStartedAt: "",
+    occupied: true,
+    ownsSession: false,
+    occupiedMessage:
+      "Hyper-V is currently serving another private visitor. Their screen and controls are not shared. Try again after that session ends.",
+  };
+};
 
 const safetyClientIp = (req) =>
   normalizeIp(
@@ -2649,12 +2820,22 @@ const withHyperVDisplayStatus = async (status) => {
     if (!hyperVRemoteSessionId) {
       hyperVRemoteSessionId = randomBytes(12).toString("hex");
       hyperVRemoteSessionStartedAt = new Date().toISOString();
+      if (hyperVSessionLease.deviceId) {
+        hyperVSessionLease.remoteSessionId = hyperVRemoteSessionId;
+        hyperVSessionLease.remoteSessionStartedAt = hyperVRemoteSessionStartedAt;
+        saveHyperVSessionLease();
+      }
     }
     enrichedStatus.remoteSessionId = hyperVRemoteSessionId;
     enrichedStatus.remoteSessionStartedAt = hyperVRemoteSessionStartedAt;
   } else {
     hyperVRemoteSessionId = "";
     hyperVRemoteSessionStartedAt = "";
+    if (hyperVSessionLease.deviceId && hyperVSessionLease.remoteSessionId) {
+      hyperVSessionLease.remoteSessionId = "";
+      hyperVSessionLease.remoteSessionStartedAt = "";
+      saveHyperVSessionLease();
+    }
     enrichedStatus.remoteSessionId = "";
     enrichedStatus.remoteSessionStartedAt = "";
   }
@@ -2741,6 +2922,46 @@ const getHyperVStatus = async ({ maxAgeMs = 8000, timeoutMs = 25000, force = fal
       hyperVStatusTask = null;
     }
   }
+};
+
+const ensureHyperVStartAccess = async (req) => {
+  const identity = hyperVRequestIdentity(req);
+  if (!identity.deviceId) {
+    throw hyperVAccessError("Hyper-V needs a valid private device identity.", 400);
+  }
+
+  clearHyperVStatusCache();
+  const status = await getHyperVStatus({ maxAgeMs: 0, timeoutMs: 25000, force: true });
+  if (status.vm?.state !== "Running") {
+    if (isHyperVOwnerRequest(req)) {
+      touchHyperVSessionLease(req);
+      return;
+    }
+    if (hyperVSessionLeaseIsActive()) {
+      throw hyperVAccessError(
+        "Hyper-V is recovering another private visitor's session. Try again in under a minute.",
+        409,
+      );
+    }
+    clearHyperVSessionLease();
+    return;
+  }
+  if (isHyperVOwnerRequest(req)) {
+    touchHyperVSessionLease(req);
+    return;
+  }
+  if (hyperVSessionLeaseIsActive()) {
+    throw hyperVAccessError(
+      "Hyper-V is currently serving another private visitor. Their screen and controls are not shared. Try again after that session ends.",
+      409,
+    );
+  }
+
+  await runHyperVAction("Stop", {}, 120000);
+  hyperVRemoteSessionId = "";
+  hyperVRemoteSessionStartedAt = "";
+  clearHyperVSessionLease();
+  clearHyperVStatusCache();
 };
 
 const normalizeArch = (arch) => (arch === "aarch64" ? "aarch64" : "x86_64");
@@ -3071,16 +3292,23 @@ const startNativeVm = async (body) => {
 };
 
 const stopSafetySession = async (session) => {
-  session.stopRequested = true;
-  session.stopMessage = "Admin stopped your VM";
   if (session.emulator.toLowerCase().includes("hyper-v")) {
+    if (
+      hyperVSessionLease.deviceId &&
+      session.deviceId !== hyperVSessionLease.deviceId
+    ) {
+      throw hyperVAccessError("That browser does not own the active Hyper-V session.", 409);
+    }
     await runHyperVAction("Stop", {}, 120000).catch(() => null);
     hyperVRemoteSessionId = "";
     hyperVRemoteSessionStartedAt = "";
+    clearHyperVSessionLease();
     clearHyperVStatusCache();
   } else if (session.emulator.toLowerCase().includes("native qemu")) {
     await stopNativeVmIfRunning();
   }
+  session.stopRequested = true;
+  session.stopMessage = "Admin stopped your VM";
   return { ok: true, message: session.stopMessage };
 };
 
@@ -3120,16 +3348,28 @@ const nativeQemuPlugin = () => ({
       socket.on("close", closeBoth);
     });
 
-    hyperVGuestVncWss.on("connection", async (socket) => {
+    hyperVGuestVncWss.on("connection", async (socket, req) => {
+      const requestUrl = new URL(req.url || "/", "http://localhost");
+      const remoteConnection = isHyperVRemoteRequest(req, requestUrl);
       try {
+        assertHyperVDisplayAccess(req, requestUrl);
+        if (remoteConnection) hyperVRemoteConnectionCount += 1;
         const status = await getHyperVStatus({ maxAgeMs: 3000, timeoutMs: 25000 });
         if (!status.guestAddress || !status.vncReady) {
+          if (remoteConnection) hyperVRemoteConnectionCount = Math.max(0, hyperVRemoteConnectionCount - 1);
           socket.close(1011, "The Hyper-V guest display is not ready.");
           return;
         }
 
         const vncSocket = net.connect(5900, status.guestAddress);
+        let connectionClosed = false;
         const closeBoth = () => {
+          if (!connectionClosed) {
+            connectionClosed = true;
+            if (remoteConnection) {
+              hyperVRemoteConnectionCount = Math.max(0, hyperVRemoteConnectionCount - 1);
+            }
+          }
           vncSocket.destroy();
           if (socket.readyState === WebSocket.OPEN) {
             socket.close();
@@ -3148,8 +3388,9 @@ const nativeQemuPlugin = () => ({
         });
         socket.on("error", closeBoth);
         socket.on("close", closeBoth);
-      } catch {
-        socket.close(1011, "The Hyper-V guest display could not be reached.");
+      } catch (error) {
+        if (remoteConnection) hyperVRemoteConnectionCount = Math.max(0, hyperVRemoteConnectionCount - 1);
+        socket.close(1008, error.message || "The Hyper-V guest display could not be reached.");
       }
     });
 
@@ -3470,6 +3711,7 @@ const nativeQemuPlugin = () => ({
           const session = {
             ...existing,
             id,
+            deviceId: normalizeStoredIsoOwnerId(req.headers["x-nebulavm-device"]),
             ip: safetyClientIp(req),
             location: safetyClientLocation(req),
             emulator: String(body.emulator || "Unknown emulator").slice(0, 80),
@@ -3591,10 +3833,11 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") {
+          const status = await getHyperVStatus({ force: url.searchParams.get("fresh") === "1" });
           json(
             res,
             200,
-            await getHyperVStatus({ force: url.searchParams.get("fresh") === "1" }),
+            hyperVStatusForRequest(req, url, status),
           );
           return;
         }
@@ -3633,6 +3876,8 @@ const nativeQemuPlugin = () => ({
             return;
           }
 
+          await ensureHyperVStartAccess(req);
+
           if (
             lastHyperVStart?.key === requestKey &&
             Date.now() - lastHyperVStart.finishedAt < 45_000
@@ -3667,7 +3912,9 @@ const nativeQemuPlugin = () => ({
             hyperVRemoteSessionStartedAt = new Date().toISOString();
             actionResult.replacedRuntime = replacedRuntime;
             clearHyperVStatusCache();
-            return cacheHyperVStatus(await withHyperVDisplayStatus(actionResult));
+            const result = cacheHyperVStatus(await withHyperVDisplayStatus(actionResult));
+            claimHyperVSession(req, result);
+            return result;
           })();
           hyperVStartTask = { key: requestKey, promise: startPromise };
 
@@ -3707,15 +3954,18 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/stop") {
+          assertHyperVDisplayAccess(req, url);
           const result = await runHyperVAction("Stop");
           hyperVRemoteSessionId = "";
           hyperVRemoteSessionStartedAt = "";
+          clearHyperVSessionLease();
           clearHyperVStatusCache();
           json(res, 200, result);
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/auto-recover") {
+          assertHyperVDisplayAccess(req, url);
           if (!hyperVRecoveryTask) {
             hyperVRecoveryTask = (async () => {
               clearHyperVStatusCache();
@@ -3741,6 +3991,8 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/request-new-disk") {
+          const accessStatus = await getHyperVStatus({ maxAgeMs: 0, timeoutMs: 25000, force: true });
+          if (accessStatus.vm?.state === "Running") assertHyperVDisplayAccess(req, url);
           const body = await readJsonBody(req);
           assertStoredIsoAccess(req, body.isoPath);
           const result = await runHyperVAction("RequestNewDisk", {
@@ -3750,28 +4002,34 @@ const nativeQemuPlugin = () => ({
             }, 120000);
           hyperVRemoteSessionId = "";
           hyperVRemoteSessionStartedAt = "";
+          clearHyperVSessionLease();
           clearHyperVStatusCache();
           json(res, 200, result);
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/reset") {
+          const accessStatus = await getHyperVStatus({ maxAgeMs: 0, timeoutMs: 25000, force: true });
+          if (accessStatus.vm?.state === "Running") assertHyperVDisplayAccess(req, url);
           clearHyperVStatusCache();
           json(res, 200, await runHyperVAction("Reset"));
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/open-console") {
+          assertHyperVDisplayAccess(req, url);
           json(res, 200, await runHyperVAction("OpenConsole"));
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/close-console") {
+          assertHyperVDisplayAccess(req, url);
           json(res, 200, await runHyperVAction("CloseConsole"));
           return;
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/console-frame") {
+          assertHyperVDisplayAccess(req, url);
           const frame = await runHyperVConsoleFrame(url.searchParams.get("contentOnly") === "1");
           if (!frame.outputPath || !existsSync(frame.outputPath)) {
             throw new Error("Hyper-V setup console frame was not written.");
@@ -3789,12 +4047,14 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/console-input") {
+          assertHyperVDisplayAccess(req, url);
           const body = await readJsonBody(req);
           json(res, 200, await runHyperVConsoleInput(body));
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/resize-display") {
+          assertHyperVDisplayAccess(req, url);
           const body = await readJsonBody(req);
           json(res, 200, await runHyperVAction("ResizeDisplay", body, 12000));
           return;
