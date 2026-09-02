@@ -89,6 +89,40 @@ so hidden Hyper-V and Android Studio windows can be mirrored into the browser.
 Keep that Windows user signed in; a Session 0 or `SYSTEM` host cannot capture
 interactive application windows.
 
+## Moving To A Dedicated Host
+
+Use a dedicated Windows PC when public visitors should not consume memory on
+the development computer. The dedicated host supports one active Hyper-V
+visitor at a time; additional visitors receive the existing occupied-session
+message instead of starting another VM.
+
+From the current host, export the tracked application, the prepared Windows 11
+base disk, and the private administrator credential to an NTFS or exFAT transfer
+drive:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File scripts\export-dedicated-host.ps1 -DestinationPath "E:\NebulaVM-Dedicated-Host"
+```
+
+On the spare PC, open PowerShell as Administrator in the transferred folder and
+prepare it. Preparation verifies the Windows edition, CPU virtualization, RAM,
+storage, Hyper-V feature, Node.js, and Cloudflare Tunnel. It installs disabled
+startup tasks and does not publish the new host yet:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File scripts\prepare-dedicated-host.ps1
+```
+
+Windows 10 reached end of standard support on October 14, 2025. Keep a Windows
+10 public host covered by Extended Security Updates or move it to a supported
+Windows edition. The explicit `-AcknowledgeWindows10Risk` switch bypasses the
+preparation block but does not make an unpatched host safe.
+
+For cutover, first run `scripts\disable-public-host.ps1` as Administrator on the
+old host. Then run `scripts\activate-dedicated-host.ps1` as Administrator on the
+spare PC. This order prevents two computers from repeatedly replacing the
+single public-host registry entry.
+
 ## Windows 11 Guest
 
 The host installer applies Windows 11 Pro directly to the dedicated dynamic
@@ -143,7 +177,8 @@ the normal authenticated NebulaVM host connection.
 
 ## Limits
 
-- Hyper-V exposes one shared Windows VM, not a separate VM per visitor.
+- Hyper-V runs one active Windows VM at a time. Each accepted visitor receives
+  a private differencing disk, while concurrent visitors must wait.
 - Host CPU, RAM, upload bandwidth, sleep, and internet outages affect clients.
 - Mobile and tablet browsers are intentionally blocked for now.
 - Netlify serves only the static app; it cannot run Hyper-V or store the VHDX.

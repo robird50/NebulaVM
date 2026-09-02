@@ -2,9 +2,26 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$nodePath = "C:\Program Files\nodejs\node.exe"
+$nodeCandidates = @(
+  $env:NEBULAVM_NODE_PATH,
+  "C:\Program Files\nodejs\node.exe",
+  "C:\Program Files (x86)\nodejs\node.exe"
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+$nodePath = $nodeCandidates | Select-Object -First 1
+if (-not $nodePath) {
+  throw "NebulaVM Host needs Node.js LTS. Install Node.js, then run the host again."
+}
 $vitePath = Join-Path $projectRoot "node_modules\vite\bin\vite.js"
-$cloudflaredPath = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
+$cloudflaredCandidates = @(
+  $env:NEBULAVM_CLOUDFLARED_PATH,
+  "C:\Program Files (x86)\cloudflared\cloudflared.exe",
+  "C:\Program Files\cloudflared\cloudflared.exe",
+  "$env:LOCALAPPDATA\Microsoft\WinGet\Links\cloudflared.exe"
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+$cloudflaredPath = $cloudflaredCandidates | Select-Object -First 1
+if (-not $cloudflaredPath) {
+  throw "NebulaVM Host needs cloudflared. Install Cloudflare Tunnel, then run the host again."
+}
 $publicUrlPath = Join-Path $projectRoot ".nebulavm-public-url"
 $hostTokenPath = Join-Path $projectRoot ".nebulavm-host-token"
 $cloudflaredLogPath = Join-Path $projectRoot ".nebulavm-cloudflared.log"

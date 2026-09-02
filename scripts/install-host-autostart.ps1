@@ -1,3 +1,5 @@
+param([switch]$DoNotStart)
+
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -71,6 +73,11 @@ Register-ScheduledTask `
   -Description "Checks NebulaVM Host and its public tunnel every minute, then safely restarts stale host components." `
   -Force | Out-Null
 
-Start-ScheduledTask -TaskName $taskName
-Start-ScheduledTask -TaskName $watchdogTaskName
+if ($DoNotStart) {
+  Disable-ScheduledTask -TaskName $taskName | Out-Null
+  Disable-ScheduledTask -TaskName $watchdogTaskName | Out-Null
+} else {
+  Start-ScheduledTask -TaskName $taskName
+  Start-ScheduledTask -TaskName $watchdogTaskName
+}
 Get-ScheduledTask -TaskName $taskName, $watchdogTaskName
