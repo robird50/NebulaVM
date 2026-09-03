@@ -13,9 +13,9 @@ $warnings = [System.Collections.Generic.List[string]]::new()
 $autopilotActions = [System.Collections.Generic.List[string]]::new()
 $autopilotEventPath = Join-Path (Split-Path -Parent $PSScriptRoot) ".nebulavm-autopilot-events.jsonl"
 $autopilotRunId = [Guid]::NewGuid().ToString("N")
-$privateDiskTtlHours = 12
-$privateDiskMaxBytes = [int64]80GB
-$hostStorageReserveBytes = [int64]25GB
+$privateDiskTtlHours = 0
+$privateDiskMaxBytes = [int64]0
+$hostStorageReserveBytes = [int64]100GB
 
 function Write-AutopilotEvent {
   param(
@@ -416,10 +416,43 @@ function Get-ActiveEmustarDiskPaths {
   return $active
 }
 
+function Release-IdleEmustarManagedDisks {
+  $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+  if (-not $vm -or $vm.State -notin @("Off", "Saved")) {
+    return
+  }
+
+  if ($vm.State -eq "Saved") {
+    Remove-VMSavedState -VM $vm -ErrorAction SilentlyContinue
+    $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+  }
+
+  Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Path -and (Test-ManagedPrivateDiskName -Name ([IO.Path]::GetFileName([string]$_.Path)))
+    } |
+    ForEach-Object {
+      $path = [string]$_.Path
+      Remove-VMHardDiskDrive -VMHardDiskDrive $_
+      try {
+        $vhd = Get-VHD -Path $path -ErrorAction SilentlyContinue
+        if ($vhd -and $vhd.Attached) {
+          Dismount-VHD -Path $path -ErrorAction SilentlyContinue
+        }
+      } catch {
+        # Cleanup below retries deletion after Hyper-V releases the disk.
+      }
+    }
+}
+
 function Remove-ManagedPrivateDisk {
   param([object]$Disk)
 
   try {
+    $vhd = Get-VHD -Path $Disk.Path -ErrorAction SilentlyContinue
+    if ($vhd -and $vhd.Attached) {
+      Dismount-VHD -Path $Disk.Path -ErrorAction Stop
+    }
     Remove-Item -LiteralPath $Disk.Path -Force -ErrorAction Stop
     return $true
   } catch {
@@ -435,6 +468,7 @@ function Cleanup-EmustarPrivateDisks {
     return
   }
 
+  Release-IdleEmustarManagedDisks
   $activeDiskPaths = Get-ActiveEmustarDiskPaths
   $cutoff = (Get-Date).ToUniversalTime().AddHours(-1 * $privateDiskTtlHours)
   $items = @(
@@ -1207,13 +1241,28 @@ function Start-Emustar {
       }
     }
     if ($currentDisk) {
+      $oldDiskPath = [string]$currentDisk.Path
+      $oldDiskIsManaged = $oldDiskPath -and
+        (Test-ManagedPrivateDiskName -Name ([IO.Path]::GetFileName($oldDiskPath)))
       Remove-VMHardDiskDrive -VMHardDiskDrive $currentDisk
+      if ($oldDiskIsManaged) {
+        try {
+          $oldVhd = Get-VHD -Path $oldDiskPath -ErrorAction SilentlyContinue
+          if ($oldVhd -and $oldVhd.Attached) {
+            Dismount-VHD -Path $oldDiskPath -ErrorAction SilentlyContinue
+          }
+        } catch {
+          # The deletion helper below retries while Hyper-V releases the disk.
+        }
+        Remove-EmustarDiskFile -Path $oldDiskPath
+        $warnings.Add("Deleted the previous temporary Hyper-V session disk.")
+      }
     }
     Add-VMHardDiskDrive -VM $vm -Path $vhdPath | Out-Null
     $warnings.Add("Attached the private virtual disk for this device and ISO.")
   }
 
-  Set-VM -VM $vm -AutomaticStartAction Nothing -AutomaticStopAction Save -CheckpointType Disabled
+  Set-VM -VM $vm -AutomaticStartAction Nothing -AutomaticStopAction TurnOff -CheckpointType Disabled
   $useFixedWindowsMemory = $isWindowsGuest -and
     (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory -gt 10GB
   Set-LowHostMemoryProfile -Vm $vm -MemoryMb $memoryMb -FixedStartup $useFixedWindowsMemory
@@ -1320,13 +1369,47 @@ function Start-Emustar {
 function Stop-Emustar {
   Assert-HyperVReady
   $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+  $sessionDisk = if ($vm) {
+    Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue | Select-Object -First 1
+  } else {
+    $null
+  }
+  $sessionDiskPath = if ($sessionDisk) { [string]$sessionDisk.Path } else { "" }
+  $managedSessionDisk = -not [string]::IsNullOrWhiteSpace($sessionDiskPath) -and
+    (Test-ManagedPrivateDiskName -Name ([IO.Path]::GetFileName($sessionDiskPath)))
+
   if ($vm -and $vm.State -in @("Running", "Paused", "Suspended")) {
-    Save-VM -VM $vm -ErrorAction Stop
+    Stop-VM -VM $vm -Force -TurnOff -ErrorAction Stop
     $vm = Get-VM -Name $vmName -ErrorAction Stop
-    $warnings.Add("Saved the Hyper-V session so its RAM is released and the next launch can resume quickly.")
-  } elseif ($vm -and $vm.State -notin @("Off", "Saved")) {
+    $warnings.Add("Turned off the temporary Hyper-V session and released its RAM.")
+  } elseif ($vm -and $vm.State -eq "Saved") {
+    Remove-VMSavedState -VM $vm -ErrorAction SilentlyContinue
+    $vm = Get-VM -Name $vmName -ErrorAction Stop
+  } elseif ($vm -and $vm.State -ne "Off") {
     $vm = Stop-EmustarForConfiguration -Vm $vm
   }
+
+  if ($vm -and $managedSessionDisk) {
+    $attachedDisk = Get-VMHardDiskDrive -VM $vm -ErrorAction SilentlyContinue |
+      Where-Object { $_.Path -and ([IO.Path]::GetFullPath([string]$_.Path) -eq [IO.Path]::GetFullPath($sessionDiskPath)) } |
+      Select-Object -First 1
+    if ($attachedDisk) {
+      Remove-VMHardDiskDrive -VMHardDiskDrive $attachedDisk
+    }
+    try {
+      $vhd = Get-VHD -Path $sessionDiskPath -ErrorAction SilentlyContinue
+      if ($vhd -and $vhd.Attached) {
+        Dismount-VHD -Path $sessionDiskPath -ErrorAction SilentlyContinue
+      }
+    } catch {
+      # Deleting the temporary disk below retries any short-lived release delay.
+    }
+    Remove-EmustarDiskFile -Path $sessionDiskPath
+    $warnings.Add("Deleted the temporary Hyper-V session disk so visitor data does not accumulate on the host.")
+    $vmDirectory = Split-Path -Parent (Split-Path -Parent $sessionDiskPath)
+    Cleanup-EmustarPrivateDisks -VmDirectory $vmDirectory
+  }
+
   return [ordered]@{
     ok = $true
     vm = Get-VmSnapshot -Vm (Get-VM -Name $vmName -ErrorAction SilentlyContinue)
@@ -1512,9 +1595,9 @@ function Request-NewEmustarDisk {
     diskPath = $vhdPath
     stoppedVm = $stoppedVm
     message = $(if ($templateDiskProvided) {
-      "Fresh private Windows 11 Template disk ready. Launch Hyper-V to boot from the new copy."
+      "Fresh temporary Windows 11 Template disk ready. Launch Hyper-V to boot from the new copy."
     } else {
-      "Fresh private Hyper-V disk ready. Launch Hyper-V to boot with a clean disk."
+      "Fresh temporary Hyper-V disk ready. Launch Hyper-V to boot with a clean disk."
     })
     vm = Get-VmSnapshot -Vm (Get-VM -Name $vmName -ErrorAction SilentlyContinue)
     warnings = $warnings

@@ -178,7 +178,7 @@ the normal authenticated NebulaVM host connection.
 ## Limits
 
 - Hyper-V runs one active Windows VM at a time. Each accepted visitor receives
-  a private differencing disk, while concurrent visitors must wait.
+  a temporary differencing disk for the active session, while concurrent visitors must wait. The disk is deleted when the session ends so visitor storage cannot accumulate on the host.
 - Host CPU, RAM, upload bandwidth, sleep, and internet outages affect clients.
 - Mobile and tablet browsers are intentionally blocked for now.
 - Netlify serves only the static app; it cannot run Hyper-V or store the VHDX.
