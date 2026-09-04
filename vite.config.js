@@ -662,39 +662,42 @@ const findWindows11TemplateDisk = () => {
 };
 
 const ensureWindows11TemplateIso = () => {
+  const diskPath = findWindows11TemplateDisk();
   const existingTemplate = existsSync(windows11TemplateIsoPath) ? windows11TemplateIsoPath : "";
   const sourcePath =
     (sourceLooksLikeWindows11Template(existingTemplate) && existingTemplate) ||
     windows11TemplateSourceCandidates.find((candidatePath) => sourceLooksLikeWindows11Template(candidatePath));
 
-  if (!sourcePath) {
+  if (!sourcePath && !diskPath) {
     return {
       ok: true,
       available: false,
       name: "Windows 11 Template",
-      error: "Windows 11 Template ISO is not installed on this host.",
+      error: "Windows 11 Template is not installed on this host.",
     };
   }
 
-  mkdirSync(templateIsoDirectory, { recursive: true });
-  if (!existsSync(windows11TemplateIsoPath)) {
-    try {
-      linkSync(sourcePath, windows11TemplateIsoPath);
-    } catch {
-      copyFileSync(sourcePath, windows11TemplateIsoPath);
+  if (sourcePath) {
+    mkdirSync(templateIsoDirectory, { recursive: true });
+    if (!existsSync(windows11TemplateIsoPath)) {
+      try {
+        linkSync(sourcePath, windows11TemplateIsoPath);
+      } catch {
+        copyFileSync(sourcePath, windows11TemplateIsoPath);
+      }
     }
   }
   grantHyperVTemplateAccess();
 
-  const size = statSync(windows11TemplateIsoPath).size;
-  const diskPath = findWindows11TemplateDisk();
+  const isoPath = existsSync(windows11TemplateIsoPath) ? windows11TemplateIsoPath : "";
+  const isoSize = isoPath ? statSync(isoPath).size : 0;
   const diskSize = diskPath ? statSync(diskPath).size : 0;
   return {
     ok: true,
     available: true,
     name: "Windows 11 Template",
-    isoPath: windows11TemplateIsoPath,
-    size,
+    isoPath,
+    size: isoSize || diskSize,
     diskPath,
     diskSize,
     prepared: Boolean(diskPath),
