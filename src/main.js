@@ -7,7 +7,7 @@ import {
   qemuWasmCanMountBrowserFiles,
 } from "./qemuX64.js";
 import "./styles.css";
-import { requestVmCaptcha, verifyBrowserVmCaptcha } from "./vmCaptcha.js";
+import { animateVmViewportIn, requestVmCaptcha, verifyBrowserVmCaptcha } from "./vmCaptcha.js";
 
 const app = document.querySelector("#app");
 const COMMIT_ID = typeof __NEBULAVM_COMMIT__ === "string" ? __NEBULAVM_COMMIT__ : "local";
@@ -6378,6 +6378,7 @@ const bootEmulator = async () => {
     await stopEmulator();
 
     prepareBootUi();
+    animateVmViewportIn();
     log("Creating virtual machine.");
     if (!isRemoteMode() && !isAndroidMode() && !isNintendoMode()) {
       log(`Hardware request: ${selectedProcessorSpeedGhz()} GHz CPU target, ${selectedMemoryMb()} MB RAM.`);

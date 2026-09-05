@@ -52,34 +52,27 @@ async function choose(page, mode) {
 }
 
 async function begin(page, button = "#bootButton") {
-  const popupPromise = page.context().waitForEvent("page");
   await page.locator(button).click();
-  const popup = await popupPromise;
-  await expect(page.getByRole("dialog")).toBeVisible();
-  return popup;
-}
-
-async function expectPopupClosed(popup) {
-  await expect.poll(() => popup.isClosed(), { timeout: 3000 }).toBe(true);
+  await expect(page.getByRole("dialog", { name: "Verify before starting" })).toBeVisible();
+  const frame = page.frameLocator("#vmCaptchaFrame");
+  await expect(frame.getByRole("button", { name: "Solve test challenge" })).toBeVisible();
+  return frame;
 }
 
 for (const mode of ["v86", "qemu-x64", "emustar-hyperv", "qemu-native-x64", "qemu-native-arm64-windows", "qemu-native-arm64-ubuntu", "nintendo", "remote-vm"]) {
   test(`${mode}: Start requires a new challenge and cancel never starts a VM`, async ({ page }) => {
     const calls = await prepare(page);
     await choose(page, mode);
-    const popup = await begin(page);
-    await expect(popup.getByRole("button", { name: "Solve test challenge" })).toBeVisible();
+    const challenge = await begin(page);
     await expect(page.locator("#bootButton")).toBeDisabled();
     expect(calls.starts).toHaveLength(0);
     expect(calls.verifies).toBe(0);
-    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await challenge.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expectPopupClosed(popup);
     await expect(page.locator("#bootButton")).toBeEnabled();
     const retry = await begin(page);
-    expect(retry.url()).not.toBe(popup.url());
-    await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    await expectPopupClosed(retry);
+    await retry.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     expect(calls.starts).toHaveLength(0);
   });
 }
@@ -87,10 +80,10 @@ for (const mode of ["v86", "qemu-x64", "emustar-hyperv", "qemu-native-x64", "qem
 test("Windows template uses the gate even with only a prepared disk", async ({ page }) => {
   const calls = await prepare(page);
   await page.locator("#emulatorMode").selectOption("emustar-hyperv", { force: true });
-  const popup = await begin(page, "#windowsTemplateButton");
-  await popup.getByRole("button", { name: "Solve test challenge" }).click();
+  const challenge = await begin(page, "#windowsTemplateButton");
+  await challenge.getByRole("button", { name: "Solve test challenge" }).click();
   await expect.poll(() => calls.starts.length).toBe(1);
-  await expectPopupClosed(popup);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(calls.starts[0].captchaToken).toBe("test-response-token");
   expect(calls.starts[0].templateDiskPath).toBe("C:\\Test\\template.vhdx");
   expect(calls.verifies).toBe(0); // The host start endpoint verifies the token, not Netlify twice.
@@ -99,10 +92,10 @@ test("Windows template uses the gate even with only a prepared disk", async ({ p
 test("browser runtime verifies on the server; rejected callback does not boot", async ({ page }) => {
   const calls = await prepare(page, { valid: false });
   await choose(page, "v86");
-  const popup = await begin(page);
-  await popup.getByRole("button", { name: "Solve test challenge" }).click();
+  const challenge = await begin(page);
+  await challenge.getByRole("button", { name: "Solve test challenge" }).click();
   await expect.poll(() => calls.verifies).toBe(1);
-  await expectPopupClosed(popup);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator("#bootButton")).toBeEnabled();
   await expect(page.getByText("Boot blocked: Verification rejected", { exact: false })).toBeVisible();
   expect(calls.starts).toHaveLength(0);
@@ -111,38 +104,42 @@ test("browser runtime verifies on the server; rejected callback does not boot", 
 test("accepted browser verification proceeds to boot", async ({ page }) => {
   const calls = await prepare(page);
   await choose(page, "v86");
-  const popup = await begin(page);
-  await popup.getByRole("button", { name: "Solve test challenge" }).click();
+  const challenge = await begin(page);
+  await challenge.getByRole("button", { name: "Solve test challenge" }).click();
   await expect.poll(() => calls.verifies).toBe(1);
-  await expectPopupClosed(popup);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByText("Creating virtual machine.", { exact: false })).toBeVisible();
+  await expect(page.locator("#screenContainer")).toHaveClass(/vm-display-entering/);
 });
 
 test("expiration keeps the VM blocked until a fresh solve", async ({ page }) => {
   const calls = await prepare(page);
   await choose(page, "v86");
-  const popup = await begin(page);
-  await popup.getByRole("button", { name: "Expire test challenge" }).click();
-  await expect(popup.getByRole("status")).toContainText("expired");
+  const challenge = await begin(page);
+  await challenge.getByRole("button", { name: "Expire test challenge" }).click();
+  await expect(challenge.getByRole("status")).toContainText("expired");
   expect(calls.verifies).toBe(0);
-  await popup.getByRole("button", { name: "Solve test challenge" }).click();
+  await challenge.getByRole("button", { name: "Solve test challenge" }).click();
   await expect.poll(() => calls.verifies).toBe(1);
-  await expectPopupClosed(popup);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
-test("only the verification window disables browser isolation", async ({ page }) => {
+test("the verification frame fades inside the viewport while app isolation stays enabled", async ({ page }) => {
   await prepare(page);
   await choose(page, "v86");
-  const popup = await begin(page);
-  await expect(popup.getByRole("button", { name: "Solve test challenge" })).toBeVisible();
+  const challenge = await begin(page);
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
-  expect(await popup.evaluate(() => crossOriginIsolated)).toBe(false);
+  const captchaFrame = page.frames().find((frame) => frame.url().includes("/captcha.html"));
+  expect(captchaFrame).toBeTruthy();
+  await expect(challenge.locator("#challenge")).toBeVisible();
+  await expect(page.locator(".vm-captcha-viewport")).toHaveClass(/is-visible/);
   await page.screenshot({ path: "test-results/captcha-desktop.png" });
-  await popup.setViewportSize({ width: 320, height: 640 });
-  await popup.screenshot({ path: "test-results/captcha-mobile.png" });
-  expect(await popup.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expectPopupClosed(popup);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.locator(".vm-captcha-viewport").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "test-results/captcha-mobile.png" });
+  expect(await challenge.locator("html").evaluate((element) => element.scrollWidth <= innerWidth)).toBe(true);
+  await challenge.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("missing configuration fails closed and unlocks Start", async ({ page }) => {
@@ -154,31 +151,23 @@ test("missing configuration fails closed and unlocks Start", async ({ page }) =>
   expect(calls.starts).toHaveLength(0);
 });
 
-test("popup blocking offers an explicit retry without starting anything", async ({ page }) => {
+test("verification is embedded and does not open a separate window", async ({ page }) => {
   const calls = await prepare(page);
   await choose(page, "v86");
-  await page.evaluate(() => {
-    const original = window.open;
-    window.open = (...args) => { window.open = original; return null; };
-  });
-  await page.locator("#bootButton").click();
-  await expect(page.getByRole("dialog")).toContainText("blocked");
+  const challenge = await begin(page);
+  expect(page.context().pages()).toHaveLength(1);
   expect(calls.starts).toHaveLength(0);
-  const popupPromise = page.context().waitForEvent("page");
-  await page.getByRole("button", { name: "Open verification" }).click();
-  const popup = await popupPromise;
-  await popup.getByRole("button", { name: "Solve test challenge" }).click();
+  await challenge.getByRole("button", { name: "Solve test challenge" }).click();
   await expect.poll(() => calls.verifies).toBe(1);
-  await expectPopupClosed(popup);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
-test("closing verification cancels without leaving Start disabled", async ({ page }) => {
+test("cancelling embedded verification does not leave Start disabled", async ({ page }) => {
   const calls = await prepare(page);
   await choose(page, "v86");
-  const popup = await begin(page);
-  await expect(popup.getByRole("button", { name: "Solve test challenge" })).toBeVisible();
-  await popup.close();
-  await expect(page.locator("#bootButton")).toBeEnabled({ timeout: 18000 });
+  const challenge = await begin(page);
+  await challenge.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.locator("#bootButton")).toBeEnabled();
   expect(calls.starts).toHaveLength(0);
   expect(calls.verifies).toBe(0);
 });

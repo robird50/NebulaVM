@@ -26,10 +26,13 @@ and redeploy the Netlify site and functions together. Deploy the updated host
 start checks alongside the frontend; old host versions do not enforce them.
 Missing keys fail closed, so configure both environments before publishing.
 
-`captcha.html` runs in a separate verification window because emulator pages
-require cross-origin isolation. Only that page disables COEP. A random,
-per-attempt BroadcastChannel carries the response back; the callback alone is
-not trusted by the server. The normal page retains COOP/COEP protections.
+`captcha.html` runs in a frame that fades into the VM viewport because emulator
+pages require cross-origin isolation. A credentialless iframe and a page-specific
+COEP exception allow the provider widget to load without weakening the main
+emulator page. A random,
+per-attempt BroadcastChannel plus same-origin messaging carries the response
+back; the callback alone is not trusted by the server. The normal page retains
+COOP/COEP protections.
 
 Each token is verified with hCaptcha's siteverify endpoint, scoped to the
 configured sitekey. No successful token is saved or reused. Network errors,
@@ -38,6 +41,6 @@ invalid responses, expired tokens, and duplicate tokens block the start.
 ## Verification
 
 Run `npm test` and `npm run build`. Test each Start path in a browser after
-configuration, including cancel, popup blocking, verification failure, and a
+configuration, including cancel, frame isolation, verification failure, and a
 second start requiring a new challenge. Do not use hCaptcha's always-pass test
 keys in production.

@@ -9,7 +9,10 @@ if (!/^[a-f0-9-]{36}$/.test(channelId)) {
   let finished = false;
   let widget;
   let widgetReady = false;
-  const send = (data) => channel.postMessage(data);
+  const send = (data) => {
+    channel.postMessage(data);
+    if (window.parent !== window) window.parent.postMessage({ ...data, channelId }, location.origin);
+  };
   const heartbeat = setInterval(() => send({ type: "ready" }), 1000);
   send({ type: "ready" });
   const close = () => {
@@ -19,7 +22,7 @@ if (!/^[a-f0-9-]{36}$/.test(channelId)) {
     window.close();
   };
   channel.onmessage = ({ data }) => { if (data?.type === "close") close(); };
-  document.querySelector("#cancel").onclick = () => { send({ type: "cancel" }); close(); };
+  document.querySelector("#cancel").onclick = () => { send({ type: "cancel" }); setTimeout(close, 50); };
   window.addEventListener("pagehide", () => { if (!finished) send({ type: "cancel" }); });
   const error = () => {
     status.textContent = "Verification unavailable. Cancel and try again later.";

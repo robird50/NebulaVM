@@ -2,6 +2,7 @@ import "./vmCaptcha.css";
 
 const endpoint = "/.netlify/functions/vm-captcha";
 let pending = false;
+const transitionMs = 320;
 
 export async function verifyBrowserVmCaptcha(captchaToken) {
   const response = await fetch(endpoint, {
@@ -21,25 +22,30 @@ export function requestVmCaptcha() {
   }
   pending = true;
   return new Promise((resolve, reject) => {
+    const viewport = document.querySelector("#screenContainer");
+    if (!viewport) {
+      pending = false;
+      reject(new Error("The VM viewport is unavailable."));
+      return;
+    }
     const channelId = crypto.randomUUID();
     const channel = new BroadcastChannel(`nebulavm-captcha-${channelId}`);
-    const dialog = document.createElement("dialog");
-    dialog.className = "vm-captcha-dialog";
-    dialog.setAttribute("aria-labelledby", "vm-captcha-title");
-    dialog.innerHTML = `<h2 id="vm-captcha-title">Verify before starting</h2>
-      <p role="status">Waiting for hCaptcha verification.</p>
-      <div class="vm-captcha-actions"><button type="button" data-open>Open verification</button>
-      <button type="button" data-cancel>Cancel</button></div>`;
-    document.body.append(dialog);
-    dialog.showModal();
-    const status = dialog.querySelector('[role="status"]');
-    let popup;
+    const overlay = document.createElement("section");
+    overlay.className = "vm-captcha-viewport";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-label", "Verify before starting");
+    overlay.innerHTML = `<iframe id="vmCaptchaFrame" title="hCaptcha verification" src="/captcha.html#${channelId}" credentialless></iframe>`;
+    viewport.append(overlay);
+    requestAnimationFrame(() => {
+      overlay.classList.add("is-visible");
+      overlay.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
     let settled = false;
     let lastHeartbeat = 0;
     const deadline = setTimeout(() => finish(new Error("Verification timed out. Click Start to try again.")), 5 * 60000);
     const heartbeat = setInterval(() => {
       if (lastHeartbeat && Date.now() - lastHeartbeat > 15000 && !document.hidden) {
-        finish(new Error("Verification window disconnected. Click Start to try again."));
+        finish(new Error("Verification panel disconnected. Click Start to try again."));
       }
     }, 1000);
     function finish(error, token) {
@@ -47,31 +53,38 @@ export function requestVmCaptcha() {
       settled = true;
       clearTimeout(deadline);
       clearInterval(heartbeat);
+      window.removeEventListener("message", receiveWindowMessage);
       channel.postMessage({ type: "close" });
-      channel.close();
-      try { popup?.close(); } catch { /* COOP can sever the window reference. */ }
-      dialog.close();
-      dialog.remove();
-      pending = false;
-      if (error) reject(error); else resolve(token);
+      overlay.classList.remove("is-visible");
+      overlay.classList.add("is-leaving");
+      setTimeout(() => {
+        channel.close();
+        overlay.remove();
+        pending = false;
+        if (error) reject(error); else resolve(token);
+      }, transitionMs);
     }
     const cancel = () => finish(Object.assign(new Error("VM start cancelled."), { name: "AbortError" }));
-    dialog.addEventListener("cancel", (event) => { event.preventDefault(); cancel(); });
-    dialog.querySelector("[data-cancel]").addEventListener("click", cancel);
-    const open = () => {
-      popup = window.open(`/captcha.html#${channelId}`, `captcha-${channelId}`, "popup,width=420,height=620");
-      status.textContent = popup ? "Waiting for hCaptcha verification." : "Verification window blocked. Select Open verification to continue.";
-    };
-    dialog.querySelector("[data-open]").addEventListener("click", open);
-    channel.onmessage = ({ data }) => {
-      if (data?.type === "ready") {
-        lastHeartbeat = Date.now();
-        dialog.querySelector("[data-open]").disabled = true;
-      }
+    const receive = (data) => {
+      if (data?.type === "ready") lastHeartbeat = Date.now();
       else if (data?.type === "solved" && typeof data.token === "string" && data.token.length <= 16384) finish(null, data.token);
       else if (data?.type === "error") finish(new Error("hCaptcha is unavailable. Please try again later."));
       else if (data?.type === "cancel") cancel();
     };
-    open();
+    const receiveWindowMessage = (event) => {
+      if (event.origin !== location.origin || event.data?.channelId !== channelId) return;
+      receive(event.data);
+    };
+    window.addEventListener("message", receiveWindowMessage);
+    channel.onmessage = ({ data }) => receive(data);
   });
+}
+
+export function animateVmViewportIn() {
+  const viewport = document.querySelector("#screenContainer");
+  if (!viewport) return;
+  viewport.classList.remove("vm-display-entering");
+  void viewport.offsetWidth;
+  viewport.classList.add("vm-display-entering");
+  setTimeout(() => viewport.classList.remove("vm-display-entering"), 500);
 }
