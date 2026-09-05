@@ -2,17 +2,20 @@ import { test, expect } from "@playwright/test";
 
 async function openFidget(page, screenshotPath) {
   await page.goto("/");
-  const zone = page.locator("#logoFidgetZone");
-  await zone.scrollIntoViewIfNeeded();
-  await expect(zone).toHaveClass(/is-ready/, { timeout: 20000 });
-  const canvas = page.locator("#logoFidgetCanvas");
+  const anchor = page.locator("#logoFidgetZone");
+  await anchor.scrollIntoViewIfNeeded();
+  const canvas = page.locator(".logo-fidget-layer");
+  const grab = page.locator(".logo-fidget-grab");
   await expect(canvas).toBeVisible();
-  await zone.screenshot({ path: screenshotPath });
-  return { zone, canvas };
+  await expect(grab).toBeVisible({ timeout: 20000 });
+  await page.screenshot({ path: screenshotPath });
+  return { anchor, canvas, grab };
 }
 
 test("3D logo fidget renders and moves under physics", async ({ page }) => {
-  const { canvas } = await openFidget(page, "test-results/logo-fidget-desktop.png");
+  const { anchor, canvas, grab } = await openFidget(page, "test-results/logo-fidget-desktop.png");
+  expect(await anchor.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(1);
+  await expect(canvas).toHaveCSS("pointer-events", "none");
   const coloredPixels = await canvas.evaluate((element) => {
     element.dispatchEvent(new Event("nebulavm-probe-frame"));
     const gl = element.getContext("webgl2") || element.getContext("webgl");
@@ -23,14 +26,29 @@ test("3D logo fidget renders and moves under physics", async ({ page }) => {
     return count;
   });
   expect(coloredPixels).toBeGreaterThan(500);
-  const before = await canvas.screenshot();
+  const start = await grab.boundingBox();
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  const targetX = start.x + start.width / 2 + 100;
+  const targetY = Math.max(140, start.y - 260);
+  await page.mouse.move(targetX, targetY, { steps: 8 });
+  await page.waitForTimeout(160);
+  await page.mouse.move(targetX + 1, targetY);
+  const held = await grab.boundingBox();
+  await page.mouse.up();
   await page.waitForTimeout(450);
-  const after = await canvas.screenshot();
-  expect(after.equals(before)).toBe(false);
+  const fallen = await grab.boundingBox();
+  expect(fallen.y).toBeGreaterThan(held.y + 5);
+  await page.screenshot({ path: "test-results/logo-fidget-desktop-thrown.png" });
 });
 
 test("3D logo fidget fits a mobile viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const { zone } = await openFidget(page, "test-results/logo-fidget-mobile.png");
-  expect(await zone.evaluate((element) => element.scrollWidth <= innerWidth)).toBe(true);
+  const { canvas, grab } = await openFidget(page, "test-results/logo-fidget-mobile.png");
+  const canvasBox = await canvas.boundingBox();
+  const grabBox = await grab.boundingBox();
+  expect(canvasBox.width).toBeLessThanOrEqual(390);
+  expect(canvasBox.height).toBeLessThanOrEqual(844);
+  expect(grabBox.x).toBeGreaterThanOrEqual(0);
+  expect(grabBox.x + grabBox.width).toBeLessThanOrEqual(390);
 });

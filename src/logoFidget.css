@@ -1,39 +1,44 @@
-.logo-fidget-zone {
-  position: relative;
+.logo-fidget-anchor {
   width: 100%;
-  height: clamp(280px, 38vw, 420px);
+  height: 1px;
   margin-top: 34px;
-  overflow: hidden;
-  background: #080d14;
+  pointer-events: none;
 }
 
-.logo-fidget-zone canvas {
+.logo-fidget-layer {
+  position: fixed;
+  z-index: 70;
+  inset: 0;
   display: block;
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100dvh;
+  pointer-events: none;
+  background: transparent;
+}
+
+.logo-fidget-grab {
+  position: fixed;
+  z-index: 71;
+  top: 0;
+  left: 0;
+  width: clamp(112px, 15dvh, 168px);
+  height: clamp(112px, 15dvh, 168px);
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
   cursor: grab;
   touch-action: none;
-  outline: none;
+  user-select: none;
 }
 
-.logo-fidget-zone canvas.is-dragging { cursor: grabbing; }
+.logo-fidget-grab.is-dragging { cursor: grabbing; }
 
-.logo-fidget-zone canvas:focus-visible {
-  box-shadow: inset 0 0 0 2px #62dbea;
+.logo-fidget-grab:focus-visible {
+  outline: 2px solid #62dbea;
+  outline-offset: 3px;
 }
 
-.logo-fidget-zone p {
-  position: absolute;
-  inset: 50% auto auto 50%;
-  margin: 0;
-  transform: translate(-50%, -50%);
-  color: #9eb0bd;
-  font-size: 0.82rem;
-}
-
-.logo-fidget-zone.is-ready p,
-.logo-fidget-zone p[hidden] { display: none; }
-
-@media (max-width: 640px) {
-  .logo-fidget-zone { height: 300px; }
-}
+.logo-fidget-layer[hidden],
+.logo-fidget-grab[hidden] { display: none; }

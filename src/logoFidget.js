@@ -5,196 +5,228 @@ import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import "./logoFidget.css";
 
 const MODEL_URL = "/assets/nebulavm-fidget.glb";
-const VIEW_HEIGHT = 4.6;
+const VIEW_HEIGHT = 8.5;
+const LOGO_RADIUS = 0.82;
 
-export async function initLogoFidget(zone) {
-  const canvas = zone.querySelector("#logoFidgetCanvas");
-  const status = zone.querySelector("#logoFidgetStatus");
-  if (!canvas || !status) return;
+export async function initLogoFidget(anchor) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "logo-fidget-layer";
+  canvas.hidden = true;
+  const grab = document.createElement("button");
+  grab.type = "button";
+  grab.className = "logo-fidget-grab";
+  grab.hidden = true;
+  grab.title = "Drag and release to throw the NebulaVM logo";
+  grab.setAttribute("aria-label", "Interactive 3D NebulaVM logo. Drag and release to throw it, use arrow keys to move it, press Space to bounce it, or press Escape to return it to the bottom.");
+  document.body.append(canvas, grab);
 
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "low-power" });
   } catch {
-    status.textContent = "The 3D logo is unavailable on this device.";
+    canvas.remove();
+    grab.remove();
     return;
   }
-
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+  renderer.setClearColor(0x000000, 0);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const scene = new THREE.Scene();
-  const camera = new THREE.OrthographicCamera(-2.3, 2.3, 2.3, -2.3, 0.1, 20);
-  camera.position.set(0, 0, 5);
-  scene.add(new THREE.HemisphereLight(0xdffaff, 0x172033, 2.3));
-  const keyLight = new THREE.DirectionalLight(0xffffff, 3.2);
+  const camera = new THREE.OrthographicCamera(-4, 4, VIEW_HEIGHT / 2, -VIEW_HEIGHT / 2, 0.1, 20);
+  camera.position.z = 5;
+  scene.add(new THREE.HemisphereLight(0xe8fbff, 0x18213a, 2.5));
+  const keyLight = new THREE.DirectionalLight(0xffffff, 3.4);
   keyLight.position.set(-3, 5, 6);
-  keyLight.castShadow = true;
   scene.add(keyLight);
-  const rimLight = new THREE.DirectionalLight(0x63e6ff, 2.2);
+  const rimLight = new THREE.DirectionalLight(0x4ae7ff, 2.4);
   rimLight.position.set(4, 1, 3);
   scene.add(rimLight);
-
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(20, 5),
-    new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.34 }),
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -2.12;
-  floor.receiveShadow = true;
-  scene.add(floor);
 
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   let logo;
   try {
-    const gltf = await loader.loadAsync(MODEL_URL);
-    logo = gltf.scene;
+    logo = (await loader.loadAsync(MODEL_URL)).scene;
   } catch {
     renderer.dispose();
-    status.textContent = "The 3D logo could not be loaded.";
+    canvas.remove();
+    grab.remove();
     return;
   }
-
   const bounds = new THREE.Box3().setFromObject(logo);
   const size = bounds.getSize(new THREE.Vector3());
-  const center = bounds.getCenter(new THREE.Vector3());
-  logo.position.sub(center);
-  logo.scale.setScalar(1.55 / Math.max(size.x, size.y));
-  logo.traverse((node) => {
-    if (!node.isMesh) return;
-    node.castShadow = true;
-    node.receiveShadow = true;
-  });
+  logo.position.sub(bounds.getCenter(new THREE.Vector3()));
+  logo.scale.setScalar((LOGO_RADIUS * 2) / Math.max(size.x, size.y));
   const logoRoot = new THREE.Group();
   logoRoot.add(logo);
   scene.add(logoRoot);
 
-  const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
-  world.allowSleep = true;
-  const material = new CANNON.Material({ friction: 0.24, restitution: 0.72 });
-  world.defaultContactMaterial = new CANNON.ContactMaterial(material, material, {
-    friction: 0.24,
-    restitution: 0.72,
-  });
-  const body = new CANNON.Body({ mass: 1, material, linearDamping: 0.08, angularDamping: 0.12 });
+  const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -13.5, 0) });
+  const physicsMaterial = new CANNON.Material({ friction: 0.2, restitution: 0.76 });
+  world.defaultContactMaterial = new CANNON.ContactMaterial(physicsMaterial, physicsMaterial, { friction: 0.2, restitution: 0.76 });
+  const body = new CANNON.Body({ mass: 1, material: physicsMaterial, linearDamping: 0.035, angularDamping: 0.06 });
   const coinRotation = new CANNON.Quaternion();
   coinRotation.setFromEuler(Math.PI / 2, 0, 0);
-  body.addShape(new CANNON.Cylinder(0.78, 0.78, 0.12, 24), new CANNON.Vec3(), coinRotation);
-  body.position.set(0.35, 1.25, 0);
-  body.angularVelocity.set(0.5, 0.8, -1.4);
+  body.addShape(new CANNON.Cylinder(LOGO_RADIUS, LOGO_RADIUS, 0.13, 24), new CANNON.Vec3(), coinRotation);
+  body.angularVelocity.set(0.7, 1.1, -1.8);
   world.addBody(body);
 
+  let halfWidth = 4;
   let walls = [];
-  let halfWidth = 2.3;
+  let firstLayout = true;
+  const addWall = (halfExtents, position) => {
+    const wall = new CANNON.Body({ mass: 0, material: physicsMaterial, shape: new CANNON.Box(new CANNON.Vec3(...halfExtents)) });
+    wall.position.set(...position);
+    world.addBody(wall);
+    walls.push(wall);
+  };
   const rebuildWalls = () => {
     walls.forEach((wall) => world.removeBody(wall));
     walls = [];
-    const addWall = (halfExtents, position) => {
-      const wall = new CANNON.Body({ mass: 0, material, shape: new CANNON.Box(new CANNON.Vec3(...halfExtents)) });
-      wall.position.set(...position);
-      world.addBody(wall);
-      walls.push(wall);
-    };
-    addWall([halfWidth + 0.4, 0.1, 1], [0, -2.3, 0]);
-    addWall([halfWidth + 0.4, 0.1, 1], [0, 2.3, 0]);
-    addWall([0.1, 2.4, 1], [-halfWidth - 0.1, 0, 0]);
-    addWall([0.1, 2.4, 1], [halfWidth + 0.1, 0, 0]);
-    addWall([halfWidth + 0.4, 2.4, 0.08], [0, 0, -0.48]);
-    addWall([halfWidth + 0.4, 2.4, 0.08], [0, 0, 0.48]);
+    const halfHeight = VIEW_HEIGHT / 2;
+    addWall([halfWidth + 0.3, 0.08, 1], [0, -halfHeight - 0.08, 0]);
+    addWall([halfWidth + 0.3, 0.08, 1], [0, halfHeight + 0.08, 0]);
+    addWall([0.08, halfHeight + 0.2, 1], [-halfWidth - 0.08, 0, 0]);
+    addWall([0.08, halfHeight + 0.2, 1], [halfWidth + 0.08, 0, 0]);
+    addWall([halfWidth + 0.3, halfHeight + 0.2, 0.06], [0, 0, -0.45]);
+    addWall([halfWidth + 0.3, halfHeight + 0.2, 0.06], [0, 0, 0.45]);
   };
-
   const resize = () => {
-    const width = Math.max(1, zone.clientWidth);
-    const height = Math.max(1, zone.clientHeight);
+    const width = Math.max(1, window.innerWidth);
+    const height = Math.max(1, window.visualViewport?.height || window.innerHeight);
     renderer.setSize(width, height, false);
     halfWidth = (VIEW_HEIGHT * width / height) / 2;
     camera.left = -halfWidth;
     camera.right = halfWidth;
-    camera.top = VIEW_HEIGHT / 2;
-    camera.bottom = -VIEW_HEIGHT / 2;
     camera.updateProjectionMatrix();
     rebuildWalls();
+    if (firstLayout) {
+      body.position.set(0, -VIEW_HEIGHT / 2 + LOGO_RADIUS + 0.1, 0);
+      firstLayout = false;
+    } else {
+      body.position.x = Math.max(-halfWidth + LOGO_RADIUS, Math.min(halfWidth - LOGO_RADIUS, body.position.x));
+      body.position.y = Math.max(-VIEW_HEIGHT / 2 + LOGO_RADIUS, Math.min(VIEW_HEIGHT / 2 - LOGO_RADIUS, body.position.y));
+    }
   };
-  new ResizeObserver(resize).observe(zone);
+  window.addEventListener("resize", resize, { passive: true });
+  window.visualViewport?.addEventListener("resize", resize, { passive: true });
   resize();
 
-  const raycaster = new THREE.Raycaster();
-  const pointer = new THREE.Vector2();
-  const dragPoint = new THREE.Vector3();
-  const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+  let anchorVisible = true;
+  let activated = false;
   let dragging = false;
-  let lastDrag = null;
-
-  const pointFromEvent = (event) => {
-    const rect = canvas.getBoundingClientRect();
-    pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
-    raycaster.setFromCamera(pointer, camera);
-    raycaster.ray.intersectPlane(dragPlane, dragPoint);
-    return dragPoint;
+  let pointerY = 0;
+  let samples = [];
+  const shouldShow = () => (anchorVisible || activated) && !document.fullscreenElement && !document.body.classList.contains("screen-app-fullscreen");
+  const updateVisibility = () => {
+    const show = shouldShow();
+    canvas.hidden = !show;
+    grab.hidden = !show;
   };
-  canvas.addEventListener("pointerdown", (event) => {
-    pointFromEvent(event);
-    if (!raycaster.intersectObject(logoRoot, true).length) return;
+  new IntersectionObserver(([entry]) => {
+    anchorVisible = entry.isIntersecting;
+    updateVisibility();
+  }, { threshold: 0 }).observe(anchor);
+  document.addEventListener("fullscreenchange", updateVisibility);
+
+  const pointerWorld = (event) => {
+    const height = Math.max(1, window.visualViewport?.height || window.innerHeight);
+    return new THREE.Vector3(
+      ((event.clientX / Math.max(1, window.innerWidth)) * 2 - 1) * halfWidth,
+      (1 - (event.clientY / height) * 2) * (VIEW_HEIGHT / 2),
+      0,
+    );
+  };
+  grab.addEventListener("pointerdown", (event) => {
     event.preventDefault();
-    canvas.setPointerCapture(event.pointerId);
+    activated = true;
     dragging = true;
-    lastDrag = { point: dragPoint.clone(), time: performance.now() };
+    pointerY = event.clientY;
+    grab.setPointerCapture(event.pointerId);
+    grab.classList.add("is-dragging");
     body.type = CANNON.Body.KINEMATIC;
     body.velocity.setZero();
     body.angularVelocity.setZero();
-    canvas.classList.add("is-dragging");
+    const point = pointerWorld(event);
+    body.position.set(point.x, point.y, 0);
+    samples = [{ point, time: performance.now() }];
+    updateVisibility();
   });
-  canvas.addEventListener("pointermove", (event) => {
+  grab.addEventListener("pointermove", (event) => {
     if (!dragging) return;
     event.preventDefault();
-    pointFromEvent(event);
+    pointerY = event.clientY;
+    const point = pointerWorld(event);
+    body.position.set(point.x, point.y, 0);
     const now = performance.now();
-    body.position.set(dragPoint.x, dragPoint.y, 0);
-    if (!lastDrag || now - lastDrag.time > 45) lastDrag = { point: dragPoint.clone(), time: now };
+    samples.push({ point, time: now });
+    samples = samples.filter((sample) => now - sample.time <= 120);
   });
   const release = (event) => {
     if (!dragging) return;
-    pointFromEvent(event);
+    const point = pointerWorld(event);
     const now = performance.now();
-    const elapsed = Math.max(16, now - lastDrag.time) / 1000;
-    const velocity = dragPoint.clone().sub(lastDrag.point).multiplyScalar(1 / elapsed).clampLength(0, 13);
+    const sample = samples[0] || { point, time: now - 16 };
+    const elapsed = Math.max(16, now - sample.time) / 1000;
+    const velocity = point.clone().sub(sample.point).multiplyScalar(1 / elapsed).clampLength(0, 15);
     body.type = CANNON.Body.DYNAMIC;
     body.updateMassProperties();
+    body.position.set(point.x, point.y, 0);
     body.velocity.set(velocity.x, velocity.y, 0);
-    body.angularVelocity.set(velocity.y * 0.35, -velocity.x * 0.35, -velocity.x * 0.7);
+    body.angularVelocity.set(velocity.y * 0.4, -velocity.x * 0.4, -velocity.x * 0.85 || 1.2);
+    body.wakeUp();
     dragging = false;
-    canvas.classList.remove("is-dragging");
+    samples = [];
+    grab.classList.remove("is-dragging");
   };
-  canvas.addEventListener("pointerup", release);
-  canvas.addEventListener("pointercancel", release);
-  canvas.addEventListener("keydown", (event) => {
-    const impulses = { ArrowLeft: [-2.5, 0, 0], ArrowRight: [2.5, 0, 0], ArrowUp: [0, 3, 0], ArrowDown: [0, -2, 0], " ": [0, 5, 0] };
+  grab.addEventListener("pointerup", release);
+  grab.addEventListener("pointercancel", release);
+  grab.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      activated = false;
+      body.position.set(0, -VIEW_HEIGHT / 2 + LOGO_RADIUS + 0.1, 0);
+      body.velocity.setZero();
+      updateVisibility();
+      return;
+    }
+    const impulses = { ArrowLeft: [-3, 0, 0], ArrowRight: [3, 0, 0], ArrowUp: [0, 3.5, 0], ArrowDown: [0, -2.5, 0], " ": [0, 6, 0] };
     const impulse = impulses[event.key];
     if (!impulse) return;
     event.preventDefault();
-    body.wakeUp();
+    activated = true;
     body.applyImpulse(new CANNON.Vec3(...impulse));
-    body.angularVelocity.z += impulse[0] * -0.45 || 0.9;
+    body.angularVelocity.z += impulse[0] * -0.5 || 1.1;
+    updateVisibility();
   });
 
-  status.hidden = true;
-  zone.classList.add("is-ready");
+  const projected = new THREE.Vector3();
+  const updateGrabPosition = () => {
+    projected.copy(logoRoot.position).project(camera);
+    const rect = grab.getBoundingClientRect();
+    const x = (projected.x * 0.5 + 0.5) * window.innerWidth - rect.width / 2;
+    const height = window.visualViewport?.height || window.innerHeight;
+    const y = (-projected.y * 0.5 + 0.5) * height - rect.height / 2;
+    grab.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+  };
   canvas.addEventListener("nebulavm-probe-frame", () => renderer.render(scene, camera));
-  let visible = true;
-  new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; }, { threshold: 0.01 }).observe(zone);
   let previous = performance.now();
   const render = (now) => {
     requestAnimationFrame(render);
-    if (!visible || document.hidden) { previous = now; return; }
+    if (!shouldShow() || document.hidden) { previous = now; return; }
+    if (dragging) {
+      const edge = 72;
+      if (pointerY < edge) window.scrollBy(0, -Math.ceil((edge - pointerY) / 5));
+      else if (pointerY > window.innerHeight - edge) window.scrollBy(0, Math.ceil((pointerY - window.innerHeight + edge) / 5));
+    }
     const delta = Math.min((now - previous) / 1000, 1 / 20);
     previous = now;
     world.step(1 / 60, delta, 3);
     logoRoot.position.copy(body.position);
     logoRoot.quaternion.copy(body.quaternion);
+    updateGrabPosition();
     renderer.render(scene, camera);
   };
+  updateVisibility();
   requestAnimationFrame(render);
 }
