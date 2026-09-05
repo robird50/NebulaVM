@@ -894,6 +894,10 @@ app.innerHTML = `
         </div>
       </section>
     </section>
+    <section class="logo-fidget-zone" id="logoFidgetZone" aria-label="NebulaVM 3D logo fidget">
+      <canvas id="logoFidgetCanvas" tabindex="0" aria-label="Interactive 3D NebulaVM logo. Drag and release to throw it, use arrow keys to move it, or press Space to bounce it." title="Drag and release to throw the NebulaVM logo"></canvas>
+      <p id="logoFidgetStatus" role="status">Loading 3D logo...</p>
+    </section>
     <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#other-commits" data-commit-history-link>Other commits</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
   </main>
 
@@ -1410,7 +1414,17 @@ const els = {
   ramMetric: document.querySelector("#ramMetric"),
   logOutput: document.querySelector("#logOutput"),
   clearLogButton: document.querySelector("#clearLogButton"),
+  logoFidgetZone: document.querySelector("#logoFidgetZone"),
 };
+
+if (els.logoFidgetZone && "IntersectionObserver" in window) {
+  const fidgetObserver = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    fidgetObserver.disconnect();
+    import("./logoFidget.js").then(({ initLogoFidget }) => initLogoFidget(els.logoFidgetZone));
+  }, { rootMargin: "480px 0px" });
+  fidgetObserver.observe(els.logoFidgetZone);
+}
 
 const MEMORY_STEPS = [64, 128, 256, 512, 1024, 2048, 4096, 6144];
 const BYTES_PER_MEGABYTE = 1024 * 1024;
