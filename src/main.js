@@ -7,6 +7,7 @@ import {
   qemuWasmCanMountBrowserFiles,
 } from "./qemuX64.js";
 import "./styles.css";
+import { requestVmCaptcha, verifyBrowserVmCaptcha } from "./vmCaptcha.js";
 
 const app = document.querySelector("#app");
 const COMMIT_ID = typeof __NEBULAVM_COMMIT__ === "string" ? __NEBULAVM_COMMIT__ : "local";
@@ -4693,6 +4694,7 @@ const updateMediaWarning = () => {
 };
 
 const updateButtons = (busy = false) => {
+  busy = busy || state.bootInProgress;
   updateMediaWarning();
   updateWindowsCredentialUi();
   applyWindowsTemplateBootLocks();
@@ -4707,7 +4709,7 @@ const updateButtons = (busy = false) => {
     : nintendoMode
     ? Boolean(state.isoFile)
     : emustarMode
-    ? Boolean(els.nativeIsoPath.value.trim() || state.isoFile)
+    ? Boolean(els.nativeIsoPath.value.trim() || state.isoFile || state.windowsTemplateDiskPath)
     : isNativeMode()
     ? Boolean(els.nativeIsoPath.value.trim())
     : isRemoteMode()
@@ -5356,7 +5358,7 @@ const showNativeDisplayStatus = (message) => {
   els.nativeDisplay.replaceChildren(status);
 };
 
-const bootNativeQemu = async (displayMode = "viewport") => {
+const bootNativeQemu = async (displayMode = "viewport", captchaToken) => {
   const runtimeName = nativeRuntimeBrand();
   els.screenContainer.querySelector(".vga-text").hidden = true;
   els.screenContainer.querySelector(".vga-canvas").hidden = true;
@@ -5373,6 +5375,7 @@ const bootNativeQemu = async (displayMode = "viewport") => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       arch: nativeArchitecture(),
+      captchaToken,
       profile: nativeProfile(),
       runtime: runtimeName,
       displayMode,
@@ -5443,7 +5446,7 @@ const bootNativeQemu = async (displayMode = "viewport") => {
   }
 };
 
-const bootEmustarHyperV = async (displayMode = "viewport") => {
+const bootEmustarHyperV = async (displayMode = "viewport", captchaToken) => {
   if (isNetlifyLauncher) {
     displayMode = "viewport";
     els.nativeDisplayMode.value = "viewport";
@@ -5469,6 +5472,7 @@ const bootEmustarHyperV = async (displayMode = "viewport") => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      captchaToken,
       displayMode,
       isoPath: state.windowsTemplateSelected ? "" : els.nativeIsoPath.value.trim(),
       templateDiskPath: state.windowsTemplateSelected ? state.windowsTemplateDiskPath : "",
@@ -6089,7 +6093,7 @@ const nativeAndroidCoordinates = (event, image) => {
   };
 };
 
-const bootNativeAndroid = async (status) => {
+const bootNativeAndroid = async (status, captchaToken) => {
   applyAndroidVersionCatalog(status.versions || []);
   const requestedVersion = Number(els.androidVersion.value);
   if (status.busy) {
@@ -6106,6 +6110,7 @@ const bootNativeAndroid = async (status) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       version: requestedVersion,
+      captchaToken,
       cores: Number(els.androidCores.value),
       memoryMb: Number(els.androidMemory.value),
       storageGb: Number(els.androidStorage.value),
@@ -6295,7 +6300,7 @@ const bootAndroidSimulator = () => {
   updateButtons();
 };
 
-const bootAndroid = async () => {
+const bootAndroid = async (captchaToken) => {
   const { response, data: status } = await fetchAndroidJson("status");
   if (!response.ok) {
     throw new Error(status.error || "The Android host could not be checked.");
@@ -6304,7 +6309,7 @@ const bootAndroid = async () => {
   if (!status.available) {
     throw new Error("Android Studio Emulator and a genuine Android system image are required on the host.");
   }
-  await bootNativeAndroid(status);
+  await bootNativeAndroid(status, captchaToken);
 };
 
 const bootEmulator = async () => {
@@ -6331,7 +6336,7 @@ const bootEmulator = async () => {
       return;
     }
   }
-  if (isHyperVMode() && !els.nativeIsoPath.value.trim()) {
+  if (isHyperVMode() && !els.nativeIsoPath.value.trim() && !state.windowsTemplateDiskPath) {
     log("Boot blocked: drop an ISO or choose an ISO path before launching Hyper-V.");
     return;
   }
@@ -6357,6 +6362,16 @@ const bootEmulator = async () => {
 
   state.bootInProgress = true;
   updateButtons(true);
+  let captchaToken;
+  try {
+    captchaToken = await requestVmCaptcha();
+    if (!isNativeMode() && !isAndroidMode()) await verifyBrowserVmCaptcha(captchaToken);
+  } catch (error) {
+    log(error.name === "AbortError" ? "VM start cancelled." : `Boot blocked: ${error.message}`);
+    state.bootInProgress = false;
+    updateButtons();
+    return;
+  }
   try {
     const qemuDisplayMode = isNativeMode() ? selectedNativeDisplayMode() : "viewport";
 
@@ -6369,15 +6384,15 @@ const bootEmulator = async () => {
     }
 
     if (isAndroidMode()) {
-      await bootAndroid();
+      await bootAndroid(captchaToken);
     } else if (isNintendoMode()) {
       bootNintendo();
     } else if (isRemoteMode()) {
       await bootRemoteVm();
     } else if (isHyperVMode()) {
-      await bootEmustarHyperV(qemuDisplayMode);
+      await bootEmustarHyperV(qemuDisplayMode, captchaToken);
     } else if (isNativeMode()) {
-      await bootNativeQemu(qemuDisplayMode);
+      await bootNativeQemu(qemuDisplayMode, captchaToken);
     } else if (isBrowserQemuMode()) {
       await bootQemuX64();
     } else {

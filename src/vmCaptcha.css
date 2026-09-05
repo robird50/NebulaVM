@@ -1,0 +1,34 @@
+.vm-captcha-dialog, .vm-captcha-page {
+  color: #f4f7fa;
+  background: #11151c;
+  font-family: Arial, sans-serif;
+  letter-spacing: 0;
+}
+.vm-captcha-dialog {
+  width: min(400px, calc(100vw - 40px));
+  box-sizing: border-box;
+  border: 1px solid #62dbea;
+  border-radius: 8px;
+  padding: 24px;
+}
+.vm-captcha-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.vm-captcha-dialog h2 { font-size: 20px; margin: 0 0 16px; }
+.vm-captcha-dialog p { font-size: 15px; line-height: 1.5; }
+.vm-captcha-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.vm-captcha-dialog button, .vm-captcha-page button {
+  border: 1px solid #75d6e6;
+  border-radius: 4px;
+  background: #8ce2ed;
+  color: #11151c;
+  min-height: 44px;
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+.vm-captcha-dialog [data-cancel], .vm-captcha-page button { background: transparent; color: #f4f7fa; border-color: #737983; }
+.vm-captcha-dialog button:disabled { opacity: .55; cursor: default; }
+.vm-captcha-page { margin: 0; min-height: 100dvh; }
+.vm-captcha-page main { padding: 24px 12px; text-align: center; }
+.vm-captcha-page h1 { font-size: 24px; margin: 12px 0; }
+.vm-captcha-page #status { font-size: 15px; line-height: 1.5; }
+.vm-captcha-page #challenge { display: flex; justify-content: center; min-height: 100px; margin: 24px 0; }

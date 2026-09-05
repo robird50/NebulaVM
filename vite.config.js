@@ -36,6 +36,7 @@ import {
   validateProblemReport,
 } from "./lib/problemReport.mjs";
 import { getCommitHistory } from "./lib/commitHistory.mjs";
+import { hcaptchaConfig, publicHcaptchaConfig, verifyHcaptcha } from "./lib/hcaptcha.mjs";
 
 const workspaceDir = dirname(fileURLToPath(import.meta.url));
 const reportGmailAccount = "nebulavmsupport@gmail.com";
@@ -63,6 +64,13 @@ const localEnvValue = (name) => {
       .slice(line.indexOf("=") + 1)
       .trim()
       .replace(/^['"]|['"]$/g, "");
+  }
+
+  if (name === "HCAPTCHA_SECRET") {
+    const secretFile = localEnvValue("HCAPTCHA_SECRET_FILE");
+    if (secretFile && existsSync(secretFile)) {
+      return readFileSync(secretFile, "utf8").trim();
+    }
   }
 
   return "";
@@ -3869,6 +3877,8 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") {
           const requestedBody = await readJsonBody(req);
+          await verifyHcaptcha(requestedBody.captchaToken, hcaptchaConfig(localEnvValue));
+          delete requestedBody.captchaToken;
           const body = requestedBody.templateDiskPath
             ? { ...requestedBody, isoPath: "" }
             : requestedBody;
@@ -4094,6 +4104,8 @@ const nativeQemuPlugin = () => ({
         if (req.method === "POST" && url.pathname === "/api/android-emulator/start") {
           const sessionId = androidSessionId(req);
           const body = await readJsonBody(req);
+          await verifyHcaptcha(body.captchaToken, hcaptchaConfig(localEnvValue));
+          delete body.captchaToken;
           json(
             res,
             200,
@@ -4165,6 +4177,8 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "POST" && url.pathname === "/api/native-qemu/start") {
           const body = await readJsonBody(req);
+          await verifyHcaptcha(body.captchaToken, hcaptchaConfig(localEnvValue));
+          delete body.captchaToken;
           assertStoredIsoAccess(req, body.isoPath);
           const result = await startNativeVm(body);
           json(res, 200, {
@@ -4204,13 +4218,43 @@ const nativeQemuPlugin = () => ({
   },
 });
 
+const installCaptchaMiddleware = (server) => {
+  server.middlewares.use(async (req, res, next) => {
+    const pathname = new URL(req.url || "/", "http://localhost").pathname;
+    if (pathname === "/captcha.html") {
+      // Keep emulator pages isolated; only the verification window embeds third-party frames.
+      const writeHead = res.writeHead;
+      res.writeHead = function (...args) {
+        this.setHeader("Cross-Origin-Embedder-Policy", "unsafe-none");
+        this.setHeader("Cache-Control", "no-store");
+        return writeHead.apply(this, args);
+      };
+    }
+    if (pathname !== "/.netlify/functions/vm-captcha") return next();
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      const config = hcaptchaConfig(localEnvValue);
+      if (req.method === "GET") return json(res, 200, publicHcaptchaConfig(config));
+      if (req.method !== "POST") return json(res, 405, { error: "Method not allowed." });
+      const body = await readJsonBody(req);
+      return json(res, 200, await verifyHcaptcha(body?.captchaToken, config));
+    } catch (error) {
+      return json(res, error.statusCode || 400, { error: error.message });
+    }
+  });
+};
+
 export default defineConfig({
-  plugins: [nativeQemuPlugin()],
+  plugins: [
+    { name: "vm-captcha", configureServer: installCaptchaMiddleware, configurePreviewServer: installCaptchaMiddleware },
+    nativeQemuPlugin(),
+  ],
   build: {
     rollupOptions: {
       input: {
         main: resolve(workspaceDir, "index.html"),
         remote: resolve(workspaceDir, "remote.html"),
+        captcha: resolve(workspaceDir, "captcha.html"),
       },
     },
   },
