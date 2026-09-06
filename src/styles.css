@@ -152,60 +152,68 @@
   color: #f8fafc;
 }
 
-/* Keep NebulaVM's yellow accents legible against both themes. */
-.official-domain-notice a,
-.commit-id a,
-.mobile-bypass-link,
-.stored-images-button,
-.stored-images-menu-head strong,
-.workspace.is-emustar-mode .controls .kicker,
-.workspace.is-emustar-mode .emustar-console-kicker,
-.workspace.is-emustar-mode .terminal-header,
-.workspace.is-emustar-mode .range-heading output,
-.host-staging-speed,
-.nintendo-help-link,
-.emustar-info-link,
-.nebula-conflict-panel h2,
-.nintendo-help-heading h2,
-.nintendo-help-sections li,
-.nintendo-help-sections a,
-.faq-heading h2,
-.faq-question::after,
-.faq-section .faq-final summary,
-.commit-history-heading h2,
-.commit-history-badge,
-.autopilot-terminal,
-.autopilot-checklist li[data-status="active"],
-.screen-corner-label,
-.virtual-keyboard-head,
-.virtual-keyboard-row button:focus-visible,
-.screen-monitoring-pill {
-  -webkit-text-stroke: 0.45px #000000;
-  text-shadow:
-    -1px -1px 0 #000000,
-    1px -1px 0 #000000,
-    -1px 1px 0 #000000,
-    1px 1px 0 #000000;
+:root[data-theme="light"] .terminal-panel,
+:root[data-theme="light"] .workspace.is-emustar-mode .terminal-panel,
+:root[data-theme="light"] .workspace.is-nintendo-mode .terminal-panel {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #111827;
 }
 
-.official-domain-notice-cta,
-.mobile-pin-dots span.is-filled,
-.drop-icon,
-.workspace.is-emustar-mode .drop-icon,
-.workspace.is-emustar-mode .controls .primary,
-.compact-button.is-active {
+:root[data-theme="light"] .terminal-header,
+:root[data-theme="light"] .workspace.is-emustar-mode .terminal-header,
+:root[data-theme="light"] .workspace.is-nintendo-mode .terminal-header {
+  border-bottom-color: #d8dee8;
+  background: #f8fafc;
+  color: #111827;
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+}
+
+:root[data-theme="light"] .terminal-panel pre,
+:root[data-theme="light"] .workspace.is-emustar-mode .terminal-panel pre,
+:root[data-theme="light"] .workspace.is-nintendo-mode .terminal-panel pre {
+  background: #ffffff;
+  color: #164e63;
+}
+
+/* Light mode gives yellow accents a fine dark edge without changing classic Dark mode. */
+:root[data-theme="light"] .official-domain-notice a,
+:root[data-theme="light"] .mobile-bypass-link,
+:root[data-theme="light"] .stored-images-menu-head strong,
+:root[data-theme="light"] .host-staging-speed,
+:root[data-theme="light"] .nebula-conflict-panel h2,
+:root[data-theme="light"] .nintendo-help-heading h2,
+:root[data-theme="light"] .nintendo-help-sections li,
+:root[data-theme="light"] .nintendo-help-sections a,
+:root[data-theme="light"] .faq-heading h2,
+:root[data-theme="light"] .faq-question::after,
+:root[data-theme="light"] .faq-section .faq-final summary,
+:root[data-theme="light"] .commit-history-heading h2,
+:root[data-theme="light"] .commit-history-badge,
+:root[data-theme="light"] .autopilot-terminal,
+:root[data-theme="light"] .autopilot-checklist li[data-status="active"],
+:root[data-theme="light"] .screen-corner-label,
+:root[data-theme="light"] .virtual-keyboard-head,
+:root[data-theme="light"] .virtual-keyboard-row button:focus-visible,
+:root[data-theme="light"] .screen-monitoring-pill {
+  -webkit-text-stroke: 0.2px #000000;
+  text-shadow: 0 0 1px #000000;
+}
+
+:root[data-theme="light"] .official-domain-notice-cta,
+:root[data-theme="light"] .mobile-pin-dots span.is-filled,
+:root[data-theme="light"] .drop-icon,
+:root[data-theme="light"] .workspace.is-emustar-mode .drop-icon,
+:root[data-theme="light"] .workspace.is-emustar-mode .controls .primary,
+:root[data-theme="light"] .compact-button.is-active {
   outline: 1px solid #000000;
   outline-offset: 0;
   box-shadow: 0 0 0 1px #000000;
 }
 
-:root[data-theme="light"] .stored-images-button,
-:root[data-theme="light"] .nintendo-help-link,
-:root[data-theme="light"] .emustar-info-link,
-:root[data-theme="light"] .workspace.is-emustar-mode .controls .kicker,
-:root[data-theme="light"] .workspace.is-emustar-mode .emustar-console-kicker,
-:root[data-theme="light"] .workspace.is-emustar-mode .terminal-header,
-:root[data-theme="light"] .workspace.is-emustar-mode .range-heading output {
+:root[data-theme="light"] footer,
+:root[data-theme="light"] footer * {
   -webkit-text-stroke: 0;
   text-shadow: none;
 }
