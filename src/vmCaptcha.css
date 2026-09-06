@@ -1,7 +1,13 @@
+@font-face {
+  font-family: "Verification Google Sans";
+  src: url("/assets/google-sans-regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
 .vm-captcha-page {
   color: #f4f7fa;
   background: #11151c;
-  font-family: Arial, sans-serif;
+  font-family: "Verification Google Sans", Arial, sans-serif;
   letter-spacing: 0;
 }
 .vm-captcha-viewport {
@@ -40,10 +46,29 @@
 }
 .vm-captcha-page button { background: transparent; color: #f4f7fa; border-color: #737983; }
 .vm-captcha-page { margin: 0; min-height: 100dvh; }
-.vm-captcha-page main { padding: 24px 12px; text-align: center; }
-.vm-captcha-page h1 { font-size: 24px; margin: 12px 0; }
-.vm-captcha-page #status { font-size: 15px; line-height: 1.5; }
-.vm-captcha-page #challenge { display: flex; justify-content: center; min-height: 100px; margin: 24px 0; }
+.vm-captcha-page main {
+  box-sizing: border-box;
+  min-height: 100dvh;
+  padding: 28px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border-top: 2px solid #91d9cf;
+}
+.vm-captcha-page main > img { width: 52px; height: 52px; object-fit: contain; }
+.vm-captcha-page h1 { font-size: 24px; font-weight: 400; margin: 16px 0 8px; }
+.vm-captcha-page #status { max-width: 360px; margin: 0; color: #b9c5d5; font-size: 15px; line-height: 1.5; }
+.vm-captcha-page #challenge { display: flex; justify-content: center; min-height: 80px; margin: 24px 0; max-width: 100%; }
+.vm-captcha-page button { min-width: 104px; border-radius: 8px; border-color: #465460; transition: background 150ms, border-color 150ms; }
+.vm-captcha-page button:hover { background: #26333b; border-color: #91d9cf; }
+.vm-captcha-page button:focus-visible { outline: 2px solid #91d9cf; outline-offset: 4px; }
+@media (max-height: 360px) {
+  .vm-captcha-page main { padding: 12px; }
+  .vm-captcha-page main > img { width: 32px; height: 32px; }
+  .vm-captcha-page #challenge { margin: 12px 0; }
+}
 
 .screen-container.vm-display-entering {
   animation: vm-display-enter 480ms ease both;
