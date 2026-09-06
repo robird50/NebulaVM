@@ -576,6 +576,39 @@ button:disabled {
   }
 }
 
+.fidget-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 44px;
+  color: #b9c5d5;
+  font-size: 14px;
+  cursor: pointer;
+}
+.fidget-toggle input {
+  appearance: none;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 11px;
+  background: #526071;
+  cursor: pointer;
+}
+.fidget-toggle input::before {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 3px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 150ms;
+}
+.fidget-toggle input:checked { background: #279b90; }
+.fidget-toggle input:checked::before { transform: translateX(16px); }
+.fidget-toggle input:focus-visible { outline: 2px solid #91d9cf; outline-offset: 3px; }
+
 .hero {
   display: flex;
   align-items: end;

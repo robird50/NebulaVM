@@ -121,7 +121,7 @@ export async function initLogoFidget(anchor) {
   let dragConstraint = null;
   let pointerY = 0;
   let samples = [];
-  const shouldShow = () => (anchorVisible || activated) && !document.fullscreenElement && !document.body.classList.contains("screen-app-fullscreen");
+  const shouldShow = () => document.querySelector("#logoFidgetToggle")?.checked !== false && (anchorVisible || activated) && !document.fullscreenElement && !document.body.classList.contains("screen-app-fullscreen");
   const updateVisibility = () => {
     const show = shouldShow();
     canvas.hidden = !show;
@@ -132,6 +132,7 @@ export async function initLogoFidget(anchor) {
     updateVisibility();
   }, { threshold: 0 }).observe(anchor);
   document.addEventListener("fullscreenchange", updateVisibility);
+  window.addEventListener("nebulavm-fidget-toggle", updateVisibility);
 
   const pointerWorld = (event) => {
     const height = Math.max(1, window.visualViewport?.height || window.innerHeight);

@@ -285,6 +285,7 @@ app.innerHTML = `
   </div>
 
   <main class="shell">
+    <label class="fidget-toggle"><input id="logoFidgetToggle" type="checkbox" role="switch" checked /><span>Logo fidget</span></label>
     <section class="hero">
       <div class="brand-lockup">
         <img class="brand-logo" src="/assets/nebulavm-logo.png" alt="NebulaVM logo" />
@@ -1413,6 +1414,13 @@ const els = {
   clearLogButton: document.querySelector("#clearLogButton"),
   logoFidgetZone: document.querySelector("#logoFidgetZone"),
 };
+
+const fidgetToggle = document.querySelector("#logoFidgetToggle");
+try { fidgetToggle.checked = localStorage.getItem("nebulavm.fidget.enabled") !== "false"; } catch {}
+fidgetToggle.addEventListener("change", () => {
+  try { localStorage.setItem("nebulavm.fidget.enabled", String(fidgetToggle.checked)); } catch {}
+  window.dispatchEvent(new Event("nebulavm-fidget-toggle"));
+});
 
 if (els.logoFidgetZone && "IntersectionObserver" in window) {
   const fidgetObserver = new IntersectionObserver((entries) => {
