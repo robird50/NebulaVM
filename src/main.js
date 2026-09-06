@@ -179,6 +179,8 @@ const state = {
   nativeSessionId: savedSessionId,
   nativeDeviceId: savedDeviceId,
   hyperVRemoteSessionId: savedHyperVRemoteSessionId,
+  hyperVUsageLimited: false,
+  hyperVUsageCooldownUntil: 0,
   nativeRfb: null,
   nativeRuntimeName: null,
   nativeMonitorTimer: null,
@@ -802,6 +804,9 @@ app.innerHTML = `
       </aside>
 
       <section class="console-area" aria-label="Virtual machine display">
+        <div class="hyperv-limit-unavailable" id="hyperVLimitUnavailable" hidden>
+          Unavailable, usage limit is exceeded.
+        </div>
         <div class="machine-topbar">
           <div class="display-identity">
             <img class="emustar-console-mark" id="displayModeMark" src="/assets/hyperv-icon.svg" alt="" />
@@ -1195,6 +1200,24 @@ app.innerHTML = `
     </section>
   </div>
 
+  <div class="display-choice-overlay popup-motion-overlay" id="hyperVLimitDialog" role="dialog" aria-modal="true" aria-labelledby="hyperVLimitTitle" hidden>
+    <section class="display-choice-panel hyperv-limit-panel popup-motion-panel" tabindex="-1">
+      <img class="hyperv-limit-art" src="/assets/hyperv-usage-stopwatch.png" alt="" />
+      <h2 id="hyperVLimitTitle">You've hit your usage of Hyper-V</h2>
+      <div class="hyperv-limit-copy">
+        <p>You have reached your 20-minute Hyper-V usage limit.</p>
+        <p>NebulaVM currently places a temporary session limit on Hyper-V to help conserve memory and other system resources on the host computer. Hyper-V sessions can use a significant amount of RAM, especially when running larger operating systems, so limiting each session helps prevent the host from becoming overloaded and allows more users to access the service throughout the day.</p>
+        <p>Your current Hyper-V session has been ended, and you will need to wait before starting another one.</p>
+        <p>You can use Hyper-V again at <strong id="hyperVLimitResetTime">--:-- on --/--/----</strong>.</p>
+        <p>This restriction only applies to Hyper-V sessions and is part of NebulaVM's resource-management system. It is not an account suspension, error, or permanent restriction. Once the cooldown period has ended, Hyper-V access will automatically become available to you again.</p>
+        <p>These limits help keep NebulaVM stable, reduce excessive host memory usage, and give other users a fair opportunity to start their own sessions.</p>
+        <p>Thank you for your patience and for helping us keep NebulaVM available and running smoothly for everyone.</p>
+        <p class="hyperv-limit-signoff">- RoBird Studios</p>
+      </div>
+      <button class="primary" id="hyperVLimitCloseButton" type="button">Okay</button>
+    </section>
+  </div>
+
   <div class="display-choice-overlay popup-motion-overlay" id="keepIsoDialog" role="dialog" aria-modal="true" aria-labelledby="keepIsoTitle" hidden>
     <section class="display-choice-panel keep-iso-panel popup-motion-panel">
       <img class="keep-iso-art" src="/assets/stored-iso-host.png" alt="" />
@@ -1363,6 +1386,10 @@ const els = {
   autopilotTerminal: document.querySelector("#autopilotTerminal"),
   autopilotTerminalStatus: document.querySelector("#autopilotTerminalStatus"),
   autopilotChecklist: document.querySelector("#autopilotChecklist"),
+  hyperVLimitDialog: document.querySelector("#hyperVLimitDialog"),
+  hyperVLimitCloseButton: document.querySelector("#hyperVLimitCloseButton"),
+  hyperVLimitResetTime: document.querySelector("#hyperVLimitResetTime"),
+  hyperVLimitUnavailable: document.querySelector("#hyperVLimitUnavailable"),
   adminMonitoringPill: document.querySelector("#adminMonitoringPill"),
   screenFullscreenExitButton: document.querySelector("#screenFullscreenExitButton"),
   virtualKeyboardButton: document.querySelector("#virtualKeyboardButton"),
@@ -4742,6 +4769,7 @@ const updateButtons = (busy = false) => {
     isNativeMode() && (state.nativeQemuApiAvailable === false || state.nativeQemuReady === false);
   els.bootButton.disabled =
     !hasBootMedia ||
+    (emustarMode && state.hyperVUsageLimited) ||
     Boolean(state.emulator) ||
     state.bootInProgress ||
     state.windowsTemplateLoading ||
@@ -4762,7 +4790,7 @@ const updateButtons = (busy = false) => {
   els.nativeConsoleButton.disabled = busy || !isHyperVMode() || nativeUnavailable;
   els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || !emustarMode;
   els.windowsTemplateButton.disabled =
-    busy || Boolean(state.emulator) || state.hostStagedIsoUploading || state.windowsTemplateLoading;
+    busy || Boolean(state.emulator) || state.hostStagedIsoUploading || state.windowsTemplateLoading || state.hyperVUsageLimited;
   els.windowsTemplateButton.classList.toggle("is-active", state.windowsTemplateSelected);
   const virtualKeyboardAvailable =
     isHyperVMode() && (state.hyperVConsoleActive || Boolean(state.nativeRfb));
@@ -4824,6 +4852,36 @@ const clearNativeMonitor = () => {
   }
 };
 
+const formatHyperVResetTime = (timestamp) => {
+  const date = new Date(timestamp);
+  return `${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} on ${date.toLocaleDateString([], {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+  })}`;
+};
+
+const applyHyperVUsageLimit = (usageLimit, { announce = false } = {}) => {
+  const cooldownUntil = Number(usageLimit?.cooldownUntil || 0);
+  const limited = Boolean(usageLimit?.limited && cooldownUntil > Date.now());
+  const becameLimited = limited && !state.hyperVUsageLimited;
+  state.hyperVUsageLimited = limited;
+  state.hyperVUsageCooldownUntil = limited ? cooldownUntil : 0;
+  els.workspace.classList.toggle("is-hyperv-usage-limited", limited && isHyperVMode());
+  els.hyperVLimitUnavailable.hidden = !(limited && isHyperVMode());
+
+  if (limited) {
+    els.hyperVLimitResetTime.textContent = formatHyperVResetTime(cooldownUntil);
+    if (announce || becameLimited) {
+      openPopupFrom(els.hyperVLimitDialog, els.bootButton, els.hyperVLimitCloseButton);
+    }
+  } else if (!els.hyperVLimitDialog.hidden) {
+    closePopupTo(els.hyperVLimitDialog);
+  }
+  updateButtons();
+  return limited;
+};
+
 const nativeExitSummary = (lastExit) => {
   if (!lastExit) return "The runtime stopped without an exit report.";
   const outputLine = String(lastExit.output || "")
@@ -4875,6 +4933,21 @@ const monitorNativeVm = () => {
       const { data: status } = hyperVRuntime
         ? await fetchHyperVJson("status")
         : await fetchNativeQemuJson(`status?arch=${nativeArchitecture()}`);
+      if (hyperVRuntime && applyHyperVUsageLimit(status.usageLimit)) {
+        clearNativeMonitor();
+        clearNativeDisplayReconnect({ clearConfig: true });
+        stopHyperVSetupConsole();
+        state.nativeRfb?.disconnect();
+        state.nativeRfb = null;
+        state.emulator = null;
+        state.running = false;
+        state.startedAt = null;
+        clearStatsTimer();
+        updateUptime();
+        setPowerState("Hyper-V limit reached", "off");
+        log(`Hyper-V usage limit reached. Access returns ${formatHyperVResetTime(state.hyperVUsageCooldownUntil)}.`);
+        return;
+      }
       const running = hyperVRuntime ? status.vm?.state === "Running" : status.running;
       if (running) {
         state.lastNativeStopLogKey = "";
@@ -5515,6 +5588,7 @@ const bootEmustarHyperV = async (displayMode = "viewport", captchaToken) => {
 
   const { response, data: result, base } = startResult;
   if (!response.ok || !result.ok) {
+    if (result.usageLimit) applyHyperVUsageLimit(result.usageLimit, { announce: true });
     throw new Error(result.error || "Hyper-V failed to start.");
   }
 
@@ -6521,6 +6595,10 @@ els.demoButton.addEventListener("click", () => {
 });
 els.pauseButton.addEventListener("click", pauseOrResume);
 els.stopButton.addEventListener("click", stopEmulator);
+els.hyperVLimitCloseButton.addEventListener("click", () => closePopupTo(els.hyperVLimitDialog));
+els.hyperVLimitDialog.addEventListener("click", (event) => {
+  if (event.target === els.hyperVLimitDialog) closePopupTo(els.hyperVLimitDialog);
+});
 els.newDiskButton.addEventListener("click", requestNewHyperVDisk);
 els.resetButton.addEventListener("click", resetEmulator);
 els.saveStateButton.addEventListener("click", saveState);
@@ -6576,6 +6654,7 @@ const updateNativeStatus = async () => {
 
     try {
       const { data: status, base } = await fetchHyperVJson("status");
+      applyHyperVUsageLimit(status.usageLimit);
       const bridgeLabel = base === window.location.origin ? "" : ` via Windows host ${base}`;
       state.nativeQemuApiAvailable = true;
       state.nativeQemuReady = Boolean(status.available);
@@ -6718,6 +6797,11 @@ const updateBackendUi = () => {
   }
   syncEmulatorDropdown();
   els.workspace.classList.toggle("is-emustar-mode", emustarMode);
+  els.workspace.classList.toggle(
+    "is-hyperv-usage-limited",
+    emustarMode && state.hyperVUsageLimited,
+  );
+  els.hyperVLimitUnavailable.hidden = !(emustarMode && state.hyperVUsageLimited);
   els.workspace.classList.toggle("is-android-mode", androidMode);
   els.workspace.classList.toggle("is-nintendo-mode", nintendoMode);
   document.documentElement.classList.toggle("android-mode", androidMode);

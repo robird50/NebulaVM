@@ -1976,6 +1976,75 @@ input[type="text"] {
   display: none;
 }
 
+.hyperv-limit-panel {
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(820px, calc(100vh - 32px));
+  overflow-y: auto;
+  text-align: center;
+}
+
+#hyperVLimitDialog {
+  z-index: 100;
+}
+
+.hyperv-limit-art {
+  display: block;
+  width: 132px;
+  height: 132px;
+  margin: 0 auto 14px;
+  object-fit: contain;
+}
+
+.hyperv-limit-panel h2 {
+  margin: 0 0 18px;
+  font-size: clamp(1.45rem, 4vw, 2rem);
+  letter-spacing: 0;
+}
+
+.hyperv-limit-copy {
+  color: var(--muted);
+  text-align: left;
+  line-height: 1.55;
+}
+
+.hyperv-limit-copy p {
+  margin: 0 0 12px;
+}
+
+.hyperv-limit-copy strong {
+  color: var(--text);
+}
+
+.hyperv-limit-signoff {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.hyperv-limit-panel > button {
+  min-width: 120px;
+  margin-top: 6px;
+}
+
+.hyperv-limit-unavailable {
+  place-self: stretch;
+  display: grid;
+  min-height: 420px;
+  place-items: center;
+  color: #858b96;
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.hyperv-limit-unavailable[hidden] {
+  display: none;
+}
+
+.workspace.is-hyperv-usage-limited .controls > *:not(.field-grid),
+.workspace.is-hyperv-usage-limited .controls .field-grid > *:not(.emulator-field),
+.workspace.is-hyperv-usage-limited .console-area > *:not(.hyperv-limit-unavailable) {
+  display: none !important;
+}
+
 .display-choice-panel {
   display: grid;
   gap: 16px;

@@ -46,6 +46,7 @@ const publicUrlPath = resolve(workspaceDir, ".nebulavm-public-url");
 const autopilotEventPath = resolve(workspaceDir, ".nebulavm-autopilot-events.jsonl");
 const guestCredentialsPath = resolve(workspaceDir, ".nebulavm-guest-credentials.json");
 const hyperVSessionPath = resolve(workspaceDir, ".nebulavm-hyperv-session.json");
+const hyperVUsagePath = resolve(workspaceDir, ".nebulavm-hyperv-usage.json");
 const publicAndroidEnabled = false;
 
 const localEnvValue = (name) => {
@@ -1251,12 +1252,15 @@ let nativeVmOutput = "";
 let lastNativeExit = null;
 let activeNativeRuntimeName = null;
 const hyperVSessionLeaseMs = 5_000;
+const hyperVSessionLimitMs = 20 * 60_000;
+const hyperVCooldownMs = 2 * 60 * 60_000;
 const emptyHyperVSessionLease = () => ({
   deviceId: "",
   browserSessionId: "",
   remoteSessionId: "",
   remoteSessionStartedAt: "",
   diskPath: "",
+  startedAt: 0,
   lastSeen: 0,
 });
 const loadHyperVSessionLease = () => {
@@ -1269,6 +1273,7 @@ const loadHyperVSessionLease = () => {
       remoteSessionId: sanitizeSessionId(saved.remoteSessionId),
       remoteSessionStartedAt: String(saved.remoteSessionStartedAt || ""),
       diskPath: String(saved.diskPath || ""),
+      startedAt: Number(saved.startedAt) || 0,
       lastSeen: Number(saved.lastSeen) || 0,
     };
   } catch {
@@ -1276,6 +1281,15 @@ const loadHyperVSessionLease = () => {
   }
 };
 let hyperVSessionLease = loadHyperVSessionLease();
+const loadHyperVUsage = () => {
+  if (!existsSync(hyperVUsagePath)) return {};
+  try {
+    return JSON.parse(readFileSync(hyperVUsagePath, "utf8").replace(/^\uFEFF/, ""));
+  } catch {
+    return {};
+  }
+};
+let hyperVUsage = loadHyperVUsage();
 let hyperVRemoteSessionId = hyperVSessionLease.remoteSessionId;
 let hyperVRemoteSessionStartedAt = hyperVSessionLease.remoteSessionStartedAt;
 let hyperVRemoteConnectionCount = 0;
@@ -1319,6 +1333,63 @@ const clearHyperVSessionLease = () => {
   hyperVSessionLease = emptyHyperVSessionLease();
   hyperVRemoteConnectionCount = 0;
   rmSync(hyperVSessionPath, { force: true });
+};
+
+const saveHyperVUsage = () => {
+  const now = Date.now();
+  hyperVUsage = Object.fromEntries(
+    Object.entries(hyperVUsage).filter(([, item]) => Number(item?.cooldownUntil || 0) > now),
+  );
+  writeFileSync(hyperVUsagePath, JSON.stringify(hyperVUsage, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+};
+
+const hyperVUsageForDevice = (deviceId) => {
+  const cooldownUntil = Number(hyperVUsage[deviceId]?.cooldownUntil || 0);
+  if (cooldownUntil <= Date.now()) {
+    if (hyperVUsage[deviceId]) {
+      delete hyperVUsage[deviceId];
+      saveHyperVUsage();
+    }
+    return { limited: false, cooldownUntil: 0, sessionLimitMs: hyperVSessionLimitMs };
+  }
+  return { limited: true, cooldownUntil, sessionLimitMs: hyperVSessionLimitMs };
+};
+
+const hyperVUsageForRequest = (req, url = null) => {
+  const { deviceId } = hyperVRequestIdentity(req, url);
+  const usage = hyperVUsageForDevice(deviceId);
+  const ownsSession = deviceId && deviceId === hyperVSessionLease.deviceId;
+  const elapsedMs = ownsSession && hyperVSessionLease.startedAt
+    ? Math.max(0, Date.now() - hyperVSessionLease.startedAt)
+    : 0;
+  return {
+    ...usage,
+    elapsedMs,
+    remainingMs: usage.limited ? 0 : Math.max(0, hyperVSessionLimitMs - elapsedMs),
+  };
+};
+
+const enforceHyperVUsageLimit = async (req, url = null) => {
+  const identity = hyperVRequestIdentity(req, url);
+  if (
+    !identity.deviceId ||
+    identity.deviceId !== hyperVSessionLease.deviceId ||
+    !hyperVSessionLease.startedAt ||
+    Date.now() - hyperVSessionLease.startedAt < hyperVSessionLimitMs
+  ) {
+    return false;
+  }
+  hyperVUsage[identity.deviceId] = { cooldownUntil: Date.now() + hyperVCooldownMs };
+  saveHyperVUsage();
+  await runHyperVAction("Stop", {}, 120000).catch(() => null);
+  hyperVRemoteSessionId = "";
+  hyperVRemoteSessionStartedAt = "";
+  clearHyperVSessionLease();
+  clearHyperVStatusCache();
+  return true;
 };
 
 const hyperVRequestIdentity = (req, url = null) => ({
@@ -1402,6 +1473,7 @@ const claimHyperVSession = (req, status) => {
     remoteSessionId: hyperVRemoteSessionId,
     remoteSessionStartedAt: hyperVRemoteSessionStartedAt,
     diskPath: String(status?.vm?.diskPath || ""),
+    startedAt: Date.now(),
     lastSeen: Date.now(),
   };
   saveHyperVSessionLease();
@@ -3866,17 +3938,30 @@ const nativeQemuPlugin = () => ({
         }
 
         if (req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") {
+          await enforceHyperVUsageLimit(req, url);
           const status = await getHyperVStatus({ force: url.searchParams.get("fresh") === "1" });
           json(
             res,
             200,
-            hyperVStatusForRequest(req, url, status),
+            {
+              ...hyperVStatusForRequest(req, url, status),
+              usageLimit: hyperVUsageForRequest(req, url),
+            },
           );
           return;
         }
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") {
           const requestedBody = await readJsonBody(req);
+          const requestUsage = hyperVUsageForRequest(req, url);
+          if (requestUsage.limited) {
+            json(res, 429, {
+              ok: false,
+              error: "You have reached your 20-minute Hyper-V usage limit.",
+              usageLimit: requestUsage,
+            });
+            return;
+          }
           await verifyHcaptcha(requestedBody.captchaToken, hcaptchaConfig(localEnvValue));
           delete requestedBody.captchaToken;
           const body = requestedBody.templateDiskPath
