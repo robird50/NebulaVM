@@ -734,7 +734,8 @@ function Set-LowHostMemoryProfile {
   param(
     [object]$Vm,
     [int]$MemoryMb,
-    [bool]$FixedStartup = $false
+    [bool]$FixedStartup = $false,
+    [bool]$PreferResponsiveWindows = $false
   )
 
   if ($FixedStartup) {
@@ -754,8 +755,8 @@ function Set-LowHostMemoryProfile {
   $hostMemoryBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
   if ($hostMemoryBytes -le 10GB) {
     $freeMemoryMb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
-    $preferredStartupMb = [math]::Min($MemoryMb, 1024)
-    $minimumBootMb = [math]::Min($MemoryMb, 768)
+    $preferredStartupMb = [math]::Min($MemoryMb, $(if ($PreferResponsiveWindows) { 2048 } else { 1024 }))
+    $minimumBootMb = [math]::Min($MemoryMb, $(if ($PreferResponsiveWindows) { 1024 } else { 768 }))
     $absoluteMinimumMb = [math]::Min($MemoryMb, 512)
     $reserveMb = 512
     $startupMb = if ($freeMemoryMb -ge ($preferredStartupMb + $reserveMb)) {
@@ -1265,7 +1266,11 @@ function Start-Emustar {
   Set-VM -VM $vm -AutomaticStartAction Nothing -AutomaticStopAction TurnOff -CheckpointType Disabled
   $useFixedWindowsMemory = $isWindowsGuest -and
     (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory -gt 10GB
-  Set-LowHostMemoryProfile -Vm $vm -MemoryMb $memoryMb -FixedStartup $useFixedWindowsMemory
+  Set-LowHostMemoryProfile `
+    -Vm $vm `
+    -MemoryMb $memoryMb `
+    -FixedStartup $useFixedWindowsMemory `
+    -PreferResponsiveWindows $isWindowsGuest
   Set-VMProcessor -VM $vm -Count $processorCount
   Set-EmustarVideoMode -Vm $vm -Width $displaySize.Width -Height $displaySize.Height
 

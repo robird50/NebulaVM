@@ -2875,8 +2875,9 @@ const configureRfbFor60Fps = (rfb) => {
   rfb.background = "#05070a";
   rfb.scaleViewport = true;
   rfb.resizeSession = true;
-  rfb.qualityLevel = 8;
-  rfb.compressionLevel = 1;
+  // Favor frequent, low-latency updates over near-lossless frames across the public tunnel.
+  rfb.qualityLevel = 5;
+  rfb.compressionLevel = 4;
 };
 
 const requestGuestDesktopResize = (reason = "viewport") => {

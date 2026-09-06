@@ -3467,6 +3467,7 @@ const nativeQemuPlugin = () => ({
         }
 
         const vncSocket = net.connect(5900, status.guestAddress);
+        vncSocket.setNoDelay(true);
         let connectionClosed = false;
         const closeBoth = () => {
           if (!connectionClosed) {
