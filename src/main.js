@@ -6355,7 +6355,7 @@ const bootEmulator = async () => {
       return;
     }
   }
-  if (isHyperVMode() && !els.nativeIsoPath.value.trim() && !state.windowsTemplateDiskPath) {
+  if (isHyperVMode() && !els.nativeIsoPath.value.trim() && !state.windowsTemplateSelected) {
     log("Boot blocked: drop an ISO or choose an ISO path before launching Hyper-V.");
     return;
   }
