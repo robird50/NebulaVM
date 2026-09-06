@@ -4,6 +4,171 @@
   font-display: swap;
 }
 
+/* Light mode is an opt-in companion to the original NebulaVM dark theme. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  background: #ffffff;
+  color: #111827;
+  --text: #111827;
+  --muted: #526071;
+}
+
+:root[data-theme="light"] body {
+  background: #ffffff;
+  color: #111827;
+}
+
+:root[data-theme="light"] .theme-toggle,
+:root[data-theme="light"] .fidget-toggle,
+:root[data-theme="light"] .lede,
+:root[data-theme="light"] .about-strip,
+:root[data-theme="light"] .field-label,
+:root[data-theme="light"] label,
+:root[data-theme="light"] small,
+:root[data-theme="light"] .muted,
+:root[data-theme="light"] .native-status,
+:root[data-theme="light"] .android-status,
+:root[data-theme="light"] .commit-id,
+:root[data-theme="light"] footer {
+  color: #374151;
+}
+
+:root[data-theme="light"] h1,
+:root[data-theme="light"] h2,
+:root[data-theme="light"] h3,
+:root[data-theme="light"] strong,
+:root[data-theme="light"] .eyebrow,
+:root[data-theme="light"] .kicker,
+:root[data-theme="light"] .terminal-header,
+:root[data-theme="light"] .emustar-console-kicker,
+:root[data-theme="light"] .workspace.is-emustar-mode .controls .kicker,
+:root[data-theme="light"] .workspace.is-emustar-mode .console-area .kicker {
+  color: #111827;
+}
+
+:root[data-theme="light"] .panel,
+:root[data-theme="light"] .console-area,
+:root[data-theme="light"] .about-strip,
+:root[data-theme="light"] .machine-topbar,
+:root[data-theme="light"] .terminal-panel,
+:root[data-theme="light"] .advanced-options,
+:root[data-theme="light"] .native-panel,
+:root[data-theme="light"] .remote-panel,
+:root[data-theme="light"] .android-recent-card,
+:root[data-theme="light"] .nintendo-runtime-card,
+:root[data-theme="light"] .emustar-info-panel,
+:root[data-theme="light"] .faq-panel,
+:root[data-theme="light"] .commit-history-panel,
+:root[data-theme="light"] .windows-credentials-panel,
+:root[data-theme="light"] .keep-iso-panel,
+:root[data-theme="light"] .nintendo-help-panel,
+:root[data-theme="light"] .problem-report-panel,
+:root[data-theme="light"] .nebula-conflict-panel,
+:root[data-theme="light"] .autopilot-panel,
+:root[data-theme="light"] .display-choice-panel,
+:root[data-theme="light"] .mobile-bypass-panel,
+:root[data-theme="light"] .hyperv-limit-panel,
+:root[data-theme="light"] .official-domain-notice-panel,
+:root[data-theme="light"] .stored-images-menu,
+:root[data-theme="light"] .emulator-menu {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.12);
+}
+
+:root[data-theme="light"] .workspace.is-emustar-mode .controls,
+:root[data-theme="light"] .workspace.is-emustar-mode .console-area {
+  background: #ffffff;
+}
+
+:root[data-theme="light"] .workspace.is-emustar-mode .controls {
+  border-color: #c6a900;
+  border-top-color: #d4b800;
+}
+
+:root[data-theme="light"] .workspace.is-emustar-mode .console-area {
+  border-color: #1483a5;
+  border-top-color: #1483a5;
+}
+
+:root[data-theme="light"] input:not([type="range"]):not([type="checkbox"]),
+:root[data-theme="light"] select,
+:root[data-theme="light"] textarea,
+:root[data-theme="light"] .emulator-select,
+:root[data-theme="light"] .workspace.is-emustar-mode .emulator-select,
+:root[data-theme="light"] .workspace.is-emustar-mode select,
+:root[data-theme="light"] .workspace.is-emustar-mode input[type="text"] {
+  border-color: #94a3b8;
+  background: #f8fafc;
+  color: #111827;
+}
+
+:root[data-theme="light"] .drop-zone,
+:root[data-theme="light"] .workspace.is-emustar-mode .drop-zone,
+:root[data-theme="light"] .workspace.is-emustar-mode .advanced-options,
+:root[data-theme="light"] .workspace.is-emustar-mode .native-panel {
+  border-color: #94a3b8;
+  background: #f3f6f8;
+  color: #111827;
+}
+
+:root[data-theme="light"] .workspace.is-emustar-mode .drop-zone.is-dragging,
+:root[data-theme="light"] .workspace.is-emustar-mode .drop-zone.has-file {
+  border-color: #087d9e;
+  background: #e9f7fb;
+}
+
+:root[data-theme="light"] .secondary,
+:root[data-theme="light"] .workspace.is-emustar-mode .controls .secondary {
+  border-color: #94a3b8;
+  background: #eef2f6;
+  color: #111827;
+}
+
+:root[data-theme="light"] a,
+:root[data-theme="light"] .emustar-info-link,
+:root[data-theme="light"] .nintendo-help-link {
+  color: #111827;
+  text-decoration-color: #a78b00;
+}
+
+:root[data-theme="light"] .terminal-panel pre,
+:root[data-theme="light"] .official-domain-notice-log,
+:root[data-theme="light"] .commit-history-status,
+:root[data-theme="light"] .emustar-share-status {
+  color: #164e63;
+}
+
+:root[data-theme="light"] .screen-shell,
+:root[data-theme="light"] .workspace.is-emustar-mode .screen-shell {
+  background: #02060a;
+  color: #f8fafc;
+}
+
+:root[data-theme="light"] .screen-shell .screen-placeholder,
+:root[data-theme="light"] .screen-shell .screen-placeholder strong,
+:root[data-theme="light"] .screen-shell .screen-placeholder small {
+  color: #f8fafc;
+}
+
+:root[data-theme="light"] .display-choice-overlay,
+:root[data-theme="light"] .mobile-bypass-overlay,
+:root[data-theme="light"] .hyperv-console-overlay,
+:root[data-theme="light"] .popup-motion-overlay {
+  background: rgba(15, 23, 42, 0.56);
+}
+
+:root[data-theme="light"] .theme-toggle input,
+:root[data-theme="light"] .fidget-toggle input {
+  background: #94a3b8;
+}
+
+:root[data-theme="light"] .theme-toggle input:checked,
+:root[data-theme="light"] .fidget-toggle input:checked {
+  background: #087f73;
+}
+
 @font-face {
   font-family: "NebulaVM Display";
   src: url("/assets/nebulavm-display.otf") format("opentype");
@@ -576,7 +741,16 @@ button:disabled {
   }
 }
 
-.fidget-toggle {
+.top-preferences {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  min-height: 44px;
+}
+
+.fidget-toggle,
+.theme-toggle {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -586,7 +760,8 @@ button:disabled {
   font-size: 14px;
   cursor: pointer;
 }
-.fidget-toggle input {
+.fidget-toggle input,
+.theme-toggle input {
   appearance: none;
   width: 38px;
   height: 22px;
@@ -595,7 +770,8 @@ button:disabled {
   background: #526071;
   cursor: pointer;
 }
-.fidget-toggle input::before {
+.fidget-toggle input::before,
+.theme-toggle input::before {
   content: "";
   display: block;
   width: 16px;
@@ -605,9 +781,12 @@ button:disabled {
   background: #fff;
   transition: transform 150ms;
 }
-.fidget-toggle input:checked { background: #279b90; }
-.fidget-toggle input:checked::before { transform: translateX(16px); }
-.fidget-toggle input:focus-visible { outline: 2px solid #91d9cf; outline-offset: 3px; }
+.fidget-toggle input:checked,
+.theme-toggle input:checked { background: #279b90; }
+.fidget-toggle input:checked::before,
+.theme-toggle input:checked::before { transform: translateX(16px); }
+.fidget-toggle input:focus-visible,
+.theme-toggle input:focus-visible { outline: 2px solid #91d9cf; outline-offset: 3px; }
 
 .hero {
   display: flex;
@@ -5226,4 +5405,46 @@ pre {
   .mobile-dev-bypass .main-actions .primary {
     grid-column: 1 / -1;
   }
+}
+
+:root[data-theme="light"] .about-strip p,
+:root[data-theme="light"] .about-strip strong,
+:root[data-theme="light"] .controls p,
+:root[data-theme="light"] .controls span,
+:root[data-theme="light"] .controls small,
+:root[data-theme="light"] .controls label,
+:root[data-theme="light"] .console-area p,
+:root[data-theme="light"] .console-area span,
+:root[data-theme="light"] .console-area small,
+:root[data-theme="light"] .range-value,
+:root[data-theme="light"] .range-minmax,
+:root[data-theme="light"] .advanced-options summary,
+:root[data-theme="light"] .advanced-options summary small {
+  color: #111827;
+}
+
+:root[data-theme="light"] .status-pill,
+:root[data-theme="light"] .stored-images-button,
+:root[data-theme="light"] .windows-template-button {
+  border-color: #a8b2bf;
+  background: #eef2f6;
+  color: #111827;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .stored-images-button:hover,
+:root[data-theme="light"] .stored-images-button:focus-visible,
+:root[data-theme="light"] .windows-template-button:hover,
+:root[data-theme="light"] .windows-template-button:focus-visible {
+  border-color: #7b8796;
+  background: #e2e8f0;
+  color: #05070a;
+}
+
+:root[data-theme="light"] .screen-shell .screen-placeholder,
+:root[data-theme="light"] .screen-shell .screen-placeholder p,
+:root[data-theme="light"] .screen-shell .screen-placeholder span,
+:root[data-theme="light"] .screen-shell .screen-placeholder strong,
+:root[data-theme="light"] .screen-shell .screen-placeholder small {
+  color: #f8fafc;
 }

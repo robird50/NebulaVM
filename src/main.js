@@ -9,6 +9,13 @@ import {
 import "./styles.css";
 import { animateVmViewportIn, requestVmCaptcha, verifyBrowserVmCaptcha } from "./vmCaptcha.js";
 
+const THEME_STORAGE_KEY = "nebulavm.theme";
+let initialTheme = "dark";
+try {
+  initialTheme = localStorage.getItem(THEME_STORAGE_KEY) === "light" ? "light" : "dark";
+} catch {}
+document.documentElement.dataset.theme = initialTheme;
+
 const app = document.querySelector("#app");
 const COMMIT_ID = typeof __NEBULAVM_COMMIT__ === "string" ? __NEBULAVM_COMMIT__ : "local";
 const HOST_TOKEN_STORAGE_KEY = "nebulavm.emustar.hostToken";
@@ -287,7 +294,10 @@ app.innerHTML = `
   </div>
 
   <main class="shell">
-    <label class="fidget-toggle"><input id="logoFidgetToggle" type="checkbox" role="switch" checked /><span>Logo fidget</span></label>
+    <div class="top-preferences" aria-label="Display preferences">
+      <label class="theme-toggle"><input id="themeToggle" type="checkbox" role="switch" /><span>Light mode</span></label>
+      <label class="fidget-toggle"><input id="logoFidgetToggle" type="checkbox" role="switch" checked /><span>Logo fidget</span></label>
+    </div>
     <section class="hero">
       <div class="brand-lockup">
         <img class="brand-logo" src="/assets/nebulavm-logo.png" alt="NebulaVM logo" />
@@ -1443,6 +1453,22 @@ const els = {
 };
 
 const fidgetToggle = document.querySelector("#logoFidgetToggle");
+const themeToggle = document.querySelector("#themeToggle");
+
+function applyTheme(theme) {
+  const lightMode = theme === "light";
+  document.documentElement.dataset.theme = lightMode ? "light" : "dark";
+  themeToggle.checked = lightMode;
+  themeToggle.setAttribute("aria-checked", String(lightMode));
+}
+
+applyTheme(initialTheme);
+themeToggle.addEventListener("change", () => {
+  const theme = themeToggle.checked ? "light" : "dark";
+  applyTheme(theme);
+  try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch {}
+});
+
 try { fidgetToggle.checked = localStorage.getItem("nebulavm.fidget.enabled") !== "false"; } catch {}
 fidgetToggle.addEventListener("change", () => {
   try { localStorage.setItem("nebulavm.fidget.enabled", String(fidgetToggle.checked)); } catch {}
