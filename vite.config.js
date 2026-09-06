@@ -1250,7 +1250,7 @@ let nativeVm = null;
 let nativeVmOutput = "";
 let lastNativeExit = null;
 let activeNativeRuntimeName = null;
-const hyperVSessionLeaseMs = 45_000;
+const hyperVSessionLeaseMs = 5_000;
 const emptyHyperVSessionLease = () => ({
   deviceId: "",
   browserSessionId: "",
