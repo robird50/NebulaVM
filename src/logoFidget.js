@@ -63,14 +63,16 @@ export async function initLogoFidget(anchor) {
   scene.add(logoRoot);
 
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -13.5, 0) });
-  const physicsMaterial = new CANNON.Material({ friction: 0.2, restitution: 0.76 });
-  world.defaultContactMaterial = new CANNON.ContactMaterial(physicsMaterial, physicsMaterial, { friction: 0.2, restitution: 0.76 });
-  const body = new CANNON.Body({ mass: 1, material: physicsMaterial, linearDamping: 0.035, angularDamping: 0.06 });
+  const physicsMaterial = new CANNON.Material({ friction: 0.35, restitution: 0.52 });
+  world.defaultContactMaterial = new CANNON.ContactMaterial(physicsMaterial, physicsMaterial, { friction: 0.35, restitution: 0.52 });
+  const body = new CANNON.Body({ mass: 1, material: physicsMaterial, linearDamping: 0.045, angularDamping: 0.1 });
   const coinRotation = new CANNON.Quaternion();
   coinRotation.setFromEuler(Math.PI / 2, 0, 0);
   body.addShape(new CANNON.Cylinder(LOGO_RADIUS, LOGO_RADIUS, 0.13, 24), new CANNON.Vec3(), coinRotation);
-  body.angularVelocity.set(0.7, 1.1, -1.8);
+  body.angularVelocity.set(2.1, 0.35, -1.1);
   world.addBody(body);
+  const cursorBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+  world.addBody(cursorBody);
 
   let halfWidth = 4;
   let walls = [];
@@ -89,8 +91,8 @@ export async function initLogoFidget(anchor) {
     addWall([halfWidth + 0.3, 0.08, 1], [0, halfHeight + 0.08, 0]);
     addWall([0.08, halfHeight + 0.2, 1], [-halfWidth - 0.08, 0, 0]);
     addWall([0.08, halfHeight + 0.2, 1], [halfWidth + 0.08, 0, 0]);
-    addWall([halfWidth + 0.3, halfHeight + 0.2, 0.06], [0, 0, -0.45]);
-    addWall([halfWidth + 0.3, halfHeight + 0.2, 0.06], [0, 0, 0.45]);
+    addWall([halfWidth + 0.3, halfHeight + 0.2, 0.06], [0, 0, -1.2]);
+    addWall([halfWidth + 0.3, halfHeight + 0.2, 0.06], [0, 0, 1.2]);
   };
   const resize = () => {
     const width = Math.max(1, window.innerWidth);
@@ -116,6 +118,7 @@ export async function initLogoFidget(anchor) {
   let anchorVisible = true;
   let activated = false;
   let dragging = false;
+  let dragConstraint = null;
   let pointerY = 0;
   let samples = [];
   const shouldShow = () => (anchorVisible || activated) && !document.fullscreenElement && !document.body.classList.contains("screen-app-fullscreen");
@@ -145,11 +148,23 @@ export async function initLogoFidget(anchor) {
     pointerY = event.clientY;
     grab.setPointerCapture(event.pointerId);
     grab.classList.add("is-dragging");
-    body.type = CANNON.Body.KINEMATIC;
+    const point = pointerWorld(event);
+    cursorBody.position.set(point.x, point.y, 0);
+    body.type = CANNON.Body.DYNAMIC;
+    body.position.set(point.x, point.y - LOGO_RADIUS * 0.82, 0);
+    body.quaternion.set(0, 0, 0, 1);
     body.velocity.setZero();
     body.angularVelocity.setZero();
-    const point = pointerWorld(event);
-    body.position.set(point.x, point.y, 0);
+    body.wakeUp();
+    dragConstraint = new CANNON.PointToPointConstraint(
+      cursorBody,
+      new CANNON.Vec3(0, 0, 0),
+      body,
+      new CANNON.Vec3(0, LOGO_RADIUS * 0.82, 0),
+      1e6,
+    );
+    dragConstraint.collideConnected = false;
+    world.addConstraint(dragConstraint);
     samples = [{ point, time: performance.now() }];
     updateVisibility();
   });
@@ -158,7 +173,7 @@ export async function initLogoFidget(anchor) {
     event.preventDefault();
     pointerY = event.clientY;
     const point = pointerWorld(event);
-    body.position.set(point.x, point.y, 0);
+    cursorBody.position.set(point.x, point.y, 0);
     const now = performance.now();
     samples.push({ point, time: now });
     samples = samples.filter((sample) => now - sample.time <= 120);
@@ -170,11 +185,10 @@ export async function initLogoFidget(anchor) {
     const sample = samples[0] || { point, time: now - 16 };
     const elapsed = Math.max(16, now - sample.time) / 1000;
     const velocity = point.clone().sub(sample.point).multiplyScalar(1 / elapsed).clampLength(0, 15);
-    body.type = CANNON.Body.DYNAMIC;
-    body.updateMassProperties();
-    body.position.set(point.x, point.y, 0);
+    if (dragConstraint) world.removeConstraint(dragConstraint);
+    dragConstraint = null;
     body.velocity.set(velocity.x, velocity.y, 0);
-    body.angularVelocity.set(velocity.y * 0.4, -velocity.x * 0.4, -velocity.x * 0.85 || 1.2);
+    body.angularVelocity.set(2.2 + velocity.y * 0.25, -velocity.x * 0.25, -velocity.x * 0.65);
     body.wakeUp();
     dragging = false;
     samples = [];

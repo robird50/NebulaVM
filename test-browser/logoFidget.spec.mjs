@@ -35,11 +35,16 @@ test("3D logo fidget renders and moves under physics", async ({ page }) => {
   await page.waitForTimeout(160);
   await page.mouse.move(targetX + 1, targetY);
   const held = await grab.boundingBox();
+  await page.screenshot({ path: "test-results/logo-fidget-desktop-dangling.png" });
   await page.mouse.up();
   await page.waitForTimeout(450);
   const fallen = await grab.boundingBox();
   expect(fallen.y).toBeGreaterThan(held.y + 5);
   await page.screenshot({ path: "test-results/logo-fidget-desktop-thrown.png" });
+  await page.waitForTimeout(3500);
+  const settled = await grab.boundingBox();
+  expect(settled.y + settled.height).toBeGreaterThan(680);
+  await page.screenshot({ path: "test-results/logo-fidget-desktop-settled.png" });
 });
 
 test("3D logo fidget fits a mobile viewport", async ({ page }) => {
