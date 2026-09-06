@@ -152,6 +152,14 @@
   color: #f8fafc;
 }
 
+:root[data-theme="light"] .commit-id a:not(.report-problem-link):not(.tiktok-footer-link),
+:root[data-theme="light"] .commit-id a:not(.report-problem-link):not(.tiktok-footer-link):hover,
+:root[data-theme="light"] .commit-id a:not(.report-problem-link):not(.tiktok-footer-link):focus-visible {
+  color: #111827;
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+}
+
 :root[data-theme="light"] .terminal-panel,
 :root[data-theme="light"] .workspace.is-emustar-mode .terminal-panel,
 :root[data-theme="light"] .workspace.is-nintendo-mode .terminal-panel {
