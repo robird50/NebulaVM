@@ -21,3 +21,12 @@ a complete Windows 11 runtime.
    graphics, Secure Boot state, TPM 2.0 presence, and persistent OPFS writes.
 
 The V2 runtime must remain desktop-only and must never upload visitor media.
+
+## Reproducible build
+
+`build-nebulahv-v2.yml` builds the pinned qemu-wasm revision on a GitHub runner,
+applies `qemu-nebulahv-display.patch`, and emits a checksummed runtime artifact.
+The custom display backend copies QEMU's 32-bit framebuffer into the browser
+canvas and exports pointer, wheel, and keyboard entry points. A successful build
+does not enable V2 by itself; the artifact must pass the browser boot probes
+before the manifest can advertise graphical display support.

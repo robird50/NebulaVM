@@ -99,11 +99,125 @@ const qemuDriveArgs = (mediaType, imagePath) => {
   return ["-cdrom", imagePath, "-boot", "d"];
 };
 
+const QNUM_BY_CODE = {
+  Escape: 0x01,
+  Digit1: 0x02, Digit2: 0x03, Digit3: 0x04, Digit4: 0x05, Digit5: 0x06,
+  Digit6: 0x07, Digit7: 0x08, Digit8: 0x09, Digit9: 0x0a, Digit0: 0x0b,
+  Minus: 0x0c, Equal: 0x0d, Backspace: 0x0e, Tab: 0x0f,
+  KeyQ: 0x10, KeyW: 0x11, KeyE: 0x12, KeyR: 0x13, KeyT: 0x14,
+  KeyY: 0x15, KeyU: 0x16, KeyI: 0x17, KeyO: 0x18, KeyP: 0x19,
+  BracketLeft: 0x1a, BracketRight: 0x1b, Enter: 0x1c, ControlLeft: 0x1d,
+  KeyA: 0x1e, KeyS: 0x1f, KeyD: 0x20, KeyF: 0x21, KeyG: 0x22,
+  KeyH: 0x23, KeyJ: 0x24, KeyK: 0x25, KeyL: 0x26, Semicolon: 0x27,
+  Quote: 0x28, Backquote: 0x29, ShiftLeft: 0x2a, Backslash: 0x2b,
+  KeyZ: 0x2c, KeyX: 0x2d, KeyC: 0x2e, KeyV: 0x2f, KeyB: 0x30,
+  KeyN: 0x31, KeyM: 0x32, Comma: 0x33, Period: 0x34, Slash: 0x35,
+  ShiftRight: 0x36, NumpadMultiply: 0x37, AltLeft: 0x38, Space: 0x39,
+  CapsLock: 0x3a, F1: 0x3b, F2: 0x3c, F3: 0x3d, F4: 0x3e,
+  F5: 0x3f, F6: 0x40, F7: 0x41, F8: 0x42, F9: 0x43, F10: 0x44,
+  NumLock: 0x45, ScrollLock: 0x46, F11: 0x57, F12: 0x58,
+  NumpadEnter: 0x9c, ControlRight: 0x9d, AltRight: 0xb8,
+  Home: 0xc7, ArrowUp: 0xc8, PageUp: 0xc9, ArrowLeft: 0xcb,
+  ArrowRight: 0xcd, End: 0xcf, ArrowDown: 0xd0, PageDown: 0xd1,
+  Insert: 0xd2, Delete: 0xd3, MetaLeft: 0xdb, MetaRight: 0xdc,
+  ContextMenu: 0xdd,
+};
+
+const createNebulaHVDisplayBridge = (moduleConfig, canvas) => {
+  let context = null;
+  let imageData = null;
+
+  moduleConfig.nebulahvDisplayResize = (width, height) => {
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    context = canvas.getContext("2d", { alpha: false, desynchronized: true });
+    imageData = context.createImageData(width, height);
+  };
+  moduleConfig.nebulahvDisplayUpdate = (
+    pointer, width, height, stride, x, y, updateWidth, updateHeight,
+  ) => {
+    if (!context || !imageData || imageData.width !== width || imageData.height !== height) {
+      moduleConfig.nebulahvDisplayResize(width, height);
+    }
+    const heap = moduleConfig.HEAPU8 || globalThis.HEAPU8;
+    if (!heap) return;
+    const left = Math.max(0, x);
+    const top = Math.max(0, y);
+    const right = Math.min(width, left + Math.max(0, updateWidth));
+    const bottom = Math.min(height, top + Math.max(0, updateHeight));
+    const destination = imageData.data;
+    for (let row = top; row < bottom; row += 1) {
+      let sourceOffset = pointer + row * stride + left * 4;
+      let destinationOffset = (row * width + left) * 4;
+      for (let column = left; column < right; column += 1) {
+        destination[destinationOffset] = heap[sourceOffset + 2];
+        destination[destinationOffset + 1] = heap[sourceOffset + 1];
+        destination[destinationOffset + 2] = heap[sourceOffset];
+        destination[destinationOffset + 3] = 255;
+        sourceOffset += 4;
+        destinationOffset += 4;
+      }
+    }
+    context.putImageData(imageData, 0, 0, left, top, right - left, bottom - top);
+  };
+};
+
+const installNebulaHVInput = (runtime, canvas) => {
+  const call = (name, ...args) => {
+    const direct = runtime?.[`_${name}`];
+    if (typeof direct === "function") direct(...args);
+  };
+  const pointerMove = (event) => {
+    const bounds = canvas.getBoundingClientRect();
+    call(
+      "nebulahv_pointer_move",
+      Math.round((event.clientX - bounds.left) * canvas.width / Math.max(bounds.width, 1)),
+      Math.round((event.clientY - bounds.top) * canvas.height / Math.max(bounds.height, 1)),
+      canvas.width,
+      canvas.height,
+    );
+  };
+  const pointerButton = (event, down) => {
+    event.preventDefault();
+    canvas.focus();
+    call("nebulahv_pointer_button", event.button, down ? 1 : 0);
+  };
+  const key = (event, down) => {
+    const number = QNUM_BY_CODE[event.code];
+    if (number == null) return;
+    event.preventDefault();
+    call("nebulahv_key_number", number, down ? 1 : 0);
+  };
+  const wheel = (event) => {
+    event.preventDefault();
+    call("nebulahv_pointer_wheel", Math.sign(event.deltaY));
+  };
+  const handlers = {
+    pointermove: pointerMove,
+    pointerdown: (event) => pointerButton(event, true),
+    pointerup: (event) => pointerButton(event, false),
+    keydown: (event) => key(event, true),
+    keyup: (event) => key(event, false),
+    wheel,
+    contextmenu: (event) => event.preventDefault(),
+  };
+  canvas.tabIndex = 0;
+  for (const [name, handler] of Object.entries(handlers)) {
+    canvas.addEventListener(name, handler, name === "wheel" ? { passive: false } : undefined);
+  }
+  return () => {
+    for (const [name, handler] of Object.entries(handlers)) {
+      canvas.removeEventListener(name, handler);
+    }
+  };
+};
+
 export class NebulaHVEmulator {
   constructor(options) {
     this.options = options;
     this.disposed = false;
     this.instance = null;
+    this.removeInput = null;
   }
 
   async start() {
@@ -253,6 +367,7 @@ export class NebulaHVEmulator {
         onStopped?.();
       },
     };
+    if (v2Ready) createNebulaHVDisplayBridge(moduleConfig, canvas);
 
     globalThis.Module = moduleConfig;
 
@@ -278,11 +393,15 @@ export class NebulaHVEmulator {
       await loadScript("/qemu/out.js");
     }
 
+    if (v2Ready) this.removeInput = installNebulaHVInput(this.instance || moduleConfig, canvas);
+
     onStarted?.();
   }
 
   async stop() {
     this.disposed = true;
+    this.removeInput?.();
+    this.removeInput = null;
     if (this.instance?.quit) {
       this.instance.quit(0);
     }
@@ -291,6 +410,8 @@ export class NebulaHVEmulator {
 
   async destroy() {
     this.disposed = true;
+    this.removeInput?.();
+    this.removeInput = null;
   }
 
   writeLine(line) {

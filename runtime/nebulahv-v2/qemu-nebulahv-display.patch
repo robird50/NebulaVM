@@ -1,0 +1,197 @@
+diff --git a/qapi/ui.json b/qapi/ui.json
+index 4184e6d..ada52f1 100644
+--- a/qapi/ui.json
++++ b/qapi/ui.json
+@@ -1488,6 +1488,7 @@
+   'data'    : [
+     { 'name': 'default' },
+     { 'name': 'none' },
++    { 'name': 'nebulahv' },
+     { 'name': 'gtk', 'if': 'CONFIG_GTK' },
+     { 'name': 'sdl', 'if': 'CONFIG_SDL' },
+     { 'name': 'egl-headless', 'if': 'CONFIG_OPENGL' },
+diff --git a/ui/meson.build b/ui/meson.build
+index 7d71583..de87416 100644
+--- a/ui/meson.build
++++ b/ui/meson.build
+@@ -18,6 +18,7 @@ system_ss.add(files(
+   'keymaps.c',
+   'qemu-pixman.c',
+   'ui-hmp-cmds.c',
++  'nebulahv.c',
+   'ui-qmp-cmds.c',
+   'util.c',
+ ))
+diff --git a/ui/nebulahv.c b/ui/nebulahv.c
+new file mode 100644
+index 0000000..e733efa
+--- /dev/null
++++ b/ui/nebulahv.c
+@@ -0,0 +1,151 @@
++#include "qemu/osdep.h"
++#include "qemu/module.h"
++#include "ui/console.h"
++#include "ui/input.h"
++
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#include <emscripten/wasmfs.h>
++#else
++#define EMSCRIPTEN_KEEPALIVE
++#endif
++
++#ifdef __EMSCRIPTEN__
++void wasmfs_before_preload(void)
++{
++    backend_t opfs = wasmfs_create_opfs_backend();
++
++    if (opfs != NULL) {
++        wasmfs_create_directory("/opfs", 0777, opfs);
++    }
++}
++#endif
++
++typedef struct NebulaHVDisplay {
++    DisplayChangeListener dcl;
++    DisplaySurface *surface;
++} NebulaHVDisplay;
++
++#ifdef __EMSCRIPTEN__
++EM_JS(void, nebulahv_canvas_resize, (int width, int height), {
++    if (Module.nebulahvDisplayResize) {
++        Module.nebulahvDisplayResize(width, height);
++    }
++});
++
++EM_JS(void, nebulahv_canvas_update,
++      (uintptr_t pixels, int width, int height, int stride,
++       int x, int y, int update_width, int update_height), {
++    if (Module.nebulahvDisplayUpdate) {
++        Module.nebulahvDisplayUpdate(
++            pixels, width, height, stride,
++            x, y, update_width, update_height
++        );
++    }
++});
++#else
++static void nebulahv_canvas_resize(int width, int height) {}
++static void nebulahv_canvas_update(uintptr_t pixels, int width, int height,
++                                   int stride, int x, int y,
++                                   int update_width, int update_height) {}
++#endif
++
++static void nebulahv_refresh(DisplayChangeListener *dcl)
++{
++    graphic_hw_update(dcl->con);
++}
++
++static void nebulahv_gfx_update(DisplayChangeListener *dcl,
++                                int x, int y, int width, int height)
++{
++    NebulaHVDisplay *display = container_of(dcl, NebulaHVDisplay, dcl);
++    DisplaySurface *surface = display->surface;
++
++    if (!surface || !surface_data(surface) ||
++        surface_bits_per_pixel(surface) != 32) {
++        return;
++    }
++
++    nebulahv_canvas_update((uintptr_t)surface_data(surface),
++                           surface_width(surface), surface_height(surface),
++                           surface_stride(surface), x, y, width, height);
++}
++
++static void nebulahv_gfx_switch(DisplayChangeListener *dcl,
++                                DisplaySurface *new_surface)
++{
++    NebulaHVDisplay *display = container_of(dcl, NebulaHVDisplay, dcl);
++
++    display->surface = new_surface;
++    if (!new_surface) {
++        return;
++    }
++    nebulahv_canvas_resize(surface_width(new_surface),
++                           surface_height(new_surface));
++    nebulahv_gfx_update(dcl, 0, 0, surface_width(new_surface),
++                        surface_height(new_surface));
++}
++
++static const DisplayChangeListenerOps nebulahv_ops = {
++    .dpy_name = "nebulahv",
++    .dpy_refresh = nebulahv_refresh,
++    .dpy_gfx_update = nebulahv_gfx_update,
++    .dpy_gfx_switch = nebulahv_gfx_switch,
++};
++
++static void nebulahv_display_init(DisplayState *ds, DisplayOptions *opts)
++{
++    QemuConsole *console;
++    int index;
++
++    for (index = 0; ; index++) {
++        NebulaHVDisplay *display;
++
++        console = qemu_console_lookup_by_index(index);
++        if (!console || !qemu_console_is_graphic(console)) {
++            break;
++        }
++        display = g_new0(NebulaHVDisplay, 1);
++        display->dcl.con = console;
++        display->dcl.ops = &nebulahv_ops;
++        register_displaychangelistener(&display->dcl);
++    }
++}
++
++static QemuDisplay qemu_display_nebulahv = {
++    .type = DISPLAY_TYPE_NEBULAHV,
++    .init = nebulahv_display_init,
++};
++
++static void nebulahv_register_display(void)
++{
++    qemu_display_register(&qemu_display_nebulahv);
++}
++
++type_init(nebulahv_register_display);
++
++EMSCRIPTEN_KEEPALIVE
++void nebulahv_pointer_move(int x, int y, int width, int height)
++{
++    qemu_input_queue_abs(NULL, INPUT_AXIS_X, x, 0, MAX(width, 1));
++    qemu_input_queue_abs(NULL, INPUT_AXIS_Y, y, 0, MAX(height, 1));
++    qemu_input_event_sync();
++}
++
++EMSCRIPTEN_KEEPALIVE
++void nebulahv_pointer_button(int button, int down)
++{
++    InputButton input_button = INPUT_BUTTON_LEFT;
++
++    if (button == 1) {
++        input_button = INPUT_BUTTON_MIDDLE;
++    } else if (button == 2) {
++        input_button = INPUT_BUTTON_RIGHT;
++    }
++    qemu_input_queue_btn(NULL, input_button, down != 0);
++    qemu_input_event_sync();
++}
++
++EMSCRIPTEN_KEEPALIVE
++void nebulahv_pointer_wheel(int delta)
++{
++    qemu_input_queue_btn(NULL,
++                         delta < 0 ? INPUT_BUTTON_WHEEL_UP
++                                   : INPUT_BUTTON_WHEEL_DOWN,
++                         true);
++    qemu_input_queue_btn(NULL,
++                         delta < 0 ? INPUT_BUTTON_WHEEL_UP
++                                   : INPUT_BUTTON_WHEEL_DOWN,
++                         false);
++    qemu_input_event_sync();
++}
++
++EMSCRIPTEN_KEEPALIVE
++void nebulahv_key_number(int number, int down)
++{
++    qemu_input_event_send_key_number(NULL, number, down != 0);
++}

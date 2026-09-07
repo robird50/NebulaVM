@@ -43,7 +43,7 @@ test("V2 arguments include graphics, protected UEFI storage, TPM, and OPFS media
   });
   const command = args.join(" ");
   assert.match(command, /q35,smm=on/);
-  assert.match(command, /virtio-vga -display sdl/);
+  assert.match(command, /VGA -display nebulahv/);
   assert.match(command, /if=pflash/);
   assert.match(command, /tpm-tis/);
   assert.match(command, /format=vhdx,file=\/opfs\/nebulahv\/windows11.vhdx/);

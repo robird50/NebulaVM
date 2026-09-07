@@ -1,0 +1,2 @@
+mergeInto(LibraryManager.library, {});
+
