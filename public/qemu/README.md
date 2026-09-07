@@ -1,6 +1,6 @@
-# Nebula x64 QEMU Wasm Artifacts
+# NebulaHV V1 Runtime
 
-Put a browser build of `qemu-system-x86_64` here.
+This directory contains the pinned browser build used by NebulaHV V1.
 
 NebulaVM expects:
 
@@ -17,5 +17,9 @@ public/qemu/load.js
 public/qemu/qemu-system-x86_64.data
 ```
 
-Build these from the QEMU Wasm project, then restart the Vite dev server so
-the required cross-origin isolation headers are active.
+The current artifact uses a fixed 2.30 GB Wasm heap, threaded TCG, and a serial
+console. It is suitable for small x86-64 boot images. It does not yet provide a
+graphical Windows 11 display, Secure Boot, TPM 2.0, or direct OPFS block I/O.
+
+V1 always runs in the visitor's desktop browser. Media is never uploaded to the
+NebulaVM host by this runtime.

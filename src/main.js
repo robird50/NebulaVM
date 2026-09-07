@@ -2,8 +2,8 @@ import { V86 } from "v86";
 import RFB from "@novnc/novnc";
 import {
   QemuX64Emulator,
-  MAX_BROWSER_MEDIA_BYTES,
   formatMegabytes,
+  maxNebulaHVMediaBytes,
   qemuWasmCanMountBrowserFiles,
 } from "./qemuX64.js";
 import "./styles.css";
@@ -382,7 +382,7 @@ app.innerHTML = `
             <span id="emulatorLabel">Emulator</span>
             <select id="emulatorMode" aria-labelledby="emulatorLabel" hidden>
               <option value="v86">Nebula x86 / v86</option>
-              <option value="qemu-x64">Nebula x64 / QEMU Wasm</option>
+              <option value="qemu-x64">NebulaHV x64 (V1)</option>
               <option value="emustar-hyperv">Hyper-V x64</option>
               <option value="qemu-native-x64">QEMU x64 / large ISO</option>
               <option value="qemu-native-arm64-windows">QEMU ARM64 / Windows</option>
@@ -411,7 +411,7 @@ app.innerHTML = `
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="qemu-x64">
                   <img class="emulator-menu-icon" src="/assets/nebulavm-emulator-icon.png" alt="" />
-                  <span>Nebula x64 / QEMU Wasm</span>
+                  <span>NebulaHV x64 (V1)</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="emustar-hyperv">
                   <img class="emulator-menu-icon" src="/assets/hyperv-icon.svg" alt="" />
@@ -4701,7 +4701,7 @@ const isSelectedMediaTooLarge = () =>
   isBrowserQemuMode() &&
   !state.browserQemuCanMountFiles &&
   state.isoFile &&
-  state.isoFile.size > MAX_BROWSER_MEDIA_BYTES;
+  state.isoFile.size > maxNebulaHVMediaBytes(Number(els.memorySize.value));
 
 const isHostStoredMediaSelectedForBrowserMode = () =>
   !isAndroidMode() &&
@@ -4722,7 +4722,7 @@ const updateMediaWarning = () => {
     els.mediaWarning.hidden = false;
     els.mediaWarning.textContent =
       "This ISO is stored on the NebulaVM host, but the selected emulator runs only inside this browser. " +
-      "Choose Hyper-V or QEMU large ISO, or drop the ISO file again for Nebula x86 / v86.";
+      "Drop the file again for NebulaHV or Nebula x86, or choose a host-backed emulator.";
     return;
   }
 
@@ -4735,8 +4735,8 @@ const updateMediaWarning = () => {
   els.mediaWarning.hidden = false;
   els.mediaWarning.textContent =
     `${state.isoFile.name} is ${formatMegabytes(state.isoFile.size)}. ` +
-    `This QEMU Wasm build can stage up to ${formatMegabytes(MAX_BROWSER_MEDIA_BYTES)} in browser memory. ` +
-    "A no-install large-ISO backend needs a WORKERFS-capable QEMU Wasm build, or use Native QEMU / Remote VM.";
+    `With ${formatMegabytes(Number(els.memorySize.value))} of guest RAM, NebulaHV V1 has ${formatMegabytes(maxNebulaHVMediaBytes(Number(els.memorySize.value)))} left for copied boot media. ` +
+    "Choose less RAM or smaller media. Large Windows installation ISOs are not supported by this V1 runtime.";
 };
 
 const updateButtons = (busy = false) => {
@@ -5428,7 +5428,7 @@ const bootQemuX64 = async () => {
     onStarted: () => {
       state.running = true;
       setPowerState("Running", "running");
-      log("QEMU x86_64 started.");
+      log("NebulaHV x86-64 started locally.");
       updateButtons();
     },
     onStopped: () => {
@@ -6507,7 +6507,7 @@ const bootEmulator = async () => {
 const pauseOrResume = () => {
   if (!state.emulator) return;
   if (els.emulatorMode.value === "qemu-x64") {
-    log("Pause and resume are not available for the QEMU x86_64 backend yet.");
+    log("Pause and resume are not available in NebulaHV V1 yet.");
     return;
   }
   if (state.running) {
@@ -6850,6 +6850,7 @@ const updateBackendUi = () => {
       ? "Nebula Console"
       : "Display";
   els.activityLabel.textContent = androidMode ? "Android log" : nintendoMode ? "Nintendo log" : emustarMode ? "Mission log" : "Activity";
+  if (isBrowserQemuMode()) els.activityLabel.textContent = "NebulaHV log";
   els.screenModeIcon.src = androidMode
     ? "/assets/android-icon.png"
     : nintendoMode
@@ -6868,6 +6869,8 @@ const updateBackendUi = () => {
       ? "Nintendo emulator ready"
     : emustarMode
       ? "Hyper-V viewport standing by"
+      : isBrowserQemuMode()
+        ? "NebulaHV ready"
       : "Drop an ISO to begin";
   if (!state.emulator && !state.isoFile && !state.windowsTemplateSelected) {
     els.machineTitle.textContent = androidMode
@@ -6876,6 +6879,8 @@ const updateBackendUi = () => {
         ? `${selectedNintendoEngine().label} - ${selectedNintendoEngine().system}`
       : emustarMode
         ? "Hyper-V Control Deck"
+        : isBrowserQemuMode()
+          ? "NebulaHV V1"
         : "Awaiting boot media";
   }
   els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode || emustarMode ? "x64" : "x86";
@@ -6961,7 +6966,7 @@ const updateBackendUi = () => {
     : remoteMode
       ? "Remote VM mode shows a VM running on another computer or cloud server."
     : isBrowserQemuMode()
-      ? "x86_64 support uses QEMU Wasm and local artifacts from public/qemu."
+      ? "NebulaHV V1 runs x86-64 locally with QEMU TCG/Wasm. Small boot images and serial-console guests are supported; Windows 11 graphics are not ready yet."
     : "Legacy x86, 32-bit Linux, DOS, hobby OS, and vintage Windows images work best.";
   if (androidMode && !state.emulator) {
     void fetchAndroidJson("status")

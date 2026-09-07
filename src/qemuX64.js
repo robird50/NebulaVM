@@ -1,3 +1,10 @@
+import {
+  describeNebulaHVMissingCapabilities,
+  inspectNebulaHVCapabilities,
+  NEBULAHV_MAX_GUEST_MEMORY_BYTES,
+  nebulahvMediaBudget,
+} from "./nebulahvCapabilities.js";
+
 const REQUIRED_ASSETS = [
   "/qemu/out.js",
   "/qemu/qemu-system-x86_64.wasm",
@@ -11,7 +18,7 @@ const OPTIONAL_ASSETS = [
   "/qemu/load-rom.data",
 ];
 
-export const MAX_BROWSER_MEDIA_BYTES = 2 * 1024 * 1024 * 1024;
+export const MAX_BROWSER_MEDIA_BYTES = 1024 * 1024 * 1024;
 
 const loadScript = (src) =>
   new Promise((resolve, reject) => {
@@ -54,6 +61,11 @@ const qemuMemoryArg = (bytes) => `${Math.max(128, Math.round(bytes / 1024 / 1024
 export const formatMegabytes = (bytes) =>
   `${(bytes / 1024 / 1024).toFixed(bytes >= 1024 * 1024 * 1024 ? 1 : 0)} MB`;
 
+export const maxNebulaHVMediaBytes = (memorySize, canMountBrowserFiles = false) =>
+  canMountBrowserFiles
+    ? Number.MAX_SAFE_INTEGER
+    : Math.min(MAX_BROWSER_MEDIA_BYTES, nebulahvMediaBudget(memorySize));
+
 const safeMediaName = (name) => name.replace(/[^a-zA-Z0-9._-]/g, "_") || "boot-media.iso";
 
 const qemuBiosArgs = async () => {
@@ -72,7 +84,7 @@ const qemuDriveArgs = (mediaType, imagePath) => {
   return ["-cdrom", imagePath, "-boot", "d"];
 };
 
-export class QemuX64Emulator {
+export class NebulaHVEmulator {
   constructor(options) {
     this.options = options;
     this.disposed = false;
@@ -80,16 +92,18 @@ export class QemuX64Emulator {
   }
 
   async start() {
-    if (!window.crossOriginIsolated) {
+    const capabilities = inspectNebulaHVCapabilities(window);
+    if (!capabilities.ready) {
+      const missing = describeNebulaHVMissingCapabilities(capabilities);
       throw new Error(
-        "Nebula x64 needs cross-origin isolation. Restart the dev server so Vite can send COOP/COEP headers.",
+        `NebulaHV cannot start in this browser. Missing: ${missing.join(", ")}.`,
       );
     }
 
     const missing = await findMissingQemuAssets();
     if (missing.length) {
       throw new Error(
-        `Missing QEMU Wasm artifacts: ${missing.join(", ")}. Build qemu-system-x86_64 and place the files in public/qemu/.`,
+        `NebulaHV runtime is incomplete. Missing: ${missing.join(", ")}.`,
       );
     }
 
@@ -106,13 +120,22 @@ export class QemuX64Emulator {
 
     terminal.textContent = "";
     terminal.hidden = false;
-    this.writeLine("Nebula x64 preparing uploaded media...");
-    const canMountBrowserFiles = await qemuWasmCanMountBrowserFiles();
-    const shouldMountBrowserFile = isoFile.size > MAX_BROWSER_MEDIA_BYTES && canMountBrowserFiles;
+    if (memorySize > NEBULAHV_MAX_GUEST_MEMORY_BYTES) {
+      throw new Error("NebulaHV V1 supports up to 2048 MB of guest RAM with the bundled runtime.");
+    }
 
-    if (isoFile.size > MAX_BROWSER_MEDIA_BYTES && !canMountBrowserFiles) {
+    this.writeLine("NebulaHV V1 preparing local boot media...");
+    this.writeLine("Privacy: the selected file stays on this device.");
+    this.writeLine(
+      `Runtime: x86-64 TCG/Wasm, ${capabilities.optional.opfs ? "OPFS available" : "OPFS unavailable"}, ${capabilities.optional.webGpu ? "WebGPU available" : "WebGPU unavailable"}.`,
+    );
+    const canMountBrowserFiles = await qemuWasmCanMountBrowserFiles();
+    const mediaLimit = maxNebulaHVMediaBytes(memorySize, canMountBrowserFiles);
+    const shouldMountBrowserFile = canMountBrowserFiles;
+
+    if (isoFile.size > mediaLimit && !canMountBrowserFiles) {
       throw new Error(
-        `${isoFile.name} is ${formatMegabytes(isoFile.size)}. This QEMU Wasm build can only copy boot media up to ${formatMegabytes(MAX_BROWSER_MEDIA_BYTES)} into browser memory. A no-install large-ISO backend needs a QEMU Wasm build compiled with WORKERFS so local files can be mounted instead of copied.`,
+        `${isoFile.name} is ${formatMegabytes(isoFile.size)}, but only ${formatMegabytes(mediaLimit)} remains in the NebulaHV V1 Wasm heap after reserving ${formatMegabytes(memorySize)} for guest RAM. Choose less RAM or smaller boot media.`,
       );
     }
 
@@ -177,7 +200,7 @@ export class QemuX64Emulator {
       await loadScript("/qemu/load-rom.js");
     }
 
-    this.writeLine("Starting QEMU x86_64...");
+    this.writeLine("Starting NebulaHV x86-64 locally...");
 
     try {
       const qemuEntrypoint = "/qemu/out.js";
@@ -200,7 +223,7 @@ export class QemuX64Emulator {
     if (this.instance?.quit) {
       this.instance.quit(0);
     }
-    this.writeLine("Nebula x64 stopped.");
+    this.writeLine("NebulaHV stopped.");
   }
 
   async destroy() {
@@ -214,3 +237,6 @@ export class QemuX64Emulator {
     terminal.scrollTop = terminal.scrollHeight;
   }
 }
+
+// Keep the old export so saved sessions and older imports remain compatible.
+export const QemuX64Emulator = NebulaHVEmulator;
