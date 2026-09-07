@@ -3793,17 +3793,32 @@ const nativeQemuPlugin = () => ({
         ((req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") ||
           (req.method === "GET" && url.pathname === "/api/emustar-hyperv/console-frame") ||
           (req.method === "POST" && url.pathname === "/api/emustar-hyperv/console-input"));
+      const publicMobileHyperVRequest =
+        publicMobileRequest &&
+        ((req.method === "GET" && url.pathname === "/api/emustar-hyperv/status") ||
+          (req.method === "GET" && url.pathname === "/api/emustar-hyperv/console-frame") ||
+          (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") ||
+          (req.method === "POST" && url.pathname === "/api/emustar-hyperv/stop") ||
+          (req.method === "POST" && url.pathname === "/api/emustar-hyperv/auto-recover") ||
+          (req.method === "POST" && url.pathname === "/api/emustar-hyperv/close-console") ||
+          (req.method === "POST" && url.pathname === "/api/emustar-hyperv/console-input") ||
+          (req.method === "POST" && url.pathname === "/api/emustar-hyperv/resize-display"));
+      const publicMobileHostRequest =
+        publicMobileRequest &&
+        req.method === "GET" &&
+        (url.pathname === "/api/emustar-host/info" ||
+          url.pathname === "/api/emustar-host/windows11-template");
 
       if (
         publicMobileRequest &&
         (isNativeQemuApi ||
-          (isHyperVApi && !publicRemoteConsoleHyperVRequest) ||
+          (isHyperVApi && !publicRemoteConsoleHyperVRequest && !publicMobileHyperVRequest) ||
           isAndroidStudioApi ||
-          (isHostApi && url.pathname !== "/api/emustar-host/info"))
+          (isHostApi && !publicMobileHostRequest))
       ) {
         json(res, 403, {
           ok: false,
-          error: "Public mobile mode can only connect to an existing Remote VM stream.",
+          error: "Public mobile mode can only start the prepared Windows 11 Template on Hyper-V.",
         });
         return;
       }
@@ -3954,6 +3969,13 @@ const nativeQemuPlugin = () => ({
 
         if (req.method === "POST" && url.pathname === "/api/emustar-hyperv/start") {
           const requestedBody = await readJsonBody(req);
+          if (publicMobileRequest && (!requestedBody.templateDiskPath || requestedBody.isoPath)) {
+            json(res, 403, {
+              ok: false,
+              error: "Mobile Hyper-V can only start the prepared Windows 11 Template.",
+            });
+            return;
+          }
           const requestUsage = hyperVUsageForRequest(req, url);
           if (requestUsage.limited) {
             json(res, 429, {
