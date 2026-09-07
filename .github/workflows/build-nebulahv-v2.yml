@@ -21,6 +21,7 @@ jobs:
           git clone --filter=blob:none https://github.com/ktock/qemu-wasm.git qemu-wasm
           git -C qemu-wasm checkout 0ef7b4e2814b231705d8371dd7997f5b72e70baf
           git -C qemu-wasm apply "$GITHUB_WORKSPACE/runtime/nebulahv-v2/qemu-nebulahv-display.patch"
+          sed -i 's#https://zlib.net/zlib-\$ZLIB_VERSION.tar.xz#https://zlib.net/fossils/zlib-\$ZLIB_VERSION.tar.xz#' qemu-wasm/Dockerfile
       - name: Build toolchain image
         working-directory: qemu-wasm
         run: docker build -t nebulahv-qemu-builder - < Dockerfile
