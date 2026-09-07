@@ -3042,12 +3042,6 @@ const ensureHyperVStartAccess = async (req) => {
       touchHyperVSessionLease(req);
       return;
     }
-    if (hyperVSessionLeaseIsActive()) {
-      throw hyperVAccessError(
-        "Hyper-V is recovering another private visitor's session. Try again in under a minute.",
-        409,
-      );
-    }
     clearHyperVSessionLease();
     return;
   }
@@ -3055,13 +3049,8 @@ const ensureHyperVStartAccess = async (req) => {
     touchHyperVSessionLease(req);
     return;
   }
-  if (hyperVSessionLeaseIsActive()) {
-    throw hyperVAccessError(
-      "Hyper-V is currently serving another private visitor. Their screen and controls are not shared. Try again after that session ends.",
-      409,
-    );
-  }
-
+  // A new verified launch preempts the single public Hyper-V slot. Stop the old
+  // VM first so its display credentials cannot carry into the replacement.
   await runHyperVAction("Stop", {}, 120000);
   hyperVRemoteSessionId = "";
   hyperVRemoteSessionStartedAt = "";
