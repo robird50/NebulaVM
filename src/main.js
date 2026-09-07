@@ -270,7 +270,7 @@ app.innerHTML = `
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
       <button class="mobile-bypass-link" id="mobileBypassButton" type="button">Bypass (devs only)</button>
     </section>
-    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
+    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#faq" data-faq-link>FAQ</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
   </main>
 
   <div class="mobile-bypass-overlay popup-motion-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
@@ -901,7 +901,7 @@ app.innerHTML = `
       </section>
     </section>
     <div class="logo-fidget-anchor" id="logoFidgetZone" aria-hidden="true"></div>
-    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
+    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#faq" data-faq-link>FAQ</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
   </main>
 
   <div class="display-choice-overlay popup-motion-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>
@@ -967,29 +967,6 @@ app.innerHTML = `
       <p class="nintendo-help-warning">Avoid sites offering free Mario, Pokemon, Zelda, or other commercial ROMs. Those are usually unauthorized copies.</p>
       <div class="nintendo-help-actions">
         <button class="primary" id="nintendoHelpOkButton" type="button">OK</button>
-      </div>
-    </section>
-  </div>
-
-  <div class="display-choice-overlay popup-motion-overlay" id="nebulaConflictDialog" role="dialog" aria-modal="true" aria-labelledby="nebulaConflictTitle" hidden>
-    <section class="display-choice-panel nebula-conflict-panel popup-motion-panel" id="nebulaConflictPanel" tabindex="-1">
-      <h2 id="nebulaConflictTitle">The Nebula Conflict</h2>
-      <div class="nebula-conflict-copy">
-        <p>
-          NebulaVM and RoBird Studios are <strong>not affiliated, associated, endorsed by, or connected with</strong> the "Nebula" astrology and psychic services app in any way.
-        </p>
-        <p>
-          This notice is provided to prevent confusion due to the similarity in names. Any reports or controversies involving the unrelated Nebula app have <strong>no connection whatsoever</strong> to NebulaVM or RoBird Studios.
-        </p>
-        <p>
-          At NebulaVM, we believe software should be transparent and accessible. <strong>NebulaVM is completely free to use</strong>—there are no subscriptions, hidden fees, paywalls, or surprise charges.
-        </p>
-        <p>
-          RoBird Studios has zero tolerance for deceptive or misleading business practices. We would <strong>never</strong> create, promote, endorse, or participate in scams, unauthorized charges, subscription traps, or any other dishonest practices. Our goal is to earn users' trust by being open, honest, and transparent about how NebulaVM works.
-        </p>
-      </div>
-      <div class="nebula-conflict-actions">
-        <button class="primary" id="nebulaConflictOkButton" type="button">OK</button>
       </div>
     </section>
   </div>
@@ -1298,10 +1275,6 @@ const els = {
   emustarInfoLink: document.querySelector("#emustarInfoLink"),
   emustarInfoDialog: document.querySelector("#emustarInfoDialog"),
   emustarInfoOkButton: document.querySelector("#emustarInfoOkButton"),
-  nebulaConflictLinks: [...document.querySelectorAll("[data-nebula-conflict-link]")],
-  nebulaConflictDialog: document.querySelector("#nebulaConflictDialog"),
-  nebulaConflictPanel: document.querySelector("#nebulaConflictPanel"),
-  nebulaConflictOkButton: document.querySelector("#nebulaConflictOkButton"),
   faqLinks: [...document.querySelectorAll("[data-faq-link]")],
   faqDialog: document.querySelector("#faqDialog"),
   faqPanel: document.querySelector("#faqPanel"),
@@ -7102,24 +7075,6 @@ els.nintendoHelpDialog.addEventListener("click", (event) => {
     closeNintendoHelpDialog();
   }
 });
-let nebulaConflictTrigger = null;
-const closeNebulaConflictDialog = () => {
-  closePopupTo(els.nebulaConflictDialog, nebulaConflictTrigger);
-};
-els.nebulaConflictLinks.forEach((link) => {
-  link.addEventListener("click", (event) => {
-    event.preventDefault();
-    nebulaConflictTrigger = link;
-    els.nebulaConflictPanel.scrollTop = 0;
-    openPopupFrom(els.nebulaConflictDialog, link, els.nebulaConflictPanel);
-  });
-});
-els.nebulaConflictOkButton.addEventListener("click", closeNebulaConflictDialog);
-els.nebulaConflictDialog.addEventListener("click", (event) => {
-  if (event.target === els.nebulaConflictDialog) {
-    closeNebulaConflictDialog();
-  }
-});
 let faqTrigger = null;
 const closeFaqDialog = () => {
   closePopupTo(els.faqDialog, faqTrigger);
@@ -7491,9 +7446,6 @@ document.addEventListener("keydown", (event) => {
     }
     if (!els.emustarInfoDialog.hidden) {
       closePopupTo(els.emustarInfoDialog, els.emustarInfoLink);
-    }
-    if (!els.nebulaConflictDialog.hidden) {
-      closeNebulaConflictDialog();
     }
     if (!els.faqDialog.hidden) {
       closeFaqDialog();
