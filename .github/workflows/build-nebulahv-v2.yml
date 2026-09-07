@@ -30,9 +30,11 @@ jobs:
           git clone --depth 1 https://gitlab.com/qemu-project/berkeley-softfloat-3.git qemu-wasm/subprojects/berkeley-softfloat-3
           git -C qemu-wasm/subprojects/berkeley-softfloat-3 fetch --depth 1 origin b64af41c3276f97f0e181920400ee056b9c88037
           git -C qemu-wasm/subprojects/berkeley-softfloat-3 checkout FETCH_HEAD
+          cp -a qemu-wasm/subprojects/packagefiles/berkeley-softfloat-3/. qemu-wasm/subprojects/berkeley-softfloat-3/
           git clone --depth 1 https://gitlab.com/qemu-project/berkeley-testfloat-3.git qemu-wasm/subprojects/berkeley-testfloat-3
           git -C qemu-wasm/subprojects/berkeley-testfloat-3 fetch --depth 1 origin e7af9751d9f9fd3b47911f51a5cfd08af256a9ab
           git -C qemu-wasm/subprojects/berkeley-testfloat-3 checkout FETCH_HEAD
+          cp -a qemu-wasm/subprojects/packagefiles/berkeley-testfloat-3/. qemu-wasm/subprojects/berkeley-testfloat-3/
           sed -i 's#https://zlib.net/zlib-\$ZLIB_VERSION.tar.xz#https://github.com/madler/zlib/releases/download/v\$ZLIB_VERSION/zlib-\$ZLIB_VERSION.tar.xz#' qemu-wasm/Dockerfile
       - name: Build toolchain image
         working-directory: qemu-wasm
