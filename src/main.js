@@ -270,7 +270,7 @@ app.innerHTML = `
       <p>Please visit this page from a computer to launch a virtual machine. Thank you for your patience!</p>
       <button class="mobile-bypass-link" id="mobileBypassButton" type="button">Bypass (devs only)</button>
     </section>
-    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#other-commits" data-commit-history-link>Other commits</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
+    <small class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></small>
   </main>
 
   <div class="mobile-bypass-overlay popup-motion-overlay" id="mobileBypassDialog" role="dialog" aria-modal="true" aria-labelledby="mobileBypassText" hidden>
@@ -901,7 +901,7 @@ app.innerHTML = `
       </section>
     </section>
     <div class="logo-fidget-anchor" id="logoFidgetZone" aria-hidden="true"></div>
-    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#other-commits" data-commit-history-link>Other commits</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
+    <footer class="commit-id">Commit ${COMMIT_ID} <span>RoBird Studios 2026</span> <a href="https://github.com/robird50/NebulaVM">Source Code</a> <a href="#faq" data-faq-link>FAQ</a> <a href="#nebula-conflict" data-nebula-conflict-link>The Nebula Conflict</a> <a class="mobile-apk-link" href="/downloads/NebulaVM.apk" download>APK download</a> <a class="tiktok-footer-link" href="https://www.tiktok.com/@nebulavm" aria-label="NebulaVM on TikTok" title="NebulaVM on TikTok"><img src="/assets/tiktok-icon.png" alt="" /></a> <a class="report-problem-link" href="#report-problem" data-report-problem-link>Report a problem</a></footer>
   </main>
 
   <div class="display-choice-overlay popup-motion-overlay" id="emustarInfoDialog" role="dialog" aria-modal="true" aria-labelledby="emustarInfoTitle" hidden>
@@ -973,7 +973,6 @@ app.innerHTML = `
 
   <div class="display-choice-overlay popup-motion-overlay" id="nebulaConflictDialog" role="dialog" aria-modal="true" aria-labelledby="nebulaConflictTitle" hidden>
     <section class="display-choice-panel nebula-conflict-panel popup-motion-panel" id="nebulaConflictPanel" tabindex="-1">
-      <img class="nebula-conflict-art" src="/assets/nebula-conflict.png" alt="NebulaVM is not connected with the unrelated Nebula astrology app" />
       <h2 id="nebulaConflictTitle">The Nebula Conflict</h2>
       <div class="nebula-conflict-copy">
         <p>
@@ -4067,6 +4066,25 @@ const sendVirtualKeyboardKey = async (key, { text = false } = {}) => {
   log("Virtual keyboard is waiting for the Hyper-V browser display to connect.");
 };
 
+const createNativeDisplayStatus = (message, { loading = true } = {}) => {
+  const status = document.createElement("div");
+  status.className = "native-display-status";
+  if (!loading) {
+    status.textContent = message;
+    return status;
+  }
+
+  status.classList.add("is-loading");
+  const throbber = document.createElement("img");
+  throbber.className = "native-starting-throbber";
+  throbber.src = "/assets/nebula-starting.gif";
+  throbber.alt = "";
+  const text = document.createElement("span");
+  text.textContent = message;
+  status.append(throbber, text);
+  return status;
+};
+
 const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   if (!vncPath) return null;
 
@@ -4077,9 +4095,7 @@ const connectNativeDisplay = (base, vncPath, runtimeName, password = "") => {
   }
   state.lastGuestResize = "";
   els.nativeDisplay.hidden = false;
-  const status = document.createElement("span");
-  status.className = "native-display-status";
-  status.textContent = `Connecting to ${runtimeName} display...`;
+  const status = createNativeDisplayStatus(`Connecting to ${runtimeName} display...`);
   els.nativeDisplay.replaceChildren(status);
 
   const rfb = new RFB(els.nativeDisplay, nativeWebSocketUrl(base, vncPath));
@@ -4247,9 +4263,7 @@ const startHyperVSetupConsole = (base) => {
   overlay.className = "hyperv-console-overlay";
   overlay.textContent = "Hyper-V setup console";
 
-  const status = document.createElement("span");
-  status.className = "native-display-status";
-  status.textContent = "Opening Hyper-V setup in this browser viewport...";
+  const status = createNativeDisplayStatus("Opening Hyper-V setup in this browser viewport...");
 
   shell.append(image, overlay, status);
   els.nativeDisplay.replaceChildren(shell);
@@ -5035,7 +5049,7 @@ const monitorNativeVm = () => {
           await adoptRunningHyperVViewport(recovery, base);
           setAutopilotStep("display", "completed");
           state.hyperVAutopilotRecoveryInProgress = false;
-          showNativeDisplayStatus("NebulaVM Autopilot restored the Hyper-V display.");
+          showNativeDisplayStatus("NebulaVM Autopilot restored the Hyper-V display.", { loading: false });
           finishAutopilotActivity(true, "Recovery finished. Hyper-V and its browser display are responding again.");
           return;
         } catch (error) {
@@ -5071,7 +5085,7 @@ const monitorNativeVm = () => {
         : nativeExitSummary(status.lastExit);
       const runtimeName = state.nativeRuntimeName || nativeRuntimeBrand();
       const stopLogKey = `${runtimeName}:${summary}`;
-      showNativeDisplayStatus(`${runtimeName} stopped. ${summary}`);
+      showNativeDisplayStatus(`${runtimeName} stopped. ${summary}`, { loading: false });
       setPowerState(`${runtimeName} stopped`, "off");
       if (state.lastNativeStopLogKey !== stopLogKey) {
         log(`${runtimeName} stopped: ${summary}`);
@@ -5234,7 +5248,7 @@ const requestNewHyperVDisk = async () => {
     updateUptime();
     setHyperVRemoteSessionId("");
     setPowerState("Fresh disk ready", "off");
-    showNativeDisplayStatus("Fresh Hyper-V disk ready. Launch Hyper-V to boot it.");
+    showNativeDisplayStatus("Fresh Hyper-V disk ready. Launch Hyper-V to boot it.", { loading: false });
     els.screenPlaceholder.hidden = false;
     els.nativeDisplay.replaceChildren();
     els.nativeDisplay.hidden = true;
@@ -5441,12 +5455,10 @@ const bootQemuX64 = async () => {
   await state.emulator.start();
 };
 
-const showNativeDisplayStatus = (message) => {
+const showNativeDisplayStatus = (message, { loading = true } = {}) => {
   stopHyperVSetupConsole();
   els.nativeDisplay.hidden = false;
-  const status = document.createElement("span");
-  status.className = "native-display-status";
-  status.textContent = message;
+  const status = createNativeDisplayStatus(message, { loading });
   els.nativeDisplay.replaceChildren(status);
 };
 
@@ -5489,7 +5501,7 @@ const bootNativeQemu = async (displayMode = "viewport", captchaToken) => {
     } catch {
       // The bridge mismatch message below is more useful than a stop failure here.
     }
-    showNativeDisplayStatus("External mode needs the updated local bridge.");
+    showNativeDisplayStatus("External mode needs the updated local bridge.", { loading: false });
     throw new Error(
       `${runtimeName} external display needs the updated local bridge. Restart npm.cmd run dev -- --port 5174 and try again.`,
     );
@@ -5645,7 +5657,7 @@ const bootEmustarHyperV = async (displayMode = "viewport", captchaToken) => {
   }
 
   if (displayMode === "external") {
-    showNativeDisplayStatus("Hyper-V is running in the host console.");
+    showNativeDisplayStatus("Hyper-V is running in the host console.", { loading: false });
     log("The Hyper-V setup console opened on the host computer.");
   } else if (!result.vncReady) {
     startHyperVSetupConsole(base);

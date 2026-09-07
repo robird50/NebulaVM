@@ -3785,10 +3785,42 @@ body.screen-app-fullscreen .screen-shell {
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: center;
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
   padding: 20px;
   color: #cbd6e3;
   font-weight: 900;
+  text-align: center;
+}
+
+.native-starting-throbber {
+  display: block;
+  width: clamp(92px, 18vw, 148px);
+  height: auto;
+  border-radius: 8px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.native-display-status.is-loading > span {
+  display: block;
+  max-width: 34rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.hyperv-console-bridge .native-display-status.is-loading {
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
+  padding: 20px;
+  border: 0;
+  border-radius: 0;
+  background: #02060a;
+  font-size: 0.9rem;
   text-align: center;
 }
 
