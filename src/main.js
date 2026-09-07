@@ -1040,10 +1040,22 @@ app.innerHTML = `
           <details><summary>What does "Host Offline" mean?</summary><p>The website cannot currently reach NebulaVM's Windows computer that provides native emulators. Visitors do not own or configure that host. Wait a moment and retry; if the message persists, report it to NebulaVM support.</p></details>
           <details><summary>Why does Hyper-V say another visitor is using it?</summary><p>The public host intentionally allows one private Hyper-V owner at a time. NebulaVM will not attach you to someone else's display. The short ownership lease is released when that session ends or stops responding.</p></details>
           <details><summary>Why did my Remote VM link expire?</summary><p>Remote links belong to one live Hyper-V session. Ending the session, requesting a new disk, replacing the VM, or starting a new session invalidates the previous link. Copy the newly generated link after Hyper-V starts.</p></details>
-          <details><summary>What does NebulaVM Autopilot repair?</summary><p>Autopilot is a scripted host watchdog, not a general-purpose AI. It can inspect known Hyper-V states, repair certain disk or permission problems, restart a failed display path, and retry approved recovery steps. It cannot repair missing hardware, exhausted storage, unsupported images, or every Windows failure.</p></details>
-        </section>
+            </section>
 
-        <section class="faq-section">
+            <section class="faq-section">
+              <h3>Autopilot</h3>
+              <details><summary>What is NebulaVM Autopilot?</summary><p>Autopilot is NebulaVM's host recovery system. It watches for known Hyper-V and browser-display failures, explains what it detects, and attempts a limited set of approved repairs automatically.</p></details>
+              <details><summary>Is Autopilot an AI language model?</summary><p>No. Autopilot is a deterministic watchdog, not a general-purpose language model. Its English status messages come from the real recovery state and the action currently being performed.</p></details>
+              <details><summary>What can Autopilot repair?</summary><p>Autopilot can diagnose known Hyper-V states, clear certain stale session conditions, reconnect a failed browser display, check the host bridge, repair some disk or permission problems, and retry approved startup steps.</p></details>
+              <details><summary>What can Autopilot not repair?</summary><p>Autopilot cannot create missing hardware resources, recover from exhausted storage or insufficient host memory, repair a corrupt or unsupported image, resolve an outside network outage, or guarantee recovery from every Windows failure.</p></details>
+              <details><summary>Does Autopilot run commands on the host computer?</summary><p>Yes, but only predefined recovery actions provided by the NebulaVM host service. The Autopilot activity panel can show the current steps and command output. Visitors cannot supply arbitrary host commands.</p></details>
+              <details><summary>Why does Autopilot show an ETA?</summary><p>The ETA is an estimate based on the current recovery step and recent recovery times. It can change as Autopilot learns more about the failure, and it is not a guaranteed completion time.</p></details>
+              <details><summary>Why might Autopilot stop without fixing the VM?</summary><p>Autopilot stops after its bounded recovery attempts so it does not create an endless restart loop or risk damaging session data. When automatic recovery is not safe, it reports the failure for further diagnosis.</p></details>
+              <details><summary>Can Autopilot edit NebulaVM files or create Git commits?</summary><p>No. Runtime Autopilot does not edit the website source or create commits. Software changes still require a developer to update, test, and deploy NebulaVM.</p></details>
+              <details><summary>Does Autopilot bypass privacy checks or usage limits?</summary><p>No. Autopilot must preserve private-session ownership, verification requirements, usage limits, and visitor isolation. It will not attach someone to another visitor's VM.</p></details>
+            </section>
+
+            <section class="faq-section">
           <h3>Security</h3>
           <details><summary>Is NebulaVM safe?</summary><p>NebulaVM is open source and uses isolated virtualization runtimes, but no virtualization software is risk-free. Use trusted images, keep the host updated, and avoid running unknown software with unnecessary network access.</p></details>
           <details><summary>Can a virtual machine access my real computer?</summary><p>A guest is isolated from the host by its emulator or hypervisor, but enabled networking, shared folders, clipboard features, runtime vulnerabilities, or host configuration can reduce that isolation. Do not treat a VM as a perfect security boundary.</p></details>
