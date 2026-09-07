@@ -20,7 +20,6 @@ jobs:
         run: |
           git clone --filter=blob:none https://github.com/ktock/qemu-wasm.git qemu-wasm
           git -C qemu-wasm checkout 0ef7b4e2814b231705d8371dd7997f5b72e70baf
-          git -C qemu-wasm submodule update --init --recursive --depth 1
           git -C qemu-wasm apply "$GITHUB_WORKSPACE/runtime/nebulahv-v2/qemu-nebulahv-display.patch"
           sed -i 's#https://zlib.net/zlib-\$ZLIB_VERSION.tar.xz#https://github.com/madler/zlib/releases/download/v\$ZLIB_VERSION/zlib-\$ZLIB_VERSION.tar.xz#' qemu-wasm/Dockerfile
       - name: Build toolchain image
@@ -35,7 +34,7 @@ jobs:
           EXTRA_CFLAGS="-O3 -Wno-error=unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sWASMFS=1 -lopfs.js -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc --js-library=/build/node_modules/xterm-pty/emscripten-pty.js --js-library=/nebulahv/nebulahv-library.js -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js"
           docker exec nebulahv-qemu-builder emconfigure /qemu/configure \
             --static --target-list=x86_64-softmmu --cpu=wasm32 --cross-prefix= \
-            --without-default-features --enable-system --enable-pixman \
+            --without-default-features --enable-system --enable-pixman --disable-fdt \
             --with-coroutine=fiber --enable-virtfs \
             --extra-cflags="$EXTRA_CFLAGS" \
             --extra-cxxflags="$EXTRA_CFLAGS" \
