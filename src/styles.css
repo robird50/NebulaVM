@@ -4097,6 +4097,47 @@ body.screen-app-fullscreen .screen-shell {
   color: #a7ed43;
 }
 
+.mobile-public #storedImagesControl,
+.mobile-public .controls > .panel-header,
+.mobile-public .controls > .drop-zone,
+.mobile-public .controls > #demoButton,
+.mobile-public .controls > .emulator-field,
+.mobile-public .controls > .field-grid,
+.mobile-public .controls > .advanced-options,
+.mobile-public .controls > .windows-credentials-panel,
+.mobile-public .controls > .native-panel,
+.mobile-public #bootButton,
+.mobile-public #pauseButton,
+.mobile-public #newDiskButton {
+  display: none !important;
+}
+
+.mobile-public .windows-template-button {
+  width: 100%;
+  min-height: 48px;
+  justify-content: center;
+  border-color: #11100a;
+  background: #ffe45e;
+  color: #11100a;
+  font-size: 0.92rem;
+}
+
+.mobile-public .controls .main-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.mobile-public .workspace.is-emustar-mode {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mobile-public .workspace.is-emustar-mode .controls,
+.mobile-public .workspace.is-emustar-mode .console-area {
+  width: 100%;
+  min-width: 0;
+}
+
 .android-spec-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

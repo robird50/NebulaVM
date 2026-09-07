@@ -1017,7 +1017,7 @@ app.innerHTML = `
           <h3>Compatibility</h3>
           <details><summary>Does NebulaVM work on Chromebooks?</summary><p>Yes. A Chromebook can run browser-local modes or act as the screen and controls for a host-backed VM. School-managed Chromebooks may restrict fullscreen, downloads, keyboard capture, storage, or network connections.</p></details>
           <details><summary>Can I use NebulaVM on Windows, macOS, or Linux?</summary><p>The web interface works in supported browsers on all three. Browser-local modes use the visitor's own device resources. Host-backed features depend on the runtimes available and configured on the host.</p></details>
-          <details><summary>Does it work on mobile devices?</summary><p>Yes, but the public mobile experience is intentionally lighter. Phones and tablets can use Remote VM links and supported browser emulators. Direct Hyper-V setup, native QEMU, public Android, and AVD Management are restricted because they require more host resources and desktop-oriented controls.</p></details>
+          <details><summary>Does it work on mobile devices?</summary><p>Yes. Phones and tablets can launch the prepared Windows 11 Template through the public Hyper-V host. To keep the mobile experience focused and compatible with the host, other emulators and custom ISO launches are not available on mobile.</p></details>
           <details><summary>Does NebulaVM use my device's RAM?</summary><p>Browser-local emulators use the visitor's CPU and RAM. Hyper-V, Android, and native host modes use the Windows host's resources; streaming their screen still uses a smaller amount of memory and network bandwidth on the visitor's device.</p></details>
           <details><summary>Which browsers are supported?</summary><p>Current Chromium-based browsers such as Chrome and Edge provide the best-tested experience. Other modern browsers may work, but fullscreen, large-file handling, keyboard capture, and streamed input can behave differently.</p></details>
         </section>
@@ -1754,7 +1754,7 @@ const applyMobileDevMode = () => {
   document.documentElement.classList.add("mobile-dev-bypass");
   document.documentElement.classList.toggle("mobile-public", isPublicMobileClient);
   if (isMobileOrTabletDevice() && !state.running) {
-    els.emulatorMode.value = isPublicMobileClient ? "remote-vm" : "v86";
+    els.emulatorMode.value = isPublicMobileClient ? "emustar-hyperv" : "v86";
     els.androidCores.value = "2";
     els.androidMemory.value = "0";
     els.androidStorage.value = "4";
@@ -3133,10 +3133,6 @@ const selectStoredIso = async (item, { silent = false } = {}) => {
 };
 
 const selectWindows11Template = async ({ boot = false, allowRecovery = true } = {}) => {
-  if (isMobileOrTabletDevice()) {
-    log("Windows 11 Template is available on desktop and laptop browsers only.");
-    return;
-  }
   if (state.emulator) {
     log("End the current session before launching the Windows 11 Template.");
     return;
@@ -4539,7 +4535,7 @@ const isRemoteMode = () => els.emulatorMode.value === "remote-vm";
 const isAndroidMode = () => els.emulatorMode.value === "android";
 const isNintendoMode = () => els.emulatorMode.value === "nintendo";
 const isPublicMobileModeAllowed = (value = els.emulatorMode.value) =>
-  value === "remote-vm";
+  value === "emustar-hyperv";
 const isNativeQemuMode = () => isStandaloneQemuMode();
 const isQemuMode = () => isBrowserQemuMode() || isNativeQemuMode();
 const isExternalMode = () => isQemuMode() || isHyperVMode() || isRemoteMode();
@@ -4789,7 +4785,10 @@ const updateButtons = (busy = false) => {
   els.nativeResetFirmwareButton.disabled =
     busy || !isNativeMode() || Boolean(state.emulator) || nativeUnavailable;
   els.nativeConsoleButton.disabled = busy || !isHyperVMode() || nativeUnavailable;
-  els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || !emustarMode;
+  els.windowsTemplateButton.hidden = !emustarMode;
+  els.windowsTemplateButton.textContent = isPublicMobileClient
+    ? "Start Windows 11 template"
+    : "Windows 11 Template \u{1F601}";
   els.windowsTemplateButton.disabled =
     busy || Boolean(state.emulator) || state.hostStagedIsoUploading || state.windowsTemplateLoading || state.hyperVUsageLimited;
   els.windowsTemplateButton.classList.toggle("is-active", state.windowsTemplateSelected);
@@ -6408,9 +6407,9 @@ const bootAndroid = async (captchaToken) => {
 
 const bootEmulator = async () => {
   if (isPublicMobileClient && !isPublicMobileModeAllowed()) {
-    els.emulatorMode.value = "remote-vm";
+    els.emulatorMode.value = "emustar-hyperv";
     updateBackendUi();
-    log("Public mobile mode supports Remote VM only. Android is disabled because it uses host RAM.");
+    log("Mobile access runs only the prepared Windows 11 Template on Hyper-V.");
     return;
   }
   if (!isAndroidMode() && !isNintendoMode() && !isNativeMode() && !isRemoteMode() && !state.isoFile) return;
@@ -6809,7 +6808,10 @@ const updateBackendUi = () => {
   els.experimentalWarningPill.hidden = !emustarMode && !androidMode && !remoteMode;
   els.emustarInfoLink.hidden = !emustarMode;
   els.storedImagesControl.hidden = androidMode || nintendoMode;
-  els.windowsTemplateButton.hidden = isMobileOrTabletDevice() || !emustarMode;
+  els.windowsTemplateButton.hidden = !emustarMode;
+  els.windowsTemplateButton.textContent = isPublicMobileClient
+    ? "Start Windows 11 template"
+    : "Windows 11 Template \u{1F601}";
   els.dropZone.hidden = androidMode;
   els.nintendoHelpLink.hidden = !nintendoMode || androidMode;
   els.mediaWarning.hidden = androidMode;
