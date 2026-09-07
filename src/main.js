@@ -5414,8 +5414,10 @@ const bootV86 = () => {
 };
 
 const bootQemuX64 = async () => {
-  els.screenContainer.querySelector(".vga-text").hidden = true;
-  els.screenContainer.querySelector(".vga-canvas").hidden = true;
+  const vgaText = els.screenContainer.querySelector(".vga-text");
+  const vgaCanvas = els.screenContainer.querySelector(".vga-canvas");
+  vgaText.hidden = true;
+  vgaCanvas.hidden = true;
   els.qemuTerminal.hidden = false;
 
   state.emulator = new QemuX64Emulator({
@@ -5424,6 +5426,7 @@ const bootQemuX64 = async () => {
     memorySize: Number(els.memorySize.value),
     cpuModel: "qemu64",
     terminal: els.qemuTerminal,
+    canvas: vgaCanvas,
     log,
     onStarted: () => {
       state.running = true;
@@ -5435,6 +5438,11 @@ const bootQemuX64 = async () => {
       state.running = false;
       setPowerState("Powered off", "off");
       updateButtons();
+    },
+    onDisplayMode: (mode) => {
+      const graphics = mode === "graphics";
+      vgaCanvas.hidden = !graphics;
+      els.qemuTerminal.hidden = graphics;
     },
   });
 
@@ -6818,7 +6826,11 @@ const updateBackendUi = () => {
   els.androidViewSwitch.hidden = !androidMode || isPublicMobileClient;
   els.hostMemoryMetric.hidden = !androidMode;
   els.dropTitle.textContent = nintendoMode ? "Drop ROM or disc image" : "Drop ISO or disk image";
-  els.isoInput.accept = nintendoMode ? nintendoAcceptString() : ".iso,.img,.bin,.raw";
+  els.isoInput.accept = nintendoMode
+    ? nintendoAcceptString()
+    : isBrowserQemuMode()
+      ? ".iso,.img,.bin,.raw,.vhdx,.qcow,.qcow2"
+      : ".iso,.img,.bin,.raw";
   if (!androidMode && state.androidViewportMode !== "device") {
     setAndroidViewportMode("device", { force: true });
   }

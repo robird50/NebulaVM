@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "runtimeVersion": "1.0.0",
+  "profile": "serial-x86_64",
+  "heapBytes": 2411724800,
+  "features": {
+    "graphicalDisplay": false,
+    "secureBoot": false,
+    "tpm2": false,
+    "directOpfs": false
+  }
+}

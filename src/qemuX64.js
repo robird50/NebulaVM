@@ -4,8 +4,16 @@ import {
   NEBULAHV_MAX_GUEST_MEMORY_BYTES,
   nebulahvMediaBudget,
 } from "./nebulahvCapabilities.js";
+import {
+  buildNebulaHVV2Arguments,
+  describeNebulaHVV2Status,
+  loadNebulaHVRuntimeManifest,
+  missingNebulaHVV2Features,
+} from "./nebulahvV2.js";
+import { stageNebulaHVDiskInOpfs } from "./nebulahvOpfs.js";
 
 const REQUIRED_ASSETS = [
+  "/qemu/nebulahv-runtime.json",
   "/qemu/out.js",
   "/qemu/qemu-system-x86_64.wasm",
   "/qemu/qemu-system-x86_64.worker.js",
@@ -68,6 +76,13 @@ export const maxNebulaHVMediaBytes = (memorySize, canMountBrowserFiles = false) 
 
 const safeMediaName = (name) => name.replace(/[^a-zA-Z0-9._-]/g, "_") || "boot-media.iso";
 
+const qemuMediaFormat = (file, mediaType) => {
+  if (mediaType !== "hda") return "raw";
+  if (/\.vhdx$/i.test(file.name)) return "vhdx";
+  if (/\.qcow2?$/i.test(file.name)) return "qcow2";
+  return "raw";
+};
+
 const qemuBiosArgs = async () => {
   if (await assetExists("/qemu/load-rom.js")) {
     return ["-L", "/pack-rom/"];
@@ -106,6 +121,7 @@ export class NebulaHVEmulator {
         `NebulaHV runtime is incomplete. Missing: ${missing.join(", ")}.`,
       );
     }
+    const runtimeManifest = await loadNebulaHVRuntimeManifest();
 
     const {
       isoFile,
@@ -113,19 +129,25 @@ export class NebulaHVEmulator {
       memorySize,
       cpuModel = "qemu64",
       terminal,
+      canvas,
       log,
       onStarted,
       onStopped,
+      onDisplayMode,
     } = this.options;
 
     terminal.textContent = "";
     terminal.hidden = false;
-    if (memorySize > NEBULAHV_MAX_GUEST_MEMORY_BYTES) {
+    const v2Ready = missingNebulaHVV2Features(runtimeManifest).length === 0;
+    if (!v2Ready && memorySize > NEBULAHV_MAX_GUEST_MEMORY_BYTES) {
       throw new Error("NebulaHV V1 supports up to 2048 MB of guest RAM with the bundled runtime.");
     }
 
-    this.writeLine("NebulaHV V1 preparing local boot media...");
+    this.writeLine(`NebulaHV ${v2Ready ? "V2" : "V1"} preparing local boot media...`);
     this.writeLine("Privacy: the selected file stays on this device.");
+    this.writeLine(
+      `Runtime ${runtimeManifest.runtimeVersion} (${runtimeManifest.profile}). ${describeNebulaHVV2Status(runtimeManifest)}`,
+    );
     this.writeLine(
       `Runtime: x86-64 TCG/Wasm, ${capabilities.optional.opfs ? "OPFS available" : "OPFS unavailable"}, ${capabilities.optional.webGpu ? "WebGPU available" : "WebGPU unavailable"}.`,
     );
@@ -133,18 +155,51 @@ export class NebulaHVEmulator {
     const mediaLimit = maxNebulaHVMediaBytes(memorySize, canMountBrowserFiles);
     const shouldMountBrowserFile = canMountBrowserFiles;
 
-    if (isoFile.size > mediaLimit && !canMountBrowserFiles) {
+    if (!v2Ready && isoFile.size > mediaLimit && !canMountBrowserFiles) {
       throw new Error(
         `${isoFile.name} is ${formatMegabytes(isoFile.size)}, but only ${formatMegabytes(mediaLimit)} remains in the NebulaHV V1 Wasm heap after reserving ${formatMegabytes(memorySize)} for guest RAM. Choose less RAM or smaller boot media.`,
       );
     }
 
-    const imageName = mediaType === "hda" ? "nebula-disk.img" : "nebula.iso";
-    const imagePath = shouldMountBrowserFile ? `/media/${safeMediaName(isoFile.name)}` : `/${imageName}`;
-    const imageBytes = shouldMountBrowserFile ? null : new Uint8Array(await isoFile.arrayBuffer());
-    const biosArgs = await qemuBiosArgs();
-    const moduleConfig = {
-      arguments: [
+    let imagePath;
+    let imageBytes = null;
+    let qemuArguments;
+    if (v2Ready) {
+      const missingV2Assets = (
+        await Promise.all(runtimeManifest.artifacts.map(async (path) => [path, await assetExists(path)]))
+      )
+        .filter(([, exists]) => !exists)
+        .map(([path]) => path);
+      if (missingV2Assets.length) {
+        throw new Error(`NebulaHV V2 artifacts are missing: ${missingV2Assets.join(", ")}.`);
+      }
+      this.writeLine("Staging the disk in private browser storage...");
+      let lastProgressBucket = -1;
+      const staged = await stageNebulaHVDiskInOpfs(isoFile, {
+        onProgress: ({ written, total }) => {
+          const percent = total ? Math.floor((written / total) * 100) : 0;
+          const bucket = Math.min(100, Math.floor(percent / 10) * 10);
+          if (bucket >= 10 && bucket !== lastProgressBucket) {
+            lastProgressBucket = bucket;
+            log(`NebulaHV OPFS staging: ${bucket}%.`);
+          }
+        },
+      });
+      imagePath = staged.qemuPath;
+      qemuArguments = buildNebulaHVV2Arguments({
+        manifest: runtimeManifest,
+        memoryMb: Math.round(memorySize / 1024 / 1024),
+        mediaPath: imagePath,
+        mediaFormat: qemuMediaFormat(isoFile, mediaType),
+        mediaType: mediaType === "hda" ? "hda" : "cdrom",
+      });
+      onDisplayMode?.("graphics");
+    } else {
+      const imageName = mediaType === "hda" ? "nebula-disk.img" : "nebula.iso";
+      imagePath = shouldMountBrowserFile ? `/media/${safeMediaName(isoFile.name)}` : `/${imageName}`;
+      imageBytes = shouldMountBrowserFile ? null : new Uint8Array(await isoFile.arrayBuffer());
+      const biosArgs = await qemuBiosArgs();
+      qemuArguments = [
         "-nographic",
         "-machine",
         "q35",
@@ -160,13 +215,21 @@ export class NebulaHVEmulator {
         "none",
         ...biosArgs,
         ...qemuDriveArgs(mediaType, imagePath),
-      ],
+      ];
+      onDisplayMode?.("terminal");
+    }
+    const moduleConfig = {
+      arguments: qemuArguments,
+      canvas,
       locateFile: (path) => `/qemu/${path}`,
       mainScriptUrlOrBlob: "/qemu/out.js",
       print: (line) => this.writeLine(line),
       printErr: (line) => this.writeLine(line),
       preRun: [
         () => {
+          if (v2Ready) {
+            return;
+          }
           if (shouldMountBrowserFile) {
             const workerFs = moduleConfig.FS.filesystems.WORKERFS || moduleConfig.WORKERFS || globalThis.WORKERFS;
             if (!workerFs) {

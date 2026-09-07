@@ -8,6 +8,7 @@ NebulaVM expects:
 public/qemu/out.js
 public/qemu/qemu-system-x86_64.wasm
 public/qemu/qemu-system-x86_64.worker.js
+public/qemu/nebulahv-runtime.json
 ```
 
 Most QEMU Wasm builds also need:
