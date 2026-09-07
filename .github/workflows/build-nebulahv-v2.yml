@@ -31,10 +31,15 @@ jobs:
             -v "$GITHUB_WORKSPACE/qemu-wasm:/qemu:ro" \
             -v "$GITHUB_WORKSPACE/runtime/nebulahv-v2:/nebulahv:ro" \
             nebulahv-qemu-builder
+          docker exec nebulahv-qemu-builder git clone --depth 1 \
+            https://gitlab.com/qemu-project/dtc.git /build/dtc
+          docker exec nebulahv-qemu-builder git -C /build/dtc fetch --depth 1 origin \
+            b6910bec11614980a21e46fbccc35934b671bd81
+          docker exec nebulahv-qemu-builder git -C /build/dtc checkout FETCH_HEAD
           EXTRA_CFLAGS="-O3 -Wno-error=unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sWASMFS=1 -lopfs.js -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc --js-library=/build/node_modules/xterm-pty/emscripten-pty.js --js-library=/nebulahv/nebulahv-library.js -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js"
           docker exec nebulahv-qemu-builder emconfigure /qemu/configure \
             --static --target-list=x86_64-softmmu --cpu=wasm32 --cross-prefix= \
-            --without-default-features --enable-system --enable-pixman --disable-fdt \
+            --without-default-features --enable-system --enable-pixman \
             --with-coroutine=fiber --enable-virtfs \
             --extra-cflags="$EXTRA_CFLAGS" \
             --extra-cxxflags="$EXTRA_CFLAGS" \
