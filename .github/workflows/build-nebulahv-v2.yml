@@ -36,23 +36,36 @@ jobs:
           git -C qemu-wasm/subprojects/berkeley-testfloat-3 checkout FETCH_HEAD
           cp -a qemu-wasm/subprojects/packagefiles/berkeley-testfloat-3/. qemu-wasm/subprojects/berkeley-testfloat-3/
           sed -i 's#https://zlib.net/zlib-\$ZLIB_VERSION.tar.xz#https://github.com/madler/zlib/releases/download/v\$ZLIB_VERSION/zlib-\$ZLIB_VERSION.tar.xz#' qemu-wasm/Dockerfile
+      - name: Restore toolchain image
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/nebulahv-qemu-builder.tar
+          key: nebulahv-qemu-builder-ubuntu24-emscripten-3.1.50-v1
       - name: Build toolchain image
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
         working-directory: qemu-wasm
-        run: docker build -t nebulahv-qemu-builder - < Dockerfile
+        run: |
+          docker build -t nebulahv-qemu-builder - < Dockerfile
+          docker save nebulahv-qemu-builder -o /tmp/nebulahv-qemu-builder.tar
+      - name: Load toolchain image
+        if: steps.toolchain-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/nebulahv-qemu-builder.tar
       - name: Compile graphical x86-64 runtime
         run: |
           docker run --rm -d --name nebulahv-qemu-builder \
             -v "$GITHUB_WORKSPACE/qemu-wasm:/qemu:ro" \
             -v "$GITHUB_WORKSPACE/runtime/nebulahv-v2:/nebulahv:ro" \
             nebulahv-qemu-builder
-          EXTRA_CFLAGS="-O3 -Wno-error=unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE -sASYNCIFY=1 -pthread -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sWASMFS=1 -lopfs.js -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc --js-library=/build/node_modules/xterm-pty/emscripten-pty.js --js-library=/nebulahv/nebulahv-library.js -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js"
+          EXTRA_CFLAGS="-O3 -Wno-error=unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE -DHAVE_GETLOADAVG_FUNCTION=1 -pthread"
+          EXTRA_LDFLAGS="-pthread -sASYNCIFY=1 -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sWASMFS=1 -lopfs.js -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc --js-library=/build/node_modules/xterm-pty/emscripten-pty.js --js-library=/nebulahv/nebulahv-library.js -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js -sEXPORTED_FUNCTIONS=_main,_nebulahv_pointer_move,_nebulahv_pointer_button,_nebulahv_pointer_wheel,_nebulahv_key_number -sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,TTY,FS"
           docker exec nebulahv-qemu-builder emconfigure /qemu/configure \
             --static --target-list=x86_64-softmmu --cpu=wasm32 --cross-prefix= \
             --without-default-features --enable-system --enable-pixman \
             --with-coroutine=fiber --enable-virtfs \
             --extra-cflags="$EXTRA_CFLAGS" \
             --extra-cxxflags="$EXTRA_CFLAGS" \
-            --extra-ldflags="-sEXPORTED_FUNCTIONS=_main,_nebulahv_pointer_move,_nebulahv_pointer_button,_nebulahv_pointer_wheel,_nebulahv_key_number -sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,TTY,FS"
+            --extra-ldflags="$EXTRA_LDFLAGS"
           docker exec nebulahv-qemu-builder emmake make -j 2 qemu-system-x86_64
       - name: Collect and inspect runtime
         run: |
