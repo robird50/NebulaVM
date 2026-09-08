@@ -27,7 +27,7 @@ new file mode 100644
 index 0000000..e733efa
 --- /dev/null
 +++ b/ui/nebulahv.c
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,167 @@
 +#include "qemu/osdep.h"
 +#include "qemu/module.h"
 +#include "ui/console.h"
