@@ -195,3 +195,21 @@ index 0000000..e733efa
 +{
 +    qemu_input_event_send_key_number(NULL, number, down != 0);
 +}
+diff --git a/include/qemu/osdep.h b/include/qemu/osdep.h
+--- a/include/qemu/osdep.h
++++ b/include/qemu/osdep.h
+@@ -788,12 +788,12 @@ static inline int platform_does_not_support_system(const char *command)
+ /**
+  * If the load average was unobtainable, -1 is returned
+  */
+-#ifndef HAVE_GETLOADAVG_FUNCTION
++#if !defined(HAVE_GETLOADAVG_FUNCTION) && !defined(__EMSCRIPTEN__)
+ static inline int getloadavg(double loadavg[], int nelem)
+ {
+     return -1;
+ }
+-#endif /* !HAVE_GETLOADAVG_FUNCTION */
++#endif /* !HAVE_GETLOADAVG_FUNCTION && !__EMSCRIPTEN__ */
+ 
+ #ifdef __cplusplus
+ }
