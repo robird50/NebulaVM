@@ -111,6 +111,8 @@ export const buildNebulaHVV2Arguments = ({
     "VGA",
     "-display",
     "nebulahv",
+    "-nic",
+    "none",
     ...firmwareArguments,
     ...(normalized.features.tpm2 ? tpmArguments : []),
     ...mediaArguments,
