@@ -65,7 +65,7 @@ jobs:
             nebulahv-qemu-builder
           EXTRA_CFLAGS="-O3 -Wno-error=unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE -pthread"
           docker exec nebulahv-qemu-builder emcc $EXTRA_CFLAGS -c /nebulahv/nebulahv-fcntl.c -o /build/nebulahv-fcntl.o
-          EXTRA_LDFLAGS="/build/nebulahv-fcntl.o -Wl,--wrap=fcntl -pthread -sASYNCIFY=1 -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sWASMFS=1 -lopfs.js -sALLOW_TABLE_GROWTH -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc --js-library=/nebulahv/nebulahv-library.js -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js -sEXPORTED_FUNCTIONS=_main,_nebulahv_pointer_move,_nebulahv_pointer_button,_nebulahv_pointer_wheel,_nebulahv_key_number -sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,FS,callMain"
+          EXTRA_LDFLAGS="/build/nebulahv-fcntl.o -Wl,--wrap=fcntl -pthread -sASYNCIFY=1 -sPROXY_TO_PTHREAD=1 -sFORCE_FILESYSTEM -sWASMFS=1 -lopfs.js -sALLOW_TABLE_GROWTH -sEMULATE_FUNCTION_POINTER_CASTS=1 -sTOTAL_MEMORY=2300MB -sWASM_BIGINT -sMALLOC=mimalloc --js-library=/nebulahv/nebulahv-library.js -sEXPORT_ES6=1 -sASYNCIFY_IMPORTS=ffi_call_js -sEXPORTED_FUNCTIONS=_main,_nebulahv_pointer_move,_nebulahv_pointer_button,_nebulahv_pointer_wheel,_nebulahv_key_number -sEXPORTED_RUNTIME_METHODS=getTempRet0,setTempRet0,addFunction,removeFunction,FS,callMain"
           docker exec nebulahv-qemu-builder emconfigure /qemu/configure \
             --static --target-list=x86_64-softmmu --cpu=wasm32 --cross-prefix= \
             --without-default-features --enable-system --enable-pixman \
@@ -81,6 +81,7 @@ jobs:
           docker cp nebulahv-qemu-builder:/build/qemu-system-x86_64.wasm nebulahv-runtime/qemu-system-x86_64.wasm
           docker cp nebulahv-qemu-builder:/build/qemu-system-x86_64.worker.js nebulahv-runtime/qemu-system-x86_64.worker.js
           cp qemu-wasm/pc-bios/bios-256k.bin nebulahv-runtime/bios-256k.bin
+          cp qemu-wasm/pc-bios/kvmvapic.bin nebulahv-runtime/kvmvapic.bin
           cp qemu-wasm/pc-bios/vgabios-stdvga.bin nebulahv-runtime/vgabios-stdvga.bin
           grep -q "nebulahv" nebulahv-runtime/out.js
           test -s nebulahv-runtime/qemu-system-x86_64.wasm

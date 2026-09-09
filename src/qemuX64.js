@@ -398,7 +398,7 @@ export class NebulaHVEmulator {
       try {
         this.instance.FS.mkdir("/firmware");
       } catch {}
-      for (const firmwareName of ["bios-256k.bin", "vgabios-stdvga.bin"]) {
+      for (const firmwareName of ["bios-256k.bin", "kvmvapic.bin", "vgabios-stdvga.bin"]) {
         const response = await fetch(`${runtimeManifest.runtimeBase}${firmwareName}`);
         if (!response.ok) {
           throw new Error(`NebulaHV firmware failed to load: ${firmwareName}.`);

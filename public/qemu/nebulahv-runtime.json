@@ -16,6 +16,7 @@
     "/qemu-v2/qemu-system-x86_64.wasm",
     "/qemu-v2/qemu-system-x86_64.worker.js",
     "/qemu-v2/bios-256k.bin",
+    "/qemu-v2/kvmvapic.bin",
     "/qemu-v2/vgabios-stdvga.bin"
   ]
 }
