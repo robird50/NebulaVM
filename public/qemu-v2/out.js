@@ -535,7 +535,7 @@ function instantiate_wasm() {
   "helper": helper
  });
  Module.__wasm32_tb.inst_gc_registry.register(inst, "instance");
- const fidx = addFunction(inst.exports.start, "ii");
+ const fidx = addFunction(ctx => inst.exports.start(ctx), "ii");
  return fidx;
 }
 
@@ -4812,7 +4812,7 @@ var _asyncify_stop_rewind = () => (_asyncify_stop_rewind = wasmExports["asyncify
 
 var ___start_em_js = Module["___start_em_js"] = 7908940;
 
-var ___stop_em_js = Module["___stop_em_js"] = 7922616;
+var ___stop_em_js = Module["___stop_em_js"] = 7922630;
 
 function invoke_ii(index, a1) {
  var sp = stackSave();
