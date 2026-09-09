@@ -308,6 +308,7 @@ export class NebulaHVEmulator {
         mediaFormat: qemuMediaFormat(isoFile, mediaType),
         mediaType: mediaType === "hda" ? "hda" : "cdrom",
       });
+      qemuArguments.unshift("-L", "/firmware");
       onDisplayMode?.("graphics");
     } else {
       const imageName = mediaType === "hda" ? "nebula-disk.img" : "nebula.iso";
@@ -393,6 +394,16 @@ export class NebulaHVEmulator {
       this.instance = await imported.default(moduleConfig);
       if (typeof this.instance.callMain !== "function") {
         throw new Error("NebulaHV graphical runtime cannot start its VM worker.");
+      }
+      try {
+        this.instance.FS.mkdir("/firmware");
+      } catch {}
+      for (const firmwareName of ["bios-256k.bin", "vgabios-stdvga.bin"]) {
+        const response = await fetch(`${runtimeManifest.runtimeBase}${firmwareName}`);
+        if (!response.ok) {
+          throw new Error(`NebulaHV firmware failed to load: ${firmwareName}.`);
+        }
+        this.instance.FS.writeFile(`/firmware/${firmwareName}`, new Uint8Array(await response.arrayBuffer()));
       }
       setTimeout(() => {
         if (this.disposed) return;

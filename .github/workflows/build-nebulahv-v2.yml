@@ -80,6 +80,8 @@ jobs:
           docker cp nebulahv-qemu-builder:/build/qemu-system-x86_64 nebulahv-runtime/out.js
           docker cp nebulahv-qemu-builder:/build/qemu-system-x86_64.wasm nebulahv-runtime/qemu-system-x86_64.wasm
           docker cp nebulahv-qemu-builder:/build/qemu-system-x86_64.worker.js nebulahv-runtime/qemu-system-x86_64.worker.js
+          cp qemu-wasm/pc-bios/bios-256k.bin nebulahv-runtime/bios-256k.bin
+          cp qemu-wasm/pc-bios/vgabios-stdvga.bin nebulahv-runtime/vgabios-stdvga.bin
           grep -q "nebulahv" nebulahv-runtime/out.js
           test -s nebulahv-runtime/qemu-system-x86_64.wasm
           sha256sum nebulahv-runtime/* > nebulahv-runtime/SHA256SUMS
