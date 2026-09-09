@@ -6,10 +6,14 @@ import {
   maxNebulaHVMediaBytes,
   qemuWasmCanMountBrowserFiles,
 } from "./qemuX64.js";
+import { hasNebulaHVGraphicalRuntime, loadNebulaHVRuntimeManifest } from "./nebulahvV2.js";
 import "./styles.css";
 import { animateVmViewportIn, requestVmCaptcha, verifyBrowserVmCaptcha } from "./vmCaptcha.js";
 
 const app = document.querySelector("#app");
+const LOCAL_BOOT_TEST = import.meta.env.DEV &&
+  ["127.0.0.1", "localhost"].includes(window.location.hostname) &&
+  new URLSearchParams(window.location.search).get("localBootTest") === "1";
 const COMMIT_ID = typeof __NEBULAVM_COMMIT__ === "string" ? __NEBULAVM_COMMIT__ : "local";
 const HOST_TOKEN_STORAGE_KEY = "nebulavm.emustar.hostToken";
 const HOST_SESSION_STORAGE_KEY = "nebulavm.emustar.sessionId";
@@ -172,6 +176,7 @@ const state = {
   startedAt: null,
   statsTimer: null,
   browserQemuCanMountFiles: false,
+  browserQemuDirectOpfs: false,
   nativeQemuApiAvailable: null,
   nativeQemuReady: false,
   nativeQemuApiBase: null,
@@ -4699,6 +4704,7 @@ const syncNativeModeToIsoPath = () => {
 
 const isSelectedMediaTooLarge = () =>
   isBrowserQemuMode() &&
+  !state.browserQemuDirectOpfs &&
   !state.browserQemuCanMountFiles &&
   state.isoFile &&
   state.isoFile.size > maxNebulaHVMediaBytes(Number(els.memorySize.value));
@@ -6464,8 +6470,10 @@ const bootEmulator = async () => {
   updateButtons(true);
   let captchaToken;
   try {
-    captchaToken = await requestVmCaptcha();
-    if (!isNativeMode() && !isAndroidMode()) await verifyBrowserVmCaptcha(captchaToken);
+    if (!LOCAL_BOOT_TEST) {
+      captchaToken = await requestVmCaptcha();
+      if (!isNativeMode() && !isAndroidMode()) await verifyBrowserVmCaptcha(captchaToken);
+    }
   } catch (error) {
     log(error.name === "AbortError" ? "VM start cancelled." : `Boot blocked: ${error.message}`);
     state.bootInProgress = false;
@@ -6780,7 +6788,14 @@ const openHyperVConsole = async () => {
 
 const updateBrowserQemuCapabilities = async () => {
   if (!isBrowserQemuMode()) return;
-  state.browserQemuCanMountFiles = await qemuWasmCanMountBrowserFiles();
+  const [canMountFiles, runtimeManifest] = await Promise.all([
+    qemuWasmCanMountBrowserFiles(),
+    loadNebulaHVRuntimeManifest().catch(() => null),
+  ]);
+  state.browserQemuCanMountFiles = canMountFiles;
+  state.browserQemuDirectOpfs = runtimeManifest
+    ? hasNebulaHVGraphicalRuntime(runtimeManifest)
+    : false;
   updateMediaWarning();
   updateButtons();
 };
@@ -6892,7 +6907,7 @@ const updateBackendUi = () => {
       : emustarMode
         ? "Hyper-V Control Deck"
         : isBrowserQemuMode()
-          ? "NebulaHV V1"
+          ? state.browserQemuDirectOpfs ? "NebulaHV V2" : "NebulaHV V1"
         : "Awaiting boot media";
   }
   els.processorMode.value = nativeArm64Mode ? "arm64" : qemuMode || emustarMode ? "x64" : "x86";
@@ -6978,7 +6993,9 @@ const updateBackendUi = () => {
     : remoteMode
       ? "Remote VM mode shows a VM running on another computer or cloud server."
     : isBrowserQemuMode()
-      ? "NebulaHV V1 runs x86-64 locally with QEMU TCG/Wasm. Small boot images and serial-console guests are supported; Windows 11 graphics are not ready yet."
+      ? state.browserQemuDirectOpfs
+        ? "NebulaHV V2 runs x86-64 locally with QEMU TCG/Wasm, a graphical display, and private OPFS disks. Secure Boot and TPM 2.0 are still being validated."
+        : "NebulaHV V1 runs x86-64 locally with QEMU TCG/Wasm. Small boot images and serial-console guests are supported; Windows 11 graphics are not ready yet."
     : "Legacy x86, 32-bit Linux, DOS, hobby OS, and vintage Windows images work best.";
   if (androidMode && !state.emulator) {
     void fetchAndroidJson("status")

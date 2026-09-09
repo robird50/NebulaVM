@@ -21,6 +21,8 @@ export const normalizeNebulaHVRuntimeManifest = (value) => {
     schemaVersion: Number(manifest.schemaVersion) || 0,
     runtimeVersion: String(manifest.runtimeVersion || "unknown"),
     profile: String(manifest.profile || "unknown"),
+    entrypoint: String(manifest.entrypoint || "/qemu/out.js"),
+    runtimeBase: String(manifest.runtimeBase || "/qemu/"),
     heapBytes: Math.max(0, Number(manifest.heapBytes) || 0),
     features: Object.fromEntries(
       NEBULAHV_V2_FEATURES.map((name) => [name, features[name] === true]),
@@ -29,6 +31,11 @@ export const normalizeNebulaHVRuntimeManifest = (value) => {
     firmware: manifest.firmware && typeof manifest.firmware === "object" ? manifest.firmware : {},
     tpm: manifest.tpm && typeof manifest.tpm === "object" ? manifest.tpm : {},
   };
+};
+
+export const hasNebulaHVGraphicalRuntime = (manifest) => {
+  const normalized = normalizeNebulaHVRuntimeManifest(manifest);
+  return normalized.features.graphicalDisplay && normalized.features.directOpfs;
 };
 
 export const missingNebulaHVV2Features = (manifest) => {
@@ -59,7 +66,7 @@ export const buildNebulaHVV2Arguments = ({
   mediaType = "hda",
 }) => {
   const normalized = normalizeNebulaHVRuntimeManifest(manifest);
-  const missing = missingNebulaHVV2Features(normalized);
+  const missing = ["graphicalDisplay", "directOpfs"].filter((name) => !normalized.features[name]);
   if (missing.length) {
     throw new Error(`NebulaHV V2 runtime is incomplete: ${missing.join(", ")}.`);
   }
@@ -69,8 +76,11 @@ export const buildNebulaHVV2Arguments = ({
   const tpmArguments = Array.isArray(normalized.tpm.arguments)
     ? normalized.tpm.arguments.map(String)
     : [];
-  if (!code || !vars || !tpmArguments.length) {
-    throw new Error("NebulaHV V2 firmware or TPM configuration is missing.");
+  if (normalized.features.secureBoot && (!code || !vars)) {
+    throw new Error("NebulaHV V2 Secure Boot firmware is missing.");
+  }
+  if (normalized.features.tpm2 && !tpmArguments.length) {
+    throw new Error("NebulaHV V2 TPM configuration is missing.");
   }
   if (!normalized.artifacts.length) {
     throw new Error("NebulaHV V2 artifact inventory is missing.");
@@ -80,6 +90,13 @@ export const buildNebulaHVV2Arguments = ({
     mediaType === "cdrom"
       ? ["-cdrom", mediaPath, "-boot", "d"]
       : ["-drive", `if=virtio,format=${mediaFormat},file=${mediaPath}`, "-boot", "c"];
+
+  const firmwareArguments = normalized.features.secureBoot
+    ? [
+        "-drive", `if=pflash,format=raw,unit=0,readonly=on,file=${code}`,
+        "-drive", `if=pflash,format=raw,unit=1,file=${vars}`,
+      ]
+    : [];
 
   return [
     "-machine",
@@ -94,11 +111,8 @@ export const buildNebulaHVV2Arguments = ({
     "VGA",
     "-display",
     "nebulahv",
-    "-drive",
-    `if=pflash,format=raw,unit=0,readonly=on,file=${code}`,
-    "-drive",
-    `if=pflash,format=raw,unit=1,file=${vars}`,
-    ...tpmArguments,
+    ...firmwareArguments,
+    ...(normalized.features.tpm2 ? tpmArguments : []),
     ...mediaArguments,
   ];
 };

@@ -7,6 +7,7 @@ import {
 import {
   buildNebulaHVV2Arguments,
   describeNebulaHVV2Status,
+  hasNebulaHVGraphicalRuntime,
   loadNebulaHVRuntimeManifest,
   missingNebulaHVV2Features,
 } from "./nebulahvV2.js";
@@ -252,7 +253,7 @@ export class NebulaHVEmulator {
 
     terminal.textContent = "";
     terminal.hidden = false;
-    const v2Ready = missingNebulaHVV2Features(runtimeManifest).length === 0;
+    const v2Ready = hasNebulaHVGraphicalRuntime(runtimeManifest);
     if (!v2Ready && memorySize > NEBULAHV_MAX_GUEST_MEMORY_BYTES) {
       throw new Error("NebulaHV V1 supports up to 2048 MB of guest RAM with the bundled runtime.");
     }
@@ -335,8 +336,9 @@ export class NebulaHVEmulator {
     const moduleConfig = {
       arguments: qemuArguments,
       canvas,
-      locateFile: (path) => `/qemu/${path}`,
-      mainScriptUrlOrBlob: "/qemu/out.js",
+      noInitialRun: v2Ready,
+      locateFile: (path) => `${runtimeManifest.runtimeBase}${path}`,
+      mainScriptUrlOrBlob: runtimeManifest.entrypoint,
       print: (line) => this.writeLine(line),
       printErr: (line) => this.writeLine(line),
       preRun: [
@@ -380,17 +382,41 @@ export class NebulaHVEmulator {
 
     this.writeLine("Starting NebulaHV x86-64 locally...");
 
-    try {
-      const qemuEntrypoint = "/qemu/out.js";
-      const imported = await import(/* @vite-ignore */ qemuEntrypoint);
-      if (typeof imported.default === "function") {
-        this.instance = await imported.default(moduleConfig);
+    const qemuEntrypoint = runtimeManifest.entrypoint;
+    if (v2Ready) {
+      const response = await fetch(qemuEntrypoint, { cache: "no-store" });
+      if (!response.ok) throw new Error(`NebulaHV runtime failed to load (${response.status}).`);
+      const runtimeUrl = URL.createObjectURL(new Blob([await response.text()], { type: "text/javascript" }));
+      moduleConfig.mainScriptUrlOrBlob = runtimeUrl;
+      const imported = await import(/* @vite-ignore */ runtimeUrl);
+      if (typeof imported.default !== "function") {
+        throw new Error("NebulaHV graphical runtime has no module entrypoint.");
       }
-    } catch (error) {
-      if (!String(error?.message || error).includes("Unexpected token")) {
-        log(`ES module load failed, trying script mode: ${error.message}`);
+      this.instance = await imported.default(moduleConfig);
+      if (typeof this.instance.callMain !== "function") {
+        throw new Error("NebulaHV graphical runtime cannot start its VM worker.");
       }
-      await loadScript("/qemu/out.js");
+      setTimeout(() => {
+        if (this.disposed) return;
+        try {
+          this.instance.callMain(qemuArguments);
+        } catch (error) {
+          this.writeLine(`NebulaHV runtime stopped: ${error.message || error}`);
+          onStopped?.();
+        }
+      }, 0);
+    } else {
+      try {
+        const imported = await import(/* @vite-ignore */ qemuEntrypoint);
+        if (typeof imported.default === "function") {
+          this.instance = await imported.default(moduleConfig);
+        }
+      } catch (error) {
+        if (!String(error?.message || error).includes("Unexpected token")) {
+          log(`ES module load failed, trying script mode: ${error.message}`);
+        }
+        await loadScript("/qemu/out.js");
+      }
     }
 
     if (v2Ready) this.removeInput = installNebulaHVInput(this.instance || moduleConfig, canvas);

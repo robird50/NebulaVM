@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildNebulaHVV2Arguments,
   describeNebulaHVV2Status,
+  hasNebulaHVGraphicalRuntime,
   missingNebulaHVV2Features,
   normalizeNebulaHVRuntimeManifest,
 } from "../src/nebulahvV2.js";
@@ -51,11 +52,28 @@ test("V2 arguments include graphics, protected UEFI storage, TPM, and OPFS media
 
 test("V2 launch fails closed when any required capability is absent", () => {
   const incomplete = structuredClone(readyManifest);
-  incomplete.features.tpm2 = false;
+  incomplete.features.directOpfs = false;
   assert.throws(
     () => buildNebulaHVV2Arguments({ manifest: incomplete, memoryMb: 2048, mediaPath: "/opfs/disk.raw" }),
-    /runtime is incomplete: tpm2/,
+    /runtime is incomplete: directOpfs/,
   );
+});
+
+test("graphical candidate can boot BIOS media while Secure Boot and TPM remain pending", () => {
+  const candidate = structuredClone(readyManifest);
+  candidate.features.secureBoot = false;
+  candidate.features.tpm2 = false;
+  candidate.firmware = {};
+  candidate.tpm = {};
+  assert.equal(hasNebulaHVGraphicalRuntime(candidate), true);
+  const command = buildNebulaHVV2Arguments({
+    manifest: candidate,
+    memoryMb: 1024,
+    mediaPath: "/opfs/nebulahv/disks/matthewos.iso",
+    mediaType: "cdrom",
+  }).join(" ");
+  assert.doesNotMatch(command, /if=pflash|tpm-tis/);
+  assert.match(command, /-cdrom \/opfs\/nebulahv\/disks\/matthewos.iso/);
 });
 
 test("OPFS disk names cannot escape NebulaHV private storage", () => {

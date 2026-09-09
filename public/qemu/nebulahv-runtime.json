@@ -1,12 +1,19 @@
 {
   "schemaVersion": 1,
-  "runtimeVersion": "1.0.0",
-  "profile": "serial-x86_64",
+  "runtimeVersion": "2.0.0-graphics-candidate.1",
+  "profile": "graphical-x86_64",
+  "entrypoint": "/qemu-v2/out.js",
+  "runtimeBase": "/qemu-v2/",
   "heapBytes": 2411724800,
   "features": {
-    "graphicalDisplay": false,
+    "graphicalDisplay": true,
     "secureBoot": false,
     "tpm2": false,
-    "directOpfs": false
-  }
+    "directOpfs": true
+  },
+  "artifacts": [
+    "/qemu-v2/out.js",
+    "/qemu-v2/qemu-system-x86_64.wasm",
+    "/qemu-v2/qemu-system-x86_64.worker.js"
+  ]
 }
