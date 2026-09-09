@@ -1,0 +1,7 @@
+diff --git a/tcg/wasm32.h b/tcg/wasm32.h
+--- a/tcg/wasm32.h
++++ b/tcg/wasm32.h
+@@ -40 +40,3 @@ void init_wasm32();
+-#define INSTANTIATE_NUM 1500
++/* Keep translated blocks in the stable TCI path until dynamic promotion has a type-safe x86-64 ABI. */
++#define INSTANTIATE_NUM INT32_MAX

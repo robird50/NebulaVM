@@ -22,6 +22,7 @@ jobs:
           git -C qemu-wasm checkout 0ef7b4e2814b231705d8371dd7997f5b72e70baf
           git -C qemu-wasm apply "$GITHUB_WORKSPACE/runtime/nebulahv-v2/qemu-nebulahv-display.patch"
           git -C qemu-wasm apply "$GITHUB_WORKSPACE/runtime/nebulahv-v2/qemu-wasm-bigint-helper.patch"
+          git -C qemu-wasm apply "$GITHUB_WORKSPACE/runtime/nebulahv-v2/qemu-wasm-tci-stability.patch"
           git clone --depth 1 https://gitlab.com/qemu-project/dtc.git qemu-wasm/subprojects/dtc
           git -C qemu-wasm/subprojects/dtc fetch --depth 1 origin b6910bec11614980a21e46fbccc35934b671bd81
           git -C qemu-wasm/subprojects/dtc checkout FETCH_HEAD
@@ -84,6 +85,7 @@ jobs:
           cp qemu-wasm/pc-bios/bios-256k.bin nebulahv-runtime/bios-256k.bin
           cp qemu-wasm/pc-bios/kvmvapic.bin nebulahv-runtime/kvmvapic.bin
           cp qemu-wasm/pc-bios/vgabios-stdvga.bin nebulahv-runtime/vgabios-stdvga.bin
+          node runtime/nebulahv-v2/patch-ffi-call.mjs nebulahv-runtime/out.js
           grep -q "nebulahv" nebulahv-runtime/out.js
           test -s nebulahv-runtime/qemu-system-x86_64.wasm
           sha256sum nebulahv-runtime/* > nebulahv-runtime/SHA256SUMS
