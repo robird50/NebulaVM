@@ -507,11 +507,16 @@ function instantiate_wasm() {
   const target = wasmTable.get(memory_v.getInt32(import_vec_begin + i * 4, true));
   helper[i] = (...args) => {
    let converted = args;
-   for (let attempt = 0; attempt <= args.length; attempt++) {
+   for (let attempt = 0; attempt <= args.length + 8; attempt++) {
     try {
      return target(...converted);
     } catch (error) {
-     const match = /Cannot convert (-?[0-9]+) to a BigInt/.exec(String(error && error.message ? error.message : error));
+     const message = String(error && error.message ? error.message : error);
+     if (/Cannot convert undefined to a BigInt/.test(message)) {
+      converted = converted.concat(0n);
+      continue;
+     }
+     const match = /Cannot convert (-?[0-9]+) to a BigInt/.exec(message);
      if (!match) {
       throw error;
      }
@@ -4817,7 +4822,7 @@ var _asyncify_stop_rewind = () => (_asyncify_stop_rewind = wasmExports["asyncify
 
 var ___start_em_js = Module["___start_em_js"] = 7908940;
 
-var ___stop_em_js = Module["___stop_em_js"] = 7922698;
+var ___stop_em_js = Module["___stop_em_js"] = 7922832;
 
 function invoke_ii(index, a1) {
  var sp = stackSave();
