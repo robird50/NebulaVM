@@ -2,7 +2,7 @@ diff --git a/tcg/wasm32.c b/tcg/wasm32.c
 index 82acd031e3..7257f5caad 100644
 --- a/tcg/wasm32.c
 +++ b/tcg/wasm32.c
-@@ -60,8 +60,31 @@ EM_JS(int, instantiate_wasm, (), {
+@@ -60,8 +60,35 @@ EM_JS(int, instantiate_wasm, (), {
          const wasmBytes = new Uint8Array(HEAP8.slice(wasm_begin, wasm_begin + wasm_size));
          
          var helper = {};
@@ -12,12 +12,16 @@ index 82acd031e3..7257f5caad 100644
 +            const target = wasmTable.get(memory_v.getInt32(import_vec_begin + i * 4, true));
 +            helper[i] = (...args) => {
 +                let converted = args;
-+                for (let attempt = 0; attempt <= args.length; attempt++) {
++                for (let attempt = 0; attempt <= args.length + 8; attempt++) {
 +                    try {
 +                        return target(...converted);
 +                    } catch (error) {
-+                        const match = /Cannot convert (-?[0-9]+) to a BigInt/.exec(
-+                            String(error && error.message ? error.message : error));
++                        const message = String(error && error.message ? error.message : error);
++                        if (/Cannot convert undefined to a BigInt/.test(message)) {
++                            converted = converted.concat(0n);
++                            continue;
++                        }
++                        const match = /Cannot convert (-?[0-9]+) to a BigInt/.exec(message);
 +                        if (!match) {
 +                            throw error;
 +                        }

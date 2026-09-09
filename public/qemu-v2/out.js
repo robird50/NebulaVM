@@ -539,6 +539,10 @@ function instantiate_wasm() {
  return fidx;
 }
 
+function execute_wasm(fidx, ctx_ptr) {
+ return wasmTable.get(fidx)(ctx_ptr);
+}
+
 function remove_module_js() {
  const memory_v = new DataView(HEAP8.buffer);
  const remove_n = memory_v.getInt32(Module.__wasm32_tb.to_remove_instance_idx_ptr, true);
@@ -4414,6 +4418,7 @@ var wasmImports = {
  /** @export */ emscripten_unwind_to_js_event_loop: _emscripten_unwind_to_js_event_loop,
  /** @export */ environ_get: _environ_get,
  /** @export */ environ_sizes_get: _environ_sizes_get,
+ /** @export */ execute_wasm: execute_wasm,
  /** @export */ exit: _exit,
  /** @export */ ffi_call_js: ffi_call_js,
  /** @export */ getaddrinfo: _getaddrinfo,
@@ -4812,7 +4817,7 @@ var _asyncify_stop_rewind = () => (_asyncify_stop_rewind = wasmExports["asyncify
 
 var ___start_em_js = Module["___start_em_js"] = 7908940;
 
-var ___stop_em_js = Module["___stop_em_js"] = 7922630;
+var ___stop_em_js = Module["___stop_em_js"] = 7922698;
 
 function invoke_ii(index, a1) {
  var sp = stackSave();
