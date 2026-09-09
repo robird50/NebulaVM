@@ -384,9 +384,7 @@ export class NebulaHVEmulator {
 
     const qemuEntrypoint = runtimeManifest.entrypoint;
     if (v2Ready) {
-      const response = await fetch(qemuEntrypoint, { cache: "no-store" });
-      if (!response.ok) throw new Error(`NebulaHV runtime failed to load (${response.status}).`);
-      const runtimeUrl = URL.createObjectURL(new Blob([await response.text()], { type: "text/javascript" }));
+      const runtimeUrl = new URL(qemuEntrypoint, window.location.href).href;
       moduleConfig.mainScriptUrlOrBlob = runtimeUrl;
       const imported = await import(/* @vite-ignore */ runtimeUrl);
       if (typeof imported.default !== "function") {

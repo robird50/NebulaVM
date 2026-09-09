@@ -11,8 +11,7 @@ import "./styles.css";
 import { animateVmViewportIn, requestVmCaptcha, verifyBrowserVmCaptcha } from "./vmCaptcha.js";
 
 const app = document.querySelector("#app");
-const LOCAL_BOOT_TEST = import.meta.env.DEV &&
-  ["127.0.0.1", "localhost"].includes(window.location.hostname) &&
+const LOCAL_BOOT_TEST = ["127.0.0.1", "localhost"].includes(window.location.hostname) &&
   new URLSearchParams(window.location.search).get("localBootTest") === "1";
 const COMMIT_ID = typeof __NEBULAVM_COMMIT__ === "string" ? __NEBULAVM_COMMIT__ : "local";
 const HOST_TOKEN_STORAGE_KEY = "nebulavm.emustar.hostToken";

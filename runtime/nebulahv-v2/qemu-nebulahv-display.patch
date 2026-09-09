@@ -225,3 +225,20 @@ diff --git a/util/memalign.c b/util/memalign.c
      int ret;
      ret = posix_memalign(&ptr, alignment, size);
      if (ret != 0) {
+diff --git a/util/event_notifier-posix.c b/util/event_notifier-posix.c
+--- a/util/event_notifier-posix.c
++++ b/util/event_notifier-posix.c
+@@ -47,6 +47,12 @@ int event_notifier_init(EventNotifier *e, int active)
+         e->rfd = e->wfd = ret;
+     } else {
+-        if (errno != ENOSYS) {
++        /*
++         * Emscripten exposes eventfd(), but currently rejects the flags QEMU
++         * needs with EINVAL. Its nonblocking pipe implementation is usable.
++         */
++#ifndef __EMSCRIPTEN__
++        if (errno != ENOSYS) {
+             return -errno;
+         }
++#endif
+         if (!g_unix_open_pipe(fds, FD_CLOEXEC, NULL)) {
