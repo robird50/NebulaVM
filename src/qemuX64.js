@@ -237,6 +237,11 @@ export class NebulaHVEmulator {
       );
     }
     const runtimeManifest = await loadNebulaHVRuntimeManifest();
+    const runtimeVersionTag = encodeURIComponent(runtimeManifest.runtimeVersion);
+    const versionedRuntimeAsset = (path) => {
+      const separator = String(path).includes("?") ? "&" : "?";
+      return `${path}${separator}v=${runtimeVersionTag}`;
+    };
 
     const {
       isoFile,
@@ -338,8 +343,8 @@ export class NebulaHVEmulator {
       arguments: qemuArguments,
       canvas,
       noInitialRun: v2Ready,
-      locateFile: (path) => `${runtimeManifest.runtimeBase}${path}`,
-      mainScriptUrlOrBlob: runtimeManifest.entrypoint,
+      locateFile: (path) => versionedRuntimeAsset(`${runtimeManifest.runtimeBase}${path}`),
+      mainScriptUrlOrBlob: versionedRuntimeAsset(runtimeManifest.entrypoint),
       print: (line) => this.writeLine(line),
       printErr: (line) => this.writeLine(line),
       preRun: [
@@ -383,7 +388,7 @@ export class NebulaHVEmulator {
 
     this.writeLine("Starting NebulaHV x86-64 locally...");
 
-    const qemuEntrypoint = runtimeManifest.entrypoint;
+    const qemuEntrypoint = versionedRuntimeAsset(runtimeManifest.entrypoint);
     if (v2Ready) {
       const runtimeUrl = new URL(qemuEntrypoint, window.location.href).href;
       moduleConfig.mainScriptUrlOrBlob = runtimeUrl;
@@ -399,7 +404,7 @@ export class NebulaHVEmulator {
         this.instance.FS.mkdir("/firmware");
       } catch {}
       for (const firmwareName of ["bios-256k.bin", "kvmvapic.bin", "vgabios-stdvga.bin"]) {
-        const response = await fetch(`${runtimeManifest.runtimeBase}${firmwareName}`);
+        const response = await fetch(versionedRuntimeAsset(`${runtimeManifest.runtimeBase}${firmwareName}`));
         if (!response.ok) {
           throw new Error(`NebulaHV firmware failed to load: ${firmwareName}.`);
         }

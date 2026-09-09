@@ -5,7 +5,20 @@ diff --git a/tcg/wasm32.h b/tcg/wasm32.h
  void init_wasm32();
  
 -#define INSTANTIATE_NUM 1500
-+/* Keep translated blocks in the stable TCI path until dynamic promotion has a type-safe x86-64 ABI. */
-+#define INSTANTIATE_NUM INT32_MAX
++/* Warm a block briefly, then promote it to native WebAssembly. */
++#define INSTANTIATE_NUM 25
  
  #endif
+diff --git a/tcg/wasm32.c b/tcg/wasm32.c
+--- a/tcg/wasm32.c
++++ b/tcg/wasm32.c
+@@ -96,7 +96,8 @@ EM_JS(int, instantiate_wasm, (), {
+ 
+         Module.__wasm32_tb.inst_gc_registry.register(inst, "instance");
+ 
+-        const fidx = addFunction(inst.exports.start, 'ii');
++        /* Force Emscripten to create a table entry with the C ABI expected by wasm_func_ptr. */
++        const fidx = addFunction((ctx) => inst.exports.start(ctx), 'ii');
+ 
+         return fidx;
+ });

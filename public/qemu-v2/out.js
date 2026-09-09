@@ -749,45 +749,45 @@ function ffi_call_js(cif, fn, rvalue, avalue) {
  stackRestore(cur_stack_ptr);
  stackAlloc(0);
  var target = getWasmTableEntry(fn);
- var invokeWithWasmIntegers = function(candidateArgs, depth) {
-   try {
-     return (0, target.apply(null, candidateArgs));
-   } catch (error) {
-     if (depth >= 32) throw error;
-     var message = String(error && error.message ? error.message : error);
-     if (/Cannot convert undefined to a BigInt/.test(message)) {
-       return invokeWithWasmIntegers(candidateArgs.concat(0n), depth + 1);
-     }
-     var match = /Cannot convert (-?[0-9]+) to a BigInt/.exec(message);
-     if (!match) throw error;
-     var rejectedValue = Number(match[1]);
-     var sawCandidate = false;
-     var lastError = error;
-     for (var argIndex = 0; argIndex < candidateArgs.length; argIndex++) {
-       if (typeof candidateArgs[argIndex] === "number" && candidateArgs[argIndex] === rejectedValue) {
-         sawCandidate = true;
-         var convertedArgs = candidateArgs.slice();
-         convertedArgs[argIndex] = BigInt(rejectedValue);
-         try {
-           return invokeWithWasmIntegers(convertedArgs, depth + 1);
-         } catch (candidateError) {
-           var candidateMessage = String(candidateError && candidateError.message ? candidateError.message : candidateError);
-           if ((candidateError && candidateError.nebulahvAbiMismatch) || /Cannot convert a BigInt value to a number/.test(candidateMessage)) {
-             lastError = candidateError;
-             continue;
-           }
-           throw candidateError;
-         }
-       }
-     }
-     if (!sawCandidate) throw error;
-     var mismatch = new TypeError("Unable to bridge QEMU helper integer arguments");
-     mismatch.nebulahvAbiMismatch = true;
-     mismatch.cause = lastError;
-     throw mismatch;
-   }
- };
- var result = invokeWithWasmIntegers(args, 0);
+var invokeWithWasmIntegers = function(candidateArgs, depth) {
+  try {
+    return (0, target.apply(null, candidateArgs));
+  } catch (error) {
+    if (depth >= 32) throw error;
+    var message = String(error && error.message ? error.message : error);
+    if (/Cannot convert undefined to a BigInt/.test(message)) {
+      return invokeWithWasmIntegers(candidateArgs.concat(0n), depth + 1);
+    }
+    var match = /Cannot convert (-?[0-9]+) to a BigInt/.exec(message);
+    if (!match) throw error;
+    var rejectedValue = Number(match[1]);
+    var sawCandidate = false;
+    var lastError = error;
+    for (var argIndex = 0; argIndex < candidateArgs.length; argIndex++) {
+      if (typeof candidateArgs[argIndex] === "number" && candidateArgs[argIndex] === rejectedValue) {
+        sawCandidate = true;
+        var convertedArgs = candidateArgs.slice();
+        convertedArgs[argIndex] = BigInt(rejectedValue);
+        try {
+          return invokeWithWasmIntegers(convertedArgs, depth + 1);
+        } catch (candidateError) {
+          var candidateMessage = String(candidateError && candidateError.message ? candidateError.message : candidateError);
+          if ((candidateError && candidateError.nebulahvAbiMismatch) || /Cannot convert a BigInt value to a number/.test(candidateMessage)) {
+            lastError = candidateError;
+            continue;
+          }
+          throw candidateError;
+        }
+      }
+    }
+    if (!sawCandidate) throw error;
+    var mismatch = new TypeError("Unable to bridge QEMU helper integer arguments");
+    mismatch.nebulahvAbiMismatch = true;
+    mismatch.cause = lastError;
+    throw mismatch;
+  }
+};
+var result = invokeWithWasmIntegers(args, 0);
  stackRestore(orig_stack_ptr);
  if (ret_by_arg) {
   return;
@@ -4810,9 +4810,9 @@ var _asyncify_start_rewind = a0 => (_asyncify_start_rewind = wasmExports["asynci
 
 var _asyncify_stop_rewind = () => (_asyncify_stop_rewind = wasmExports["asyncify_stop_rewind"])();
 
-var ___start_em_js = Module["___start_em_js"] = 7906476;
+var ___start_em_js = Module["___start_em_js"] = 7908940;
 
-var ___stop_em_js = Module["___stop_em_js"] = 7920152;
+var ___stop_em_js = Module["___stop_em_js"] = 7922616;
 
 function invoke_ii(index, a1) {
  var sp = stackSave();
