@@ -44,6 +44,7 @@ test("V2 arguments include graphics, protected UEFI storage, TPM, and OPFS media
   });
   const command = args.join(" ");
   assert.match(command, /q35,smm=on/);
+  assert.match(command, /-m 1024M/);
   assert.match(command, /VGA -display nebulahv/);
   assert.match(command, /-nic none/);
   assert.match(command, /if=pflash/);

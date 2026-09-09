@@ -1,4 +1,5 @@
 export const NEBULAHV_RUNTIME_MANIFEST = "/qemu/nebulahv-runtime.json";
+export const NEBULAHV_QEMU_MAX_GUEST_MEMORY_MB = 1024;
 
 export const NEBULAHV_V2_FEATURES = [
   "graphicalDisplay",
@@ -106,7 +107,7 @@ export const buildNebulaHVV2Arguments = ({
     "-smp",
     "2",
     "-m",
-    `${Math.max(512, Math.min(4096, Number(memoryMb) || 512))}M`,
+    `${Math.max(512, Math.min(NEBULAHV_QEMU_MAX_GUEST_MEMORY_MB, Number(memoryMb) || 512))}M`,
     "-device",
     "VGA",
     "-display",

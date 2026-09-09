@@ -71,6 +71,7 @@ jobs:
           docker exec nebulahv-qemu-builder emconfigure /qemu/configure \
             --static --target-list=x86_64-softmmu --cpu=wasm32 --cross-prefix= \
             --without-default-features --enable-system --enable-pixman \
+            --enable-vhdx \
             --with-coroutine=fiber --enable-virtfs \
             --extra-cflags="$EXTRA_CFLAGS" \
             --extra-cxxflags="$EXTRA_CFLAGS" \
@@ -85,7 +86,7 @@ jobs:
           cp qemu-wasm/pc-bios/bios-256k.bin nebulahv-runtime/bios-256k.bin
           cp qemu-wasm/pc-bios/kvmvapic.bin nebulahv-runtime/kvmvapic.bin
           cp qemu-wasm/pc-bios/vgabios-stdvga.bin nebulahv-runtime/vgabios-stdvga.bin
-          node runtime/nebulahv-v2/patch-ffi-call.mjs nebulahv-runtime/out.js
+          node runtime/nebulahv-v2/patch-ffi-call.mjs nebulahv-runtime/out.js nebulahv-runtime/qemu-system-x86_64.worker.js
           grep -q "nebulahv" nebulahv-runtime/out.js
           test -s nebulahv-runtime/qemu-system-x86_64.wasm
           sha256sum nebulahv-runtime/* > nebulahv-runtime/SHA256SUMS
