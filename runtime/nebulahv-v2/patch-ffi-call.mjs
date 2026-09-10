@@ -56,6 +56,91 @@ if (occurrences !== 1) {
 }
 
 let patchedSource = source.replace(original, replacement);
+const helperParserAnchor = `  const wasmBytes = new Uint8Array(HEAP8.slice(wasm_begin, wasm_begin + wasm_size));
+  var helper = {};`;
+const helperParserReplacement = `  const wasmBytes = new Uint8Array(HEAP8.slice(wasm_begin, wasm_begin + wasm_size));
+  const helperResultTypes = (() => {
+   let offset = 8;
+   const types = [];
+   const results = [];
+   const readU32 = () => {
+    let value = 0;
+    let shift = 0;
+    while (true) {
+     const byte = wasmBytes[offset++];
+     value |= (byte & 127) << shift;
+     if ((byte & 128) === 0) return value >>> 0;
+     shift += 7;
+    }
+   };
+   const readName = () => {
+    const length = readU32();
+    const start = offset;
+    offset += length;
+    return String.fromCharCode(...wasmBytes.subarray(start, start + length));
+   };
+   const skipLimits = () => {
+    const flags = readU32();
+    readU32();
+    if (flags & 1) readU32();
+   };
+   while (offset < wasmBytes.length) {
+    const sectionId = wasmBytes[offset++];
+    const sectionSize = readU32();
+    const sectionEnd = offset + sectionSize;
+    if (sectionId === 1) {
+     const count = readU32();
+     for (let typeIndex = 0; typeIndex < count; typeIndex++) {
+      offset++;
+      const parameterCount = readU32();
+      offset += parameterCount;
+      const resultCount = readU32();
+      types.push(resultCount ? wasmBytes[offset] : null);
+      offset += resultCount;
+     }
+    } else if (sectionId === 2) {
+     const count = readU32();
+     for (let importIndex = 0; importIndex < count; importIndex++) {
+      const moduleName = readName();
+      const fieldName = readName();
+      const kind = wasmBytes[offset++];
+      if (kind === 0) {
+       const resultType = types[readU32()];
+       if (moduleName === "helper") results[Number(fieldName)] = resultType;
+      } else if (kind === 1) {
+       offset++;
+       skipLimits();
+      } else if (kind === 2) {
+       skipLimits();
+      } else if (kind === 3) {
+       offset += 2;
+      } else if (kind === 4) {
+       readU32();
+       readU32();
+      }
+     }
+    }
+    offset = sectionEnd;
+    if (sectionId > 2) break;
+   }
+   return results;
+  })();
+  var helper = {};`;
+if (!patchedSource.includes(helperParserAnchor)) {
+  throw new Error("Expected the generated helper table anchor.");
+}
+patchedSource = patchedSource.replace(helperParserAnchor, helperParserReplacement);
+
+const helperReturn = "    return invoke(args, 0);";
+const helperReturnReplacement = `    const result = invoke(args, 0);
+    if (helperResultTypes[i] === 126) {
+     return typeof result === "bigint" ? result : BigInt(result || 0);
+    }
+    return typeof result === "bigint" ? Number(result) : result;`;
+if (patchedSource.split(helperReturn).length - 1 !== 1) {
+  throw new Error("Expected one generated helper return.");
+}
+patchedSource = patchedSource.replace(helperReturn, helperReturnReplacement);
 const resultConversions = [
   ["HEAPU32[(rvalue >> 2) + 0 >>> 0] = result;", "HEAPU32[(rvalue >> 2) + 0 >>> 0] = Number(result);"],
   ["HEAPF32[(rvalue >> 2) + 0 >>> 0] = result;", "HEAPF32[(rvalue >> 2) + 0 >>> 0] = Number(result);"],

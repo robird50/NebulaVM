@@ -1,0 +1,16 @@
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+--- a/target/i386/tcg/translate.c
++++ b/target/i386/tcg/translate.c
+@@ -6949,7 +6949,12 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
+      * For icount also disable repz optimization so that each iteration
+      * is accounted separately.
+      */
++#ifdef __EMSCRIPTEN__
++    /* Avoid a JavaScript/Wasm boundary crossing for every REP iteration. */
++    dc->repz_opt = !(cflags & CF_USE_ICOUNT);
++#else
+     dc->repz_opt = !dc->jmp_opt && !(cflags & CF_USE_ICOUNT);
++#endif
+ 
+     dc->T0 = tcg_temp_new();
+     dc->T1 = tcg_temp_new();

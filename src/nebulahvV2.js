@@ -87,9 +87,10 @@ export const buildNebulaHVV2Arguments = ({
     throw new Error("NebulaHV V2 artifact inventory is missing.");
   }
 
-  const mediaArguments =
-    mediaType === "cdrom"
-      ? ["-cdrom", mediaPath, "-boot", "d"]
+  const mediaArguments = mediaType === "cdrom"
+    ? ["-cdrom", mediaPath, "-boot", "d"]
+    : mediaType === "floppy"
+      ? ["-drive", `if=floppy,format=raw,readonly=on,file=${mediaPath}`, "-boot", "a"]
       : ["-drive", `if=virtio,format=${mediaFormat},file=${mediaPath}`, "-boot", "c"];
 
   const firmwareArguments = normalized.features.secureBoot

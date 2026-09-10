@@ -78,6 +78,17 @@ test("graphical candidate can boot BIOS media while Secure Boot and TPM remain p
   assert.match(command, /-cdrom \/opfs\/nebulahv\/disks\/matthewos.iso/);
 });
 
+test("graphical candidate boots floppy diagnostics as a read-only floppy", () => {
+  const command = buildNebulaHVV2Arguments({
+    manifest: readyManifest,
+    memoryMb: 512,
+    mediaPath: "/opfs/nebulahv/disks/demo.img",
+    mediaType: "floppy",
+  }).join(" ");
+  assert.match(command, /if=floppy,format=raw,readonly=on,file=\/opfs\/nebulahv\/disks\/demo.img/);
+  assert.match(command, /-boot a/);
+});
+
 test("OPFS disk names cannot escape NebulaHV private storage", () => {
   assert.equal(safeNebulaHVDiskName("../Windows 11?.vhdx"), "_Windows_11_.vhdx");
   assert.equal(safeNebulaHVDiskName("..."), "disk.raw");

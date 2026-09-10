@@ -311,7 +311,7 @@ export class NebulaHVEmulator {
         memoryMb: Math.round(memorySize / 1024 / 1024),
         mediaPath: imagePath,
         mediaFormat: qemuMediaFormat(isoFile, mediaType),
-        mediaType: mediaType === "hda" ? "hda" : "cdrom",
+        mediaType: mediaType === "hda" ? "hda" : mediaType === "fda" ? "floppy" : "cdrom",
       });
       qemuArguments.unshift("-L", "/firmware");
       onDisplayMode?.("graphics");
