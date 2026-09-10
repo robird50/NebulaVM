@@ -1,7 +1,7 @@
 diff --git a/tcg/wasm32.h b/tcg/wasm32.h
 --- a/tcg/wasm32.h
 +++ b/tcg/wasm32.h
-@@ -38,5 +38,6 @@ int get_core_nums();
+@@ -38,5 +38,10 @@ int get_core_nums();
  void init_wasm32();
  
 -#define INSTANTIATE_NUM 1500
