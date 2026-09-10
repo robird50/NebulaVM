@@ -5,8 +5,12 @@ diff --git a/tcg/wasm32.h b/tcg/wasm32.h
  void init_wasm32();
  
 -#define INSTANTIATE_NUM 1500
-+/* Warm a block briefly, then promote it to native WebAssembly. */
-+#define INSTANTIATE_NUM 25
++/*
++ * Dynamic block promotion currently leaves stale function-table indexes in
++ * browser workers. Keep execution in the stable TCI path until promotion can
++ * safely retain and retire generated WebAssembly instances.
++ */
++#define INSTANTIATE_NUM 0x7fffffff
  
  #endif
 diff --git a/tcg/wasm32.c b/tcg/wasm32.c
