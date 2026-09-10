@@ -78,7 +78,7 @@ index 24953ca3dc..725334fed7 100644
 - * safely retain and retire generated WebAssembly instances.
 - */
 -#define INSTANTIATE_NUM 0x7fffffff
-+/* Promote hot blocks quickly; generated functions are retained in a worker-local map. */
-+#define INSTANTIATE_NUM 25
++/* Promote only proven hot blocks; retain generated functions in a worker-local map. */
++#define INSTANTIATE_NUM 1500
  
  #endif
