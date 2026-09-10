@@ -3401,6 +3401,10 @@ body.screen-app-fullscreen .screen-shell {
   display: none;
 }
 
+.vga-canvas:not([hidden]) {
+  display: block;
+}
+
 .qemu-terminal {
   grid-area: 1 / 1;
   width: 100%;

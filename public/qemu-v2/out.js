@@ -477,12 +477,24 @@ function createWasm() {
 }
 
 function nebulahv_canvas_resize(width, height) {
+ if (ENVIRONMENT_IS_PTHREAD) {
+  postMessage({ cmd: "callHandler", handler: "nebulahvDisplayResize", args: [ width, height ] });
+  return;
+ }
  if (Module.nebulahvDisplayResize) {
   Module.nebulahvDisplayResize(width, height);
  }
 }
 
 function nebulahv_canvas_update(pixels, width, height, stride, x, y, update_width, update_height) {
+ if (ENVIRONMENT_IS_PTHREAD) {
+  postMessage({
+   cmd: "callHandler",
+   handler: "nebulahvDisplayUpdate",
+   args: [ pixels, width, height, stride, x, y, update_width, update_height ]
+  });
+  return;
+ }
  if (Module.nebulahvDisplayUpdate) {
   Module.nebulahvDisplayUpdate(pixels, width, height, stride, x, y, update_width, update_height);
  }
@@ -501,35 +513,120 @@ function instantiate_wasm() {
  const wasm_begin = tmp_body_begin + tmp_body_size + 4;
  const import_vec_size = memory_v.getInt32(wasm_begin + wasm_size, true);
  const import_vec_begin = wasm_begin + wasm_size + 4;
- const wasmBytes = new Uint8Array(HEAP8.slice(wasm_begin, wasm_begin + wasm_size));
- var helper = {};
+  const wasmBytes = new Uint8Array(HEAP8.slice(wasm_begin, wasm_begin + wasm_size));
+  const helperResultTypes = (() => {
+   let offset = 8;
+   const types = [];
+   const results = [];
+   const readU32 = () => {
+    let value = 0;
+    let shift = 0;
+    while (true) {
+     const byte = wasmBytes[offset++];
+     value |= (byte & 127) << shift;
+     if ((byte & 128) === 0) return value >>> 0;
+     shift += 7;
+    }
+   };
+   const readName = () => {
+    const length = readU32();
+    const start = offset;
+    offset += length;
+    return String.fromCharCode(...wasmBytes.subarray(start, start + length));
+   };
+   const skipLimits = () => {
+    const flags = readU32();
+    readU32();
+    if (flags & 1) readU32();
+   };
+   while (offset < wasmBytes.length) {
+    const sectionId = wasmBytes[offset++];
+    const sectionSize = readU32();
+    const sectionEnd = offset + sectionSize;
+    if (sectionId === 1) {
+     const count = readU32();
+     for (let typeIndex = 0; typeIndex < count; typeIndex++) {
+      offset++;
+      const parameterCount = readU32();
+      offset += parameterCount;
+      const resultCount = readU32();
+      types.push(resultCount ? wasmBytes[offset] : null);
+      offset += resultCount;
+     }
+    } else if (sectionId === 2) {
+     const count = readU32();
+     for (let importIndex = 0; importIndex < count; importIndex++) {
+      const moduleName = readName();
+      const fieldName = readName();
+      const kind = wasmBytes[offset++];
+      if (kind === 0) {
+       const resultType = types[readU32()];
+       if (moduleName === "helper") results[Number(fieldName)] = resultType;
+      } else if (kind === 1) {
+       offset++;
+       skipLimits();
+      } else if (kind === 2) {
+       skipLimits();
+      } else if (kind === 3) {
+       offset += 2;
+      } else if (kind === 4) {
+       readU32();
+       readU32();
+      }
+     }
+    }
+    offset = sectionEnd;
+    if (sectionId > 2) break;
+   }
+   return results;
+  })();
+  var helper = {};
  for (let i = 0; i < import_vec_size / 4; i++) {
   const target = wasmTable.get(memory_v.getInt32(import_vec_begin + i * 4, true));
   helper[i] = (...args) => {
-   let converted = args;
-   for (let attempt = 0; attempt <= args.length + 8; attempt++) {
+   const invoke = (candidateArgs, depth) => {
     try {
-     return target(...converted);
+     return target(...candidateArgs);
     } catch (error) {
+     if (depth >= 32) throw error;
      const message = String(error && error.message ? error.message : error);
      if (/Cannot convert undefined to a BigInt/.test(message)) {
-      converted = converted.concat(0n);
-      continue;
+      return invoke(candidateArgs.concat(0n), depth + 1);
      }
      const match = /Cannot convert (-?[0-9]+) to a BigInt/.exec(message);
-     if (!match) {
-      throw error;
-     }
+     if (!match) throw error;
      const value = Number(match[1]);
-     const argumentIndex = converted.findIndex(argument => argument === value);
-     if (argumentIndex < 0) {
-      throw error;
+     let sawCandidate = false;
+     let lastError = error;
+     for (let argumentIndex = 0; argumentIndex < candidateArgs.length; argumentIndex++) {
+      if (typeof candidateArgs[argumentIndex] === "number" && candidateArgs[argumentIndex] === value) {
+       sawCandidate = true;
+       const converted = candidateArgs.slice();
+       converted[argumentIndex] = BigInt(value);
+       try {
+        return invoke(converted, depth + 1);
+       } catch (candidateError) {
+        const candidateMessage = String(candidateError && candidateError.message ? candidateError.message : candidateError);
+        if ((candidateError && candidateError.nebulahvAbiMismatch) || /Cannot convert a BigInt value to a number/.test(candidateMessage)) {
+         lastError = candidateError;
+         continue;
+        }
+        throw candidateError;
+       }
+      }
      }
-     converted = converted.slice();
-     converted[argumentIndex] = BigInt(value);
+     if (!sawCandidate) throw error;
+     const mismatch = new TypeError("Unable to bridge QEMU helper integer arguments");
+     mismatch.nebulahvAbiMismatch = true;
+     mismatch.cause = lastError;
+     throw mismatch;
     }
-   }
-   throw new TypeError("Unable to bridge QEMU helper integer arguments");
+   };
+    const result = invoke(args, 0);
+    if (helperResultTypes[i] === 126) {
+     return typeof result === "bigint" ? result : BigInt(result || 0);
+    }
+    return typeof result === "bigint" ? Number(result) : result;
   };
  }
  const mod = new WebAssembly.Module(wasmBytes);
@@ -4822,7 +4919,7 @@ var _asyncify_stop_rewind = () => (_asyncify_stop_rewind = wasmExports["asyncify
 
 var ___start_em_js = Module["___start_em_js"] = 7908940;
 
-var ___stop_em_js = Module["___stop_em_js"] = 7922832;
+var ___stop_em_js = Module["___stop_em_js"] = 7923511;
 
 function invoke_ii(index, a1) {
  var sp = stackSave();
