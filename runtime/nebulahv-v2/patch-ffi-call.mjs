@@ -56,8 +56,7 @@ if (occurrences !== 1) {
 }
 
 let patchedSource = source.replace(original, replacement);
-const helperParserAnchor = `  const wasmBytes = new Uint8Array(HEAP8.slice(wasm_begin, wasm_begin + wasm_size));
-  var helper = {};`;
+const helperParserPattern = /([ \t]*)const wasmBytes = new Uint8Array\(HEAP8\.slice\(wasm_begin, wasm_begin \+ wasm_size\)\);\r?\n\1var helper = \{\};/;
 const helperParserReplacement = `  const wasmBytes = new Uint8Array(HEAP8.slice(wasm_begin, wasm_begin + wasm_size));
   const helperResultTypes = (() => {
    let offset = 8;
@@ -126,21 +125,21 @@ const helperParserReplacement = `  const wasmBytes = new Uint8Array(HEAP8.slice(
    return results;
   })();
   var helper = {};`;
-if (!patchedSource.includes(helperParserAnchor)) {
+if (!helperParserPattern.test(patchedSource)) {
   throw new Error("Expected the generated helper table anchor.");
 }
-patchedSource = patchedSource.replace(helperParserAnchor, helperParserReplacement);
+patchedSource = patchedSource.replace(helperParserPattern, helperParserReplacement);
 
-const helperReturn = "    return invoke(args, 0);";
+const helperReturnPattern = /^([ \t]*)return invoke\(args, 0\);$/m;
 const helperReturnReplacement = `    const result = invoke(args, 0);
     if (helperResultTypes[i] === 126) {
      return typeof result === "bigint" ? result : BigInt(result || 0);
     }
     return typeof result === "bigint" ? Number(result) : result;`;
-if (patchedSource.split(helperReturn).length - 1 !== 1) {
+if ((patchedSource.match(new RegExp(helperReturnPattern.source, "gm")) || []).length !== 1) {
   throw new Error("Expected one generated helper return.");
 }
-patchedSource = patchedSource.replace(helperReturn, helperReturnReplacement);
+patchedSource = patchedSource.replace(helperReturnPattern, helperReturnReplacement);
 const resultConversions = [
   ["HEAPU32[(rvalue >> 2) + 0 >>> 0] = result;", "HEAPU32[(rvalue >> 2) + 0 >>> 0] = Number(result);"],
   ["HEAPF32[(rvalue >> 2) + 0 >>> 0] = result;", "HEAPF32[(rvalue >> 2) + 0 >>> 0] = Number(result);"],
