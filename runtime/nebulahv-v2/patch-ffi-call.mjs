@@ -140,6 +140,24 @@ if ((patchedSource.match(new RegExp(helperReturnPattern.source, "gm")) || []).le
   throw new Error("Expected one generated helper return.");
 }
 patchedSource = patchedSource.replace(helperReturnPattern, helperReturnReplacement);
+const helperCacheAnchor = "  helper[i] = (...args) => {";
+if (patchedSource.split(helperCacheAnchor).length !== 2) {
+  throw new Error("Expected one helper argument cache anchor.");
+}
+patchedSource = patchedSource.replace(helperCacheAnchor,
+  "  let argumentKinds;\n" + helperCacheAnchor);
+const helperInvokeAnchor = "return target(...candidateArgs);";
+const helperStart = patchedSource.indexOf(helperCacheAnchor);
+const helperResult = patchedSource.indexOf(helperInvokeAnchor, helperStart);
+if (helperResult < 0) throw new Error("Expected a successful helper result.");
+patchedSource = patchedSource.slice(0, helperResult)
+  + "const result = target(...candidateArgs);\n     argumentKinds = candidateArgs.map(value => typeof value);\n     return result;"
+  + patchedSource.slice(helperResult + helperInvokeAnchor.length);
+patchedSource = patchedSource.replace("    const result = invoke(args, 0);", `    const result = argumentKinds
+     ? target(...argumentKinds.map((kind, index) => kind === "bigint"
+         ? BigInt(args[index] === undefined ? 0 : args[index])
+         : typeof args[index] === "bigint" ? Number(args[index]) : args[index]))
+     : invoke(args, 0);`);
 const resultConversions = [
   ["HEAPU32[(rvalue >> 2) + 0 >>> 0] = result;", "HEAPU32[(rvalue >> 2) + 0 >>> 0] = Number(result);"],
   ["HEAPF32[(rvalue >> 2) + 0 >>> 0] = result;", "HEAPF32[(rvalue >> 2) + 0 >>> 0] = Number(result);"],

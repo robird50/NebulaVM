@@ -18,7 +18,7 @@ index 706299c5e9..245f66e08c 100644
              helper[i] = (...args) => {
                  const invoke = (candidateArgs, depth) => {
                      try {
-@@ -114,13 +121,21 @@ EM_JS(int, instantiate_wasm, (), {
+@@ -114,13 +121,25 @@ EM_JS(int, instantiate_wasm, (), {
  
          Module.__wasm32_tb.inst_gc_registry.register(inst, "instance");
  
@@ -39,6 +39,10 @@ index 706299c5e9..245f66e08c 100644
 +        try {
 +            return target(ctx_ptr);
 +        } catch (error) {
++            /* Emscripten uses Infinity as its internal longjmp sentinel. */
++            if (error === Infinity) {
++                throw error;
++            }
 +            const detail = error && (error.stack || error.message) || String(error);
 +            throw new Error(`NebulaHV generated block ${fidx} failed: ${detail}`);
 +        }
