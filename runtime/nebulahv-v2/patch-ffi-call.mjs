@@ -165,21 +165,24 @@ patchedSource = patchedSource.replace("    const result = invoke(args, 0);", `  
          ? BigInt(args[index] === undefined ? 0 : args[index])
          : typeof args[index] === "bigint" ? Number(args[index]) : args[index]))
      : invoke(args, 0);`);
-const resultConversions = [
-  ["HEAPU32[(rvalue >> 2) + 0 >>> 0] = result;", "HEAPU32[(rvalue >> 2) + 0 >>> 0] = Number(result);"],
-  ["HEAPF32[(rvalue >> 2) + 0 >>> 0] = result;", "HEAPF32[(rvalue >> 2) + 0 >>> 0] = Number(result);"],
-  ["HEAPF64[(rvalue >> 3) + 0 >>> 0] = result;", "HEAPF64[(rvalue >> 3) + 0 >>> 0] = Number(result);"],
-  ["HEAPU8[rvalue + 0 >>> 0] = result;", "HEAPU8[rvalue + 0 >>> 0] = Number(result);"],
-  ["HEAPU16[(rvalue >> 1) + 0 >>> 0] = result;", "HEAPU16[(rvalue >> 1) + 0 >>> 0] = Number(result);"],
-  ["HEAPU64[(rvalue >> 3) + 0] = result;", "HEAPU64[(rvalue >> 3) + 0] = typeof result === 'bigint' ? result : BigInt(result);"],
-];
-for (const [resultOriginal, resultReplacement] of resultConversions) {
-  const resultOccurrences = patchedSource.split(resultOriginal).length - 1;
+const numericResultHeaps = ["HEAPU32", "HEAPF32", "HEAPF64", "HEAPU8", "HEAPU16"];
+for (const heap of numericResultHeaps) {
+  const resultPattern = new RegExp(`(${heap}\\[[^\\]\\r\\n]*rvalue[^\\]\\r\\n]*\\]\\s*=\\s*)result;`, "g");
+  const resultOccurrences = [...patchedSource.matchAll(resultPattern)].length;
   if (resultOccurrences !== 1) {
-    throw new Error(`Expected one libffi result write, found ${resultOccurrences}: ${resultOriginal}`);
+    throw new Error(`Expected one libffi ${heap} result write, found ${resultOccurrences}.`);
   }
-  patchedSource = patchedSource.replace(resultOriginal, resultReplacement);
+  patchedSource = patchedSource.replace(resultPattern, "$1Number(result);");
 }
+const bigintResultPattern = /(HEAPU64\[[^\]\r\n]*rvalue[^\]\r\n]*\]\s*=\s*)result;/g;
+const bigintResultOccurrences = [...patchedSource.matchAll(bigintResultPattern)].length;
+if (bigintResultOccurrences !== 1) {
+  throw new Error(`Expected one libffi HEAPU64 result write, found ${bigintResultOccurrences}.`);
+}
+patchedSource = patchedSource.replace(
+  bigintResultPattern,
+  "$1typeof result === 'bigint' ? result : BigInt(result);",
+);
 await writeFile(outputPath, patchedSource);
 
 if (workerPath) {
