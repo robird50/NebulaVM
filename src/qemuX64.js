@@ -128,41 +128,113 @@ const QNUM_BY_CODE = {
 };
 
 const createNebulaHVDisplayBridge = (moduleConfig, canvas) => {
-  let context = null;
-  let imageData = null;
+  const gl = canvas.getContext("webgl2", {
+    alpha: false,
+    antialias: false,
+    depth: false,
+    desynchronized: true,
+    preserveDrawingBuffer: true,
+  });
+  if (!gl) throw new Error("NebulaHV requires WebGL 2 for its local display.");
+
+  const compileShader = (type, source) => {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      throw new Error(`NebulaHV display shader failed: ${gl.getShaderInfoLog(shader)}`);
+    }
+    return shader;
+  };
+  const program = gl.createProgram();
+  gl.attachShader(program, compileShader(gl.VERTEX_SHADER, `#version 300 es
+    in vec2 position;
+    out vec2 textureCoordinate;
+    void main() {
+      textureCoordinate = vec2((position.x + 1.0) * 0.5, (1.0 - position.y) * 0.5);
+      gl_Position = vec4(position, 0.0, 1.0);
+    }
+  `));
+  gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, `#version 300 es
+    precision mediump float;
+    uniform sampler2D framebufferTexture;
+    in vec2 textureCoordinate;
+    out vec4 outputColor;
+    void main() {
+      outputColor = texture(framebufferTexture, textureCoordinate).bgra;
+    }
+  `));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    throw new Error(`NebulaHV display program failed: ${gl.getProgramInfoLog(program)}`);
+  }
+  const vertices = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vertices);
+  gl.bufferData(
+    gl.ARRAY_BUFFER,
+    new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+    gl.STATIC_DRAW,
+  );
+  gl.useProgram(program);
+  const position = gl.getAttribLocation(program, "position");
+  gl.enableVertexAttribArray(position);
+  gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  let uploadBuffer = null;
+  let pendingFrame = null;
+  let frameRequest = 0;
+  let lastPresentedAt = 0;
 
   moduleConfig.nebulahvDisplayResize = (width, height) => {
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
-    context = canvas.getContext("2d", { alpha: false, desynchronized: true });
-    imageData = context.createImageData(width, height);
+    uploadBuffer = new Uint8Array(width * height * 4);
+    gl.viewport(0, 0, width, height);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(
+      gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0,
+      gl.RGBA, gl.UNSIGNED_BYTE, uploadBuffer,
+    );
   };
   moduleConfig.nebulahvDisplayUpdate = (
     pointer, width, height, stride, x, y, updateWidth, updateHeight,
   ) => {
-    if (!context || !imageData || imageData.width !== width || imageData.height !== height) {
-      moduleConfig.nebulahvDisplayResize(width, height);
-    }
-    const heap = moduleConfig.HEAPU8 || globalThis.HEAPU8;
-    if (!heap) return;
-    const left = Math.max(0, x);
-    const top = Math.max(0, y);
-    const right = Math.min(width, left + Math.max(0, updateWidth));
-    const bottom = Math.min(height, top + Math.max(0, updateHeight));
-    const destination = imageData.data;
-    for (let row = top; row < bottom; row += 1) {
-      let sourceOffset = pointer + row * stride + left * 4;
-      let destinationOffset = (row * width + left) * 4;
-      for (let column = left; column < right; column += 1) {
-        destination[destinationOffset] = heap[sourceOffset + 2];
-        destination[destinationOffset + 1] = heap[sourceOffset + 1];
-        destination[destinationOffset + 2] = heap[sourceOffset];
-        destination[destinationOffset + 3] = 255;
-        sourceOffset += 4;
-        destinationOffset += 4;
+    pendingFrame = { pointer, width, height, stride, x, y, updateWidth, updateHeight };
+    if (frameRequest) return;
+    frameRequest = requestAnimationFrame(() => {
+      frameRequest = 0;
+      const now = performance.now();
+      if (now - lastPresentedAt < 100) return;
+      lastPresentedAt = now;
+      const frame = pendingFrame;
+      pendingFrame = null;
+      if (!frame) return;
+      if (!uploadBuffer || canvas.width !== frame.width || canvas.height !== frame.height) {
+        moduleConfig.nebulahvDisplayResize(frame.width, frame.height);
       }
-    }
-    context.putImageData(imageData, 0, 0, left, top, right - left, bottom - top);
+      const heap = moduleConfig.HEAPU8 || globalThis.HEAPU8;
+      if (!heap) return;
+      const rowBytes = frame.width * 4;
+      for (let row = 0; row < frame.height; row += 1) {
+        const sourceOffset = frame.pointer + row * frame.stride;
+        uploadBuffer.set(
+          heap.subarray(sourceOffset, sourceOffset + rowBytes),
+          row * rowBytes,
+        );
+      }
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texSubImage2D(
+        gl.TEXTURE_2D, 0, 0, 0, frame.width, frame.height,
+        gl.RGBA, gl.UNSIGNED_BYTE, uploadBuffer,
+      );
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    });
   };
 };
 
@@ -323,8 +395,13 @@ export class NebulaHVEmulator {
         machineProfile: localDiagnostics ? bootQuery.get("hvMachine") || (runtimeManifest.features.secureBoot ? "q35" : "q35-nosmm")
           : runtimeManifest.features.secureBoot ? "q35" : "q35-nosmm",
       });
+      qemuArguments = qemuArguments.map((argument) => (
+        typeof argument === "string" && argument.startsWith("/firmware/")
+          ? `/${argument.split("/").pop()}`
+          : argument
+      ));
       if (localDiagnostics) log(`NebulaHV boot diagnostics enabled; CPU model ${bootQuery.get("hvCpu") || "max"}.`);
-      qemuArguments.unshift("-L", "/firmware");
+      qemuArguments.unshift("-L", "/");
       onDisplayMode?.("graphics");
     } else {
       const imageName = mediaType === "hda" ? "nebula-disk.img" : "nebula.iso";
@@ -356,7 +433,7 @@ export class NebulaHVEmulator {
     const moduleConfig = {
       arguments: qemuArguments,
       canvas,
-      noInitialRun: v2Ready,
+      noInitialRun: false,
       locateFile: (path) => versionedRuntimeAsset(`${runtimeManifest.runtimeBase}${path}`),
       mainScriptUrlOrBlob: versionedRuntimeAsset(runtimeManifest.entrypoint),
       print: (line) => this.writeLine(line),
@@ -379,20 +456,29 @@ export class NebulaHVEmulator {
       preRun: [
         () => {
           if (v2Ready) {
-            const firmwareFiles = Object.values(runtimeManifest.firmware || {}).filter(Boolean);
+            const firmwareFiles = [
+              ...Object.values(runtimeManifest.firmware || {}).filter(Boolean).map((path) => ({
+                source: path,
+                destination: `/${path.split("/").pop()}`,
+              })),
+              ...["bios-256k.bin", "kvmvapic.bin", "vgabios-stdvga.bin"].map((name) => ({
+                source: versionedRuntimeAsset(`${runtimeManifest.runtimeBase}${name}`),
+                destination: `/${name}`,
+              })),
+            ];
             if (firmwareFiles.length) {
               const dependency = "nebulahv-uefi-firmware";
               moduleConfig.addRunDependency(dependency);
-              try {
-                moduleConfig.FS.mkdir("/firmware");
-              } catch {}
-              Promise.all(firmwareFiles.map(async (path) => {
-                const response = await fetch(path, { cache: "force-cache" });
-                if (!response.ok) throw new Error(`Could not load UEFI firmware: ${path}`);
-                moduleConfig.FS.writeFile(path, new Uint8Array(await response.arrayBuffer()));
+              Promise.all(firmwareFiles.map(async ({ source, destination }) => {
+                const response = await fetch(source, { cache: "force-cache" });
+                if (!response.ok) throw new Error(`Could not load UEFI firmware: ${source}`);
+                moduleConfig.FS.writeFile(destination, new Uint8Array(await response.arrayBuffer()));
               })).then(
                 () => moduleConfig.removeRunDependency(dependency),
-                (error) => moduleConfig.abort(error),
+                (error) => {
+                  moduleConfig.printErr(`UEFI firmware load failed: ${error?.message || error}`);
+                  moduleConfig.removeRunDependency(dependency);
+                },
               );
             }
             return;
@@ -420,7 +506,10 @@ export class NebulaHVEmulator {
         onStopped?.();
       },
     };
-    if (v2Ready) createNebulaHVDisplayBridge(moduleConfig, canvas);
+    const useDedicatedWorker = v2Ready
+      && typeof Worker === "function"
+      && typeof OffscreenCanvas === "function";
+    if (v2Ready && !useDedicatedWorker) createNebulaHVDisplayBridge(moduleConfig, canvas);
 
     globalThis.Module = moduleConfig;
 
@@ -437,33 +526,66 @@ export class NebulaHVEmulator {
     if (v2Ready) {
       const runtimeUrl = new URL(qemuEntrypoint, window.location.href).href;
       moduleConfig.mainScriptUrlOrBlob = runtimeUrl;
-      const imported = await import(/* @vite-ignore */ runtimeUrl);
-      if (typeof imported.default !== "function") {
-        throw new Error("NebulaHV graphical runtime has no module entrypoint.");
-      }
-      this.instance = await imported.default(moduleConfig);
-      if (typeof this.instance.callMain !== "function") {
-        throw new Error("NebulaHV graphical runtime cannot start its VM worker.");
-      }
-      try {
-        this.instance.FS.mkdir("/firmware");
-      } catch {}
-      for (const firmwareName of ["bios-256k.bin", "kvmvapic.bin", "vgabios-stdvga.bin"]) {
-        const response = await fetch(versionedRuntimeAsset(`${runtimeManifest.runtimeBase}${firmwareName}`));
-        if (!response.ok) {
-          throw new Error(`NebulaHV firmware failed to load: ${firmwareName}.`);
+      if (useDedicatedWorker) {
+        const worker = new Worker(
+          new URL("./nebulahvRuntime.worker.js", import.meta.url),
+          { type: "module", name: "NebulaHV runtime" },
+        );
+        this.runtimeWorker = worker;
+        const bitmapContext = canvas.getContext("bitmaprenderer");
+        const fallbackContext = bitmapContext ? null : canvas.getContext("2d", { alpha: false });
+        const started = new Promise((resolve, reject) => {
+          worker.onmessage = ({ data }) => {
+            if (data.type === "frame") {
+              canvas.width = data.width;
+              canvas.height = data.height;
+              if (bitmapContext) bitmapContext.transferFromImageBitmap(data.bitmap);
+              else {
+                fallbackContext.drawImage(data.bitmap, 0, 0);
+                data.bitmap.close();
+              }
+            } else if (data.type === "print") {
+              moduleConfig.print(data.line);
+            } else if (data.type === "printErr") {
+              moduleConfig.printErr(data.line);
+            } else if (data.type === "started") {
+              resolve();
+            } else if (data.type === "error") {
+              reject(new Error(data.message));
+            } else if (data.type === "abort") {
+              moduleConfig.onAbort(data.reason);
+            } else if (data.type === "exit") {
+              moduleConfig.onExit(data.code);
+            }
+          };
+          worker.onerror = (event) => reject(new Error(event.message || "NebulaHV worker failed."));
+        });
+        worker.postMessage({
+          type: "start",
+          qemuArguments,
+          runtimeManifest,
+          runtimeUrl,
+          baseUrl: window.location.href,
+        });
+        await started;
+        this.instance = {};
+        for (const name of [
+          "nebulahv_pointer_move",
+          "nebulahv_pointer_button",
+          "nebulahv_pointer_wheel",
+          "nebulahv_key_number",
+        ]) {
+          this.instance[`_${name}`] = (...args) => worker.postMessage({
+            type: "input", name, args,
+          });
         }
-        this.instance.FS.writeFile(`/firmware/${firmwareName}`, new Uint8Array(await response.arrayBuffer()));
-      }
-      setTimeout(() => {
-        if (this.disposed) return;
-        try {
-          this.instance.callMain(qemuArguments);
-        } catch (error) {
-          this.writeLine(`NebulaHV runtime stopped: ${error.message || error}`);
-          onStopped?.();
+      } else {
+        const imported = await import(/* @vite-ignore */ runtimeUrl);
+        if (typeof imported.default !== "function") {
+          throw new Error("NebulaHV graphical runtime has no module entrypoint.");
         }
-      }, 0);
+        this.instance = await imported.default(moduleConfig);
+      }
     } else {
       try {
         const imported = await import(/* @vite-ignore */ qemuEntrypoint);
@@ -487,6 +609,8 @@ export class NebulaHVEmulator {
     this.disposed = true;
     this.removeInput?.();
     this.removeInput = null;
+    this.runtimeWorker?.terminate();
+    this.runtimeWorker = null;
     this.instance?.PThread?.terminateAllThreads?.();
     this.instance = null;
   }
