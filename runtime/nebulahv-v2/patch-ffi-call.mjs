@@ -64,9 +64,8 @@ if (occurrences !== 1) {
 }
 
 let patchedSource = source.replace(original, replacement);
-const helperParserPattern = /([ \t]*)const wasmBytes = new Uint8Array\(HEAP8\.slice\(wasm_begin, wasm_begin \+ wasm_size\)\);\r?\n\1var helper = \{\};/;
-const helperParserReplacement = `  const wasmBytes = new Uint8Array(HEAP8.slice(wasm_begin, wasm_begin + wasm_size));
-  const helperResultTypes = (() => {
+const helperParserPattern = /^([ \t]*)var helper = \{\};$/m;
+const helperParserReplacement = `  const helperResultTypes = (() => {
    let offset = 8;
    const types = [];
    const results = [];
