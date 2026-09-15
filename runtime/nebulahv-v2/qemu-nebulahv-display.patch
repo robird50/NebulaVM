@@ -75,6 +75,9 @@ index 0000000..e733efa
 +      (uintptr_t pixels, int width, int height, int stride,
 +       int x, int y, int update_width, int update_height), {
 +    if (ENVIRONMENT_IS_PTHREAD) {
++        var now = performance.now();
++        if (now - (Module.nebulahvLastFrameAt || 0) < 50) return;
++        Module.nebulahvLastFrameAt = now;
 +        postMessage({
 +            cmd: "callHandler",
 +            handler: "nebulahvDisplayUpdate",

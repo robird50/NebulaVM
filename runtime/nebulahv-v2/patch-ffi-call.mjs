@@ -10,9 +10,12 @@ if (!outputPath) {
 const source = await readFile(outputPath, "utf8");
 const original = "var result = (0, getWasmTableEntry(fn).apply(null, args));";
 const replacement = `var target = getWasmTableEntry(fn);
+var ffiKindCache = Module.nebulahvFfiKinds || (Module.nebulahvFfiKinds = new WeakMap());
 var invokeWithWasmIntegers = function(candidateArgs, depth) {
   try {
-    return (0, target.apply(null, candidateArgs));
+    var result = (0, target.apply(null, candidateArgs));
+    ffiKindCache.set(target, candidateArgs.map(value => typeof value));
+    return result;
   } catch (error) {
     if (depth >= 32) throw error;
     var message = String(error && error.message ? error.message : error);
@@ -48,7 +51,12 @@ var invokeWithWasmIntegers = function(candidateArgs, depth) {
     throw mismatch;
   }
 };
-var result = invokeWithWasmIntegers(args, 0);`;
+var ffiKinds = ffiKindCache.get(target);
+var result = ffiKinds
+  ? target.apply(null, ffiKinds.map((kind, index) => kind === "bigint"
+      ? BigInt(args[index] === undefined ? 0 : args[index])
+      : typeof args[index] === "bigint" ? Number(args[index]) : args[index]))
+  : invokeWithWasmIntegers(args, 0);`;
 
 const occurrences = source.split(original).length - 1;
 if (occurrences !== 1) {
