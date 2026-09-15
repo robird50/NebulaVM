@@ -80,7 +80,7 @@ jobs:
             --extra-cxxflags="$EXTRA_CFLAGS" \
             --extra-ldflags="$EXTRA_LDFLAGS"
           docker exec nebulahv-qemu-builder emmake make -j 2 qemu-system-x86_64
-      - name: Collect and inspect runtime
+      - name: Collect raw runtime
         run: |
           mkdir -p nebulahv-runtime
           docker cp nebulahv-qemu-builder:/build/qemu-system-x86_64 nebulahv-runtime/out.js
@@ -89,6 +89,15 @@ jobs:
           cp qemu-wasm/pc-bios/bios-256k.bin nebulahv-runtime/bios-256k.bin
           cp qemu-wasm/pc-bios/kvmvapic.bin nebulahv-runtime/kvmvapic.bin
           cp qemu-wasm/pc-bios/vgabios-stdvga.bin nebulahv-runtime/vgabios-stdvga.bin
+      - name: Preserve raw runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: nebulahv-v2-raw-${{ github.sha }}
+          path: nebulahv-runtime/
+          if-no-files-found: error
+          retention-days: 2
+      - name: Patch and inspect runtime
+        run: |
           node runtime/nebulahv-v2/patch-ffi-call.mjs nebulahv-runtime/out.js nebulahv-runtime/qemu-system-x86_64.worker.js
           grep -q "nebulahv" nebulahv-runtime/out.js
           test -s nebulahv-runtime/qemu-system-x86_64.wasm

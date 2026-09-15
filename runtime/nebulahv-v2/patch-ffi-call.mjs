@@ -167,14 +167,14 @@ patchedSource = patchedSource.replace("    const result = invoke(args, 0);", `  
      : invoke(args, 0);`);
 const numericResultHeaps = ["HEAPU32", "HEAPF32", "HEAPF64", "HEAPU8", "HEAPU16"];
 for (const heap of numericResultHeaps) {
-  const resultPattern = new RegExp(`(${heap}\\[[^\\]\\r\\n]*rvalue[^\\]\\r\\n]*\\]\\s*=\\s*)result;`, "g");
+  const resultPattern = new RegExp(`(${heap}[^\\r\\n]*?=\\s*)result;`, "g");
   const resultOccurrences = [...patchedSource.matchAll(resultPattern)].length;
   if (resultOccurrences !== 1) {
     throw new Error(`Expected one libffi ${heap} result write, found ${resultOccurrences}.`);
   }
   patchedSource = patchedSource.replace(resultPattern, "$1Number(result);");
 }
-const bigintResultPattern = /(HEAPU64\[[^\]\r\n]*rvalue[^\]\r\n]*\]\s*=\s*)result;/g;
+const bigintResultPattern = /(HEAPU64[^\r\n]*?=\s*)result;/g;
 const bigintResultOccurrences = [...patchedSource.matchAll(bigintResultPattern)].length;
 if (bigintResultOccurrences !== 1) {
   throw new Error(`Expected one libffi HEAPU64 result write, found ${bigintResultOccurrences}.`);
