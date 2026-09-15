@@ -65,8 +65,17 @@ export const buildNebulaHVV2Arguments = ({
   mediaPath,
   mediaFormat = "raw",
   mediaType = "hda",
+  cpuModel = "qemu64",
+  diagnostics = false,
+  machineProfile = "q35",
 }) => {
+  if (!["qemu64", "max"].includes(cpuModel)) {
+    throw new Error("Unsupported NebulaHV CPU model.");
+  }
   const normalized = normalizeNebulaHVRuntimeManifest(manifest);
+  if (!["q35", "q35-nosmm", "pc"].includes(machineProfile) || (machineProfile !== "q35" && normalized.features.secureBoot)) {
+    throw new Error("Unsupported NebulaHV machine profile.");
+  }
   const missing = ["graphicalDisplay", "directOpfs"].filter((name) => !normalized.features[name]);
   if (missing.length) {
     throw new Error(`NebulaHV V2 runtime is incomplete: ${missing.join(", ")}.`);
@@ -91,30 +100,41 @@ export const buildNebulaHVV2Arguments = ({
     ? ["-cdrom", mediaPath, "-boot", "d"]
     : mediaType === "floppy"
       ? ["-drive", `if=floppy,format=raw,readonly=on,file=${mediaPath}`, "-boot", "a"]
-      : ["-drive", `if=virtio,format=${mediaFormat},file=${mediaPath}`, "-boot", "c"];
+      : [
+          "-drive", `if=none,id=nebulahv-disk,format=${mediaFormat},file=${mediaPath}`,
+          "-device", "nvme,serial=nebulahv,drive=nebulahv-disk",
+          "-boot", "c",
+        ];
 
-  const firmwareArguments = normalized.features.secureBoot
+  const firmwareArguments = code && vars
     ? [
         "-drive", `if=pflash,format=raw,unit=0,readonly=on,file=${code}`,
         "-drive", `if=pflash,format=raw,unit=1,file=${vars}`,
       ]
     : [];
+  const legacyFloppy = mediaType === "floppy" && !normalized.features.secureBoot;
 
   return [
     "-machine",
-    "q35,smm=on",
+    legacyFloppy || machineProfile === "pc" ? "pc,smm=off"
+      : machineProfile === "q35-nosmm" ? "q35,smm=off" : "q35,smm=on",
     "-cpu",
-    "qemu64",
+    cpuModel,
     "-smp",
-    "2",
+    legacyFloppy ? "1" : "2",
     "-m",
-    `${Math.max(512, Math.min(NEBULAHV_QEMU_MAX_GUEST_MEMORY_MB, Number(memoryMb) || 512))}M`,
+    `${Math.max(legacyFloppy ? 64 : 512, Math.min(NEBULAHV_QEMU_MAX_GUEST_MEMORY_MB, Number(memoryMb) || 512))}M`,
     "-device",
     "VGA",
     "-display",
     "nebulahv",
     "-nic",
     "none",
+    ...(diagnostics ? [
+      "-d", "cpu_reset,guest_errors,int", "-no-reboot", "-no-shutdown",
+      "-trace", "ide_atapi_cmd_read",
+    ] : []),
+    ...(legacyFloppy ? ["-debugcon", "stdio", "-global", "isa-debugcon.iobase=0x402"] : []),
     ...firmwareArguments,
     ...(normalized.features.tpm2 ? tpmArguments : []),
     ...mediaArguments,

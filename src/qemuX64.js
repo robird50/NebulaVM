@@ -93,6 +93,9 @@ const qemuBiosArgs = async () => {
 };
 
 const qemuDriveArgs = (mediaType, imagePath) => {
+  if (mediaType === "fda") {
+    return ["-drive", `if=floppy,format=raw,readonly=on,file=${imagePath}`, "-boot", "a"];
+  }
   if (mediaType === "hda") {
     return ["-drive", `if=virtio,format=raw,file=${imagePath}`, "-boot", "c"];
   }
@@ -306,13 +309,21 @@ export class NebulaHVEmulator {
         },
       });
       imagePath = staged.qemuPath;
+      const bootQuery = new URLSearchParams(globalThis.location?.search || "");
+      const localDiagnostics = ["127.0.0.1", "localhost", "[::1]"].includes(globalThis.location?.hostname)
+        && bootQuery.get("hvBootDiagnostics") === "1";
       qemuArguments = buildNebulaHVV2Arguments({
         manifest: runtimeManifest,
         memoryMb: Math.round(memorySize / 1024 / 1024),
         mediaPath: imagePath,
         mediaFormat: qemuMediaFormat(isoFile, mediaType),
         mediaType: mediaType === "hda" ? "hda" : mediaType === "fda" ? "floppy" : "cdrom",
+        diagnostics: localDiagnostics,
+        cpuModel: localDiagnostics ? bootQuery.get("hvCpu") || "max" : "max",
+        machineProfile: localDiagnostics ? bootQuery.get("hvMachine") || (runtimeManifest.features.secureBoot ? "q35" : "q35-nosmm")
+          : runtimeManifest.features.secureBoot ? "q35" : "q35-nosmm",
       });
+      if (localDiagnostics) log(`NebulaHV boot diagnostics enabled; CPU model ${bootQuery.get("hvCpu") || "max"}.`);
       qemuArguments.unshift("-L", "/firmware");
       onDisplayMode?.("graphics");
     } else {
@@ -339,6 +350,9 @@ export class NebulaHVEmulator {
       ];
       onDisplayMode?.("terminal");
     }
+    let runtimeLineCount = 0;
+    let diagnosticContextLines = 0;
+    let lastDiskTraceAt = 0;
     const moduleConfig = {
       arguments: qemuArguments,
       canvas,
@@ -346,10 +360,41 @@ export class NebulaHVEmulator {
       locateFile: (path) => versionedRuntimeAsset(`${runtimeManifest.runtimeBase}${path}`),
       mainScriptUrlOrBlob: versionedRuntimeAsset(runtimeManifest.entrypoint),
       print: (line) => this.writeLine(line),
-      printErr: (line) => this.writeLine(line),
+      printErr: (line) => {
+        const text = String(line);
+        if (text.includes("ide_atapi_cmd_read")) {
+          const now = Date.now();
+          if (now - lastDiskTraceAt < 1000) return;
+          lastDiskTraceAt = now;
+        }
+        const important = /error|exception|fault|abort|panic|CPU Reset|ide_atapi_cmd_read/i.test(text);
+        if (important && !text.includes("ide_atapi_cmd_read")) diagnosticContextLines = 32;
+        runtimeLineCount++;
+        if (runtimeLineCount > 600 && !important && diagnosticContextLines === 0) return;
+        if (diagnosticContextLines > 0) diagnosticContextLines--;
+        this.writeLine(line);
+        log(`NebulaHV runtime: ${line}`);
+        if (String(line).includes("worker sent an error!")) onStopped?.();
+      },
       preRun: [
         () => {
           if (v2Ready) {
+            const firmwareFiles = Object.values(runtimeManifest.firmware || {}).filter(Boolean);
+            if (firmwareFiles.length) {
+              const dependency = "nebulahv-uefi-firmware";
+              moduleConfig.addRunDependency(dependency);
+              try {
+                moduleConfig.FS.mkdir("/firmware");
+              } catch {}
+              Promise.all(firmwareFiles.map(async (path) => {
+                const response = await fetch(path, { cache: "force-cache" });
+                if (!response.ok) throw new Error(`Could not load UEFI firmware: ${path}`);
+                moduleConfig.FS.writeFile(path, new Uint8Array(await response.arrayBuffer()));
+              })).then(
+                () => moduleConfig.removeRunDependency(dependency),
+                (error) => moduleConfig.abort(error),
+              );
+            }
             return;
           }
           if (shouldMountBrowserFile) {
@@ -442,22 +487,18 @@ export class NebulaHVEmulator {
     this.disposed = true;
     this.removeInput?.();
     this.removeInput = null;
-    if (this.instance?.quit) {
-      this.instance.quit(0);
-    }
-    this.writeLine("NebulaHV stopped.");
+    this.instance?.PThread?.terminateAllThreads?.();
+    this.instance = null;
   }
 
   async destroy() {
-    this.disposed = true;
-    this.removeInput?.();
-    this.removeInput = null;
+    await this.stop();
   }
 
   writeLine(line) {
     if (this.disposed || line == null) return;
     const { terminal } = this.options;
-    terminal.textContent += `${line}\n`;
+    terminal.textContent = `${terminal.textContent}${line}\n`.slice(-65536);
     terminal.scrollTop = terminal.scrollHeight;
   }
 }

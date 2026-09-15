@@ -386,7 +386,7 @@ app.innerHTML = `
             <span id="emulatorLabel">Emulator</span>
             <select id="emulatorMode" aria-labelledby="emulatorLabel" hidden>
               <option value="v86">Nebula x86 / v86</option>
-              <option value="qemu-x64">NebulaHV x64 (V1)</option>
+              <option value="qemu-x64">NebulaHV x64</option>
               <option value="emustar-hyperv">Hyper-V x64</option>
               <option value="qemu-native-x64">QEMU x64 / large ISO</option>
               <option value="qemu-native-arm64-windows">QEMU ARM64 / Windows</option>
@@ -415,7 +415,7 @@ app.innerHTML = `
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="qemu-x64">
                   <img class="emulator-menu-icon" src="/assets/nebulavm-emulator-icon.png" alt="" />
-                  <span>NebulaHV x64 (V1)</span>
+                  <span>NebulaHV x64</span>
                 </button>
                 <button class="emulator-menu-option" type="button" role="option" aria-selected="false" data-emulator-option="emustar-hyperv">
                   <img class="emulator-menu-icon" src="/assets/hyperv-icon.svg" alt="" />
@@ -5125,15 +5125,83 @@ const setSelectedFile = (file) => {
 
 const createDemoBootImage = () => {
   const bytes = new Uint8Array(512);
-  const program = [
-    0x31, 0xc0, 0x8e, 0xd8, 0x8e, 0xc0, 0xbe, 0x1f, 0x7c, 0xe8, 0x03, 0x00,
-    0xf4, 0xeb, 0xfd, 0xac, 0x08, 0xc0, 0x74, 0x0a, 0xb4, 0x0e, 0xb7, 0x00,
-    0xb3, 0x07, 0xcd, 0x10, 0xeb, 0xf1, 0xc3,
-  ];
-  const message = "\r\nNebulaVM demo booted.\r\nDrop your ISO to start a real VM.\r\n";
+  const program = [];
+  const labels = new Map();
+  const relativeFixups = [];
+  const absoluteFixups = [];
+  const emit = (...values) => program.push(...values);
+  const mark = (name) => labels.set(name, program.length);
+  const jump8 = (opcode, target) => {
+    emit(opcode, 0);
+    relativeFixups.push({ offset: program.length - 1, target });
+  };
+  const loadString = (target) => {
+    emit(0xbe, 0, 0);
+    absoluteFixups.push({ offset: program.length - 2, target });
+  };
+
+  emit(
+    0x31, 0xc0, // xor ax, ax
+    0x8e, 0xd8, // mov ds, ax
+    0x8e, 0xd0, // mov ss, ax
+    0xbc, 0x00, 0x7c, // mov sp, 0x7c00
+    0xb8, 0x13, 0x00, // mov ax, 0x0013 (320x200, 256 colors)
+    0xcd, 0x10, // int 0x10
+    0xb8, 0x00, 0xa0, // mov ax, 0xa000
+    0x8e, 0xc0, // mov es, ax
+    0x31, 0xff, // xor di, di
+    0x31, 0xd2, // xor dx, dx (row)
+  );
+  mark("row");
+  emit(0x31, 0xc9); // xor cx, cx (column)
+  mark("pixel");
+  emit(
+    0x89, 0xc8, // mov ax, cx
+    0xc1, 0xe8, 0x04, // shr ax, 4
+    0x89, 0xd3, // mov bx, dx
+    0xc1, 0xeb, 0x03, // shr bx, 3
+    0x31, 0xd8, // xor ax, bx
+    0x24, 0x3f, // and al, 0x3f
+    0x04, 0x20, // add al, 0x20
+    0xaa, // stosb
+    0x41, // inc cx
+    0x81, 0xf9, 0x40, 0x01, // cmp cx, 320
+  );
+  jump8(0x72, "pixel"); // jb pixel
+  emit(0x42, 0x81, 0xfa, 0xc8, 0x00); // inc dx; cmp dx, 200
+  jump8(0x72, "row"); // jb row
+  emit(
+    0xb4, 0x02, // mov ah, 2 (set cursor)
+    0xb7, 0x00, // mov bh, 0
+    0xb6, 0x0a, // mov dh, 10
+    0xb2, 0x05, // mov dl, 5
+    0xcd, 0x10, // int 0x10
+  );
+  loadString("message");
+  mark("print");
+  emit(0xac, 0x08, 0xc0); // lodsb; or al, al
+  jump8(0x74, "halt"); // jz halt
+  emit(0xb4, 0x0e, 0xb7, 0x00, 0xb3, 0x0f, 0xcd, 0x10); // BIOS teletype, white
+  jump8(0xeb, "print");
+  mark("halt");
+  emit(0xf4); // hlt
+  jump8(0xeb, "halt");
+  mark("message");
+  emit(...new TextEncoder().encode("NEBULAHV GRAPHICS ONLINE\r\n     BROWSER VGA FRAMEBUFFER OK"), 0);
+
+  for (const { offset, target } of relativeFixups) {
+    const delta = labels.get(target) - (offset + 1);
+    if (delta < -128 || delta > 127) throw new Error(`Demo jump to ${target} is out of range.`);
+    program[offset] = delta & 0xff;
+  }
+  for (const { offset, target } of absoluteFixups) {
+    const address = 0x7c00 + labels.get(target);
+    program[offset] = address & 0xff;
+    program[offset + 1] = address >> 8;
+  }
+  if (program.length > 510) throw new Error("Demo boot program exceeds one sector.");
 
   bytes.set(program, 0);
-  bytes.set(new TextEncoder().encode(message), program.length);
   bytes[510] = 0x55;
   bytes[511] = 0xaa;
 
@@ -6599,8 +6667,10 @@ els.dropZone.addEventListener("drop", (event) => {
 
 els.bootButton.addEventListener("click", bootEmulator);
 els.demoButton.addEventListener("click", () => {
-  els.emulatorMode.value = "v86";
-  els.processorMode.value = "x86";
+  if (!isBrowserQemuMode()) {
+    els.emulatorMode.value = "v86";
+    els.processorMode.value = "x86";
+  }
   updateBackendUi();
   setSelectedFile(createDemoBootImage());
   els.mediaType.value = "fda";
@@ -6966,7 +7036,7 @@ const updateBackendUi = () => {
   els.mediaType.disabled = state.windowsTemplateSelected;
   els.bootOrder.disabled = remoteMode || state.emulator || state.windowsTemplateSelected;
   els.nativeDisplayMode.disabled = (emustarMode && isNetlifyLauncher) || Boolean(state.emulator);
-  els.demoButton.disabled = externalMode;
+  els.demoButton.disabled = (externalMode && !isBrowserQemuMode()) || Boolean(state.emulator);
   els.autostart.disabled = externalMode;
   els.networkingHelp.textContent = nativeMode
     ? emustarMode

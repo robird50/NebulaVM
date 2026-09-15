@@ -165,9 +165,15 @@ patchedSource = patchedSource.replace("    const result = invoke(args, 0);", `  
          ? BigInt(args[index] === undefined ? 0 : args[index])
          : typeof args[index] === "bigint" ? Number(args[index]) : args[index]))
      : invoke(args, 0);`);
-const numericResultHeaps = ["HEAPU32", "HEAPF32", "HEAPF64", "HEAPU8", "HEAPU16"];
-for (const heap of numericResultHeaps) {
-  const resultPattern = new RegExp(`(${heap}[^\\r\\n]*?=\\s*)result;`, "g");
+const numericResultHeaps = [
+  ["HEAPU32", "(?:HEAPU32|GROWABLE_HEAP_U32\\(\\))"],
+  ["HEAPF32", "(?:HEAPF32|GROWABLE_HEAP_F32\\(\\))"],
+  ["HEAPF64", "(?:HEAPF64|GROWABLE_HEAP_F64\\(\\))"],
+  ["HEAPU8", "(?:HEAPU8|GROWABLE_HEAP_U8\\(\\))"],
+  ["HEAPU16", "(?:HEAPU16|GROWABLE_HEAP_U16\\(\\))"],
+];
+for (const [heap, heapPattern] of numericResultHeaps) {
+  const resultPattern = new RegExp(`(${heapPattern}[^\\r\\n]*?=\\s*)result;`, "g");
   const resultOccurrences = [...patchedSource.matchAll(resultPattern)].length;
   if (resultOccurrences !== 1) {
     throw new Error(`Expected one libffi ${heap} result write, found ${resultOccurrences}.`);

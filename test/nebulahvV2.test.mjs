@@ -48,6 +48,7 @@ test("V2 arguments include graphics, protected UEFI storage, TPM, and OPFS media
   assert.match(command, /VGA -display nebulahv/);
   assert.match(command, /-nic none/);
   assert.match(command, /if=pflash/);
+  assert.match(command, /nvme,serial=nebulahv,drive=nebulahv-disk/);
   assert.match(command, /tpm-tis/);
   assert.match(command, /format=vhdx,file=\/opfs\/nebulahv\/windows11.vhdx/);
 });
@@ -92,4 +93,41 @@ test("graphical candidate boots floppy diagnostics as a read-only floppy", () =>
 test("OPFS disk names cannot escape NebulaHV private storage", () => {
   assert.equal(safeNebulaHVDiskName("../Windows 11?.vhdx"), "_Windows_11_.vhdx");
   assert.equal(safeNebulaHVDiskName("..."), "disk.raw");
+});
+
+test("BIOS floppy diagnostic uses a legacy controller platform and one CPU", () => {
+  const candidate = structuredClone(readyManifest);
+  candidate.features.secureBoot = false;
+  candidate.features.tpm2 = false;
+  const command = buildNebulaHVV2Arguments({manifest: candidate, memoryMb: 128,
+    mediaPath: "/opfs/demo.img", mediaType: "floppy"}).join(" ");
+  assert.match(command, /-machine pc,smm=off/);
+  assert.match(command, /-smp 1/);
+  assert.match(command, /-m 128M/);
+});
+
+test("boot diagnostics are opt-in and CPU model choices are bounded", () => {
+  const options = { manifest: readyManifest, memoryMb: 1024, mediaPath: "/opfs/windows.iso", mediaType: "cdrom" };
+  const normal = buildNebulaHVV2Arguments(options).join(" ");
+  assert.match(normal, /-cpu qemu64/);
+  assert.doesNotMatch(normal, /-d cpu_reset|-no-reboot|-trace/);
+  const diagnostic = buildNebulaHVV2Arguments({ ...options, diagnostics: true, cpuModel: "max" }).join(" ");
+  assert.match(diagnostic, /-cpu max/);
+  assert.match(diagnostic, /-d cpu_reset,guest_errors,int -no-reboot -no-shutdown/);
+  assert.match(diagnostic, /-trace ide_atapi_cmd_read/);
+  assert.throws(() => buildNebulaHVV2Arguments({ ...options, cpuModel: "host" }), /Unsupported/);
+});
+
+test("legacy machine comparison cannot disable declared Secure Boot", () => {
+  const options = { manifest: readyManifest, mediaPath: "/opfs/windows.iso", mediaType: "cdrom", machineProfile: "pc" };
+  assert.throws(() => buildNebulaHVV2Arguments(options), /Unsupported NebulaHV machine/);
+  const bios = structuredClone(readyManifest);
+  bios.features.secureBoot = false;
+  bios.features.tpm2 = false;
+  const command = buildNebulaHVV2Arguments({ ...options, manifest: bios }).join(" ");
+  assert.match(command, /-machine pc,smm=off/);
+  assert.match(command, /-smp 2/);
+  const dma = buildNebulaHVV2Arguments({ ...options, manifest: bios, machineProfile: "q35-nosmm" }).join(" ");
+  assert.match(dma, /-machine q35,smm=off/);
+  assert.throws(() => buildNebulaHVV2Arguments({ ...options, machineProfile: "q35-nosmm" }), /Unsupported/);
 });

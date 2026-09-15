@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "runtimeVersion": "2.0.0-graphics-candidate.10",
+  "runtimeVersion": "2.0.0-graphics-candidate.16-uefi",
   "profile": "graphical-x86_64",
   "entrypoint": "/qemu-v2/out.js",
   "runtimeBase": "/qemu-v2/",
@@ -17,6 +17,12 @@
     "/qemu-v2/qemu-system-x86_64.worker.js",
     "/qemu-v2/bios-256k.bin",
     "/qemu-v2/kvmvapic.bin",
-    "/qemu-v2/vgabios-stdvga.bin"
-  ]
+    "/qemu-v2/vgabios-stdvga.bin",
+    "/firmware/edk2-x86_64-code.fd",
+    "/firmware/edk2-x86_64-vars.fd"
+  ],
+  "firmware": {
+    "code": "/firmware/edk2-x86_64-code.fd",
+    "vars": "/firmware/edk2-x86_64-vars.fd"
+  }
 }
