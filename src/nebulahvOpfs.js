@@ -61,11 +61,17 @@ export const stageNebulaHVDiskInOpfs = async (
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      await writable.write(value);
+      await writable.write({ type: "write", position: written, data: value });
       written += value.byteLength;
       onProgress({ written, total: file.size });
     }
     await writable.close();
+    const stagedDisk = await diskHandle.getFile();
+    if (written !== file.size || stagedDisk.size !== file.size) {
+      throw new Error(
+        `Browser storage truncated ${diskName}: expected ${file.size} bytes, wrote ${written}, stored ${stagedDisk.size}.`,
+      );
+    }
   } catch (error) {
     await writable.abort?.().catch(() => {});
     await diskDirectory.removeEntry(diskName).catch(() => {});
