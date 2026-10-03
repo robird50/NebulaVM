@@ -68,14 +68,22 @@ jobs:
             -v "$GITHUB_WORKSPACE/runtime/nebulahv-v2:/nebulahv:ro" \
             nebulahv-qemu-builder
           docker exec nebulahv-qemu-builder bash -lc '
+            set -e
             cd /emsdk/upstream/emscripten
             sed -i "/TODO: return 64-byte off_t/d" system/lib/wasmfs/backends/opfs_backend.h
             sed -i "s/uint32_t _wasmfs_opfs_get_size_blob/off_t _wasmfs_opfs_get_size_blob/" system/lib/wasmfs/backends/opfs_backend.h
             sed -i "s/_wasmfs_opfs_get_size_blob__sig: .ii./_wasmfs_opfs_get_size_blob__sig: '\''ji'\''/" src/library_sigs.js
             sed -i "/_wasmfs_opfs_get_size_blob__deps/i\\  _wasmfs_opfs_get_size_blob__i53abi: true," src/library_wasmfs_opfs.js
+            sed -i "s/uint32_t pos/off_t pos/g" system/lib/wasmfs/backends/opfs_backend.h
+            sed -i "s/_wasmfs_opfs_read_access__sig: .iipii./_wasmfs_opfs_read_access__sig: '\''iipij'\''/; s/_wasmfs_opfs_write_access__sig: .iipii./_wasmfs_opfs_write_access__sig: '\''iipij'\''/; s/_wasmfs_opfs_read_blob__sig: .ipipiip./_wasmfs_opfs_read_blob__sig: '\''ipipijp'\''/" src/library_sigs.js
+            sed -i "/_wasmfs_opfs_read_access__deps/i\\  _wasmfs_opfs_read_access__i53abi: true," src/library_wasmfs_opfs.js
+            sed -i "/_wasmfs_opfs_write_access__deps/i\\  _wasmfs_opfs_write_access__i53abi: true," src/library_wasmfs_opfs.js
+            sed -i "/_wasmfs_opfs_read_blob__deps/i\\  _wasmfs_opfs_read_blob__i53abi: true," src/library_wasmfs_opfs.js
             grep -q "off_t _wasmfs_opfs_get_size_blob" system/lib/wasmfs/backends/opfs_backend.h
             grep -q "_wasmfs_opfs_get_size_blob__sig: .ji." src/library_sigs.js
             grep -q "_wasmfs_opfs_get_size_blob__i53abi: true" src/library_wasmfs_opfs.js
+            test "$(grep -c "off_t pos" system/lib/wasmfs/backends/opfs_backend.h)" -eq 3
+            grep -q "_wasmfs_opfs_read_blob__sig: .ipipijp." src/library_sigs.js
             emcc --clear-cache
           '
           EXTRA_CFLAGS="-O3 -g -Wno-error=unused-command-line-argument -matomics -mbulk-memory -DNDEBUG -DG_DISABLE_ASSERT -D_GNU_SOURCE -pthread -sASYNCIFY=1 -sWASM_BIGINT"
